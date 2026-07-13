@@ -51,6 +51,24 @@ describe('validateForRun', () => {
     expect(hasBlockingErrors(issues)).toBe(false);
   });
 
+  it('does NOT block the run when an UNREACHABLE agent is misconfigured (spec §19)', () => {
+    const { pg } = readyPlayground();
+    // C is unreachable AND missing a provider/model — must warn, not block.
+    pg.agents.push(createAgent({ name: 'C', role: 'r', systemInstruction: 'do' }));
+    const issues = validateForRun(pg);
+    // The only issue about C is the reachability warning, no blocking error.
+    const cIssues = issues.filter((i) => i.agentId === pg.agents[pg.agents.length - 1].id);
+    expect(cIssues.every((i) => i.level === 'warning')).toBe(true);
+    expect(hasBlockingErrors(issues)).toBe(false);
+  });
+
+  it('DOES block when a REACHABLE agent is misconfigured', () => {
+    const { pg, bId } = readyPlayground();
+    // B is reachable (A→B) and now missing its model — must block.
+    pg.agents.find((a) => a.id === bId)!.llm.model = '';
+    expect(hasBlockingErrors(validateForRun(pg))).toBe(true);
+  });
+
   it('errors when the starting agent is disabled', () => {
     const { pg, aId } = readyPlayground();
     pg.agents.find((a) => a.id === aId)!.runtime.enabled = false;

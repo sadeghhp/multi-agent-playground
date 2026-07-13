@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import {
   Background,
   Controls,
@@ -7,8 +7,10 @@ import {
   type EdgeChange,
   MiniMap,
   type NodeChange,
+  type Node,
   ReactFlow,
   ReactFlowProvider,
+  useNodesState,
   useReactFlow,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -46,7 +48,15 @@ function CanvasInner() {
     [errors],
   );
 
-  const nodes = useMemo<AgentFlowNode[]>(() => {
+  // React Flow owns node state (canonical v12 pattern) so it can manage live drag
+  // and keep its internal measured dimensions. We reconcile FROM the domain into
+  // this state on structural/data changes, and write positions BACK to the domain
+  // once per drag on drag-stop — never per animation frame.
+  const [nodes, setNodes, onNodesChangeInternal] = useNodesState<AgentFlowNode>([]);
+
+  // Desired nodes projected from the domain. Recomputed only when the domain
+  // changes (not during a drag, which doesn't touch the domain).
+  const desiredNodes = useMemo<AgentFlowNode[]>(() => {
     if (!playground) return [];
     return agentsToNodes(playground.agents, playground.providers, {
       agentStates,
@@ -54,23 +64,38 @@ function CanvasInner() {
     });
   }, [playground, agentStates, erroredAgentIds]);
 
+  useEffect(() => {
+    // Merge desired data onto existing nodes, preserving each node's live
+    // position and React Flow internals (measured/selected/dragging). New agents
+    // adopt their domain position; removed agents drop out.
+    setNodes((prev) => {
+      const prevById = new Map(prev.map((n) => [n.id, n]));
+      return desiredNodes.map((d) => {
+        const existing = prevById.get(d.id);
+        return existing ? { ...existing, data: d.data } : d;
+      });
+    });
+  }, [desiredNodes, setNodes]);
+
   const edges = useMemo<Edge[]>(() => {
     if (!playground) return [];
     return connectionsToEdges(playground.connections, activeConnectionId);
   }, [playground, activeConnectionId]);
 
-  // Node drag -> persist position. Deletion handled via onNodesDelete.
   const onNodesChange = useCallback(
-    (changes: NodeChange[]) => {
-      if (isRunning) return;
-      for (const change of changes) {
-        // Persist position as the node moves; autosave debounce coalesces writes.
-        if (change.type === 'position' && change.position) {
-          setAgentPosition(change.id, change.position.x, change.position.y);
-        }
-      }
+    (changes: NodeChange<AgentFlowNode>[]) => {
+      if (isRunning) return; // graph locked during execution (spec §10.3)
+      onNodesChangeInternal(changes);
     },
-    [isRunning, setAgentPosition],
+    [isRunning, onNodesChangeInternal],
+  );
+
+  // Persist the final position once, when a drag ends.
+  const onNodeDragStop = useCallback(
+    (_e: unknown, node: Node) => {
+      setAgentPosition(node.id, node.position.x, node.position.y);
+    },
+    [setAgentPosition],
   );
 
   const onEdgesChange = useCallback((_changes: EdgeChange[]) => {
@@ -124,6 +149,7 @@ function CanvasInner() {
         edges={edges}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
+        onNodeDragStop={onNodeDragStop}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onNodesDelete={onNodesDelete}

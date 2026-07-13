@@ -10,6 +10,7 @@ import {
 } from '../domain/schema';
 import { createPlayground, duplicateAgent } from '../domain/factories';
 import { deletePlayground as dbDelete, loadAllPlaygrounds, savePlayground } from '../persistence/db';
+import { regenerateIds } from '../persistence/serialization';
 import { setSelectedPlaygroundId } from './prefs';
 
 /**
@@ -134,16 +135,11 @@ export const useDomainStore = create<DomainState>((set, get) => {
     duplicatePlayground() {
       const pg = get().playground;
       if (!pg) return;
-      const copy = createPlayground(`${pg.name} (copy)`);
-      activate({
-        ...copy,
-        description: pg.description,
-        agents: pg.agents,
-        connections: pg.connections,
-        providers: pg.providers.map((p) => ({ ...p })),
-        conversation: pg.conversation,
-        ui: pg.ui,
-      });
+      // Regenerate every id (playground/agents/providers/connections) and remap
+      // references. Sharing provider ids across playgrounds would let deleting one
+      // clear the other's credentials (they're keyed globally by provider id).
+      const copy = regenerateIds(pg);
+      activate({ ...copy, name: `${pg.name} (copy)` });
     },
 
     async deletePlayground(id) {

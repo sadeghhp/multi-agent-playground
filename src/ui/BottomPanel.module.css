@@ -30,6 +30,7 @@
 
 .headerRight { display: flex; align-items: center; gap: 8px; }
 
+.stats { font-size: 12px; color: var(--text-subtle); font-family: var(--mono); }
 .status { font-size: 12px; color: var(--text-muted); }
 .status_running { color: var(--accent); font-weight: 600; }
 .status_error { color: var(--danger); font-weight: 600; }

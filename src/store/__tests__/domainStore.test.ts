@@ -45,6 +45,37 @@ describe('duplicatePlayground', () => {
   });
 });
 
+describe('addConnection', () => {
+  it('ignores a duplicate directed edge between the same pair', () => {
+    const store = useDomainStore.getState();
+    store.newPlayground('P');
+    const a = createAgent({ name: 'A' });
+    const b = createAgent({ name: 'B' });
+    store.addAgent(a);
+    store.addAgent(b);
+    store.addConnection({ id: 'c1', source: a.id, target: b.id, enabled: true, type: 'conversation', priority: 0 });
+    store.addConnection({ id: 'c2', source: a.id, target: b.id, enabled: true, type: 'review', priority: 0 });
+    expect(useDomainStore.getState().playground!.connections).toHaveLength(1);
+  });
+});
+
+describe('removeProvider', () => {
+  it('unassigns the provider from agents that used it', () => {
+    const store = useDomainStore.getState();
+    store.newPlayground('P');
+    const provider = createProvider({ displayName: 'P' });
+    store.addProvider(provider);
+    const base = createAgent();
+    const a = createAgent({ name: 'A', llm: { ...base.llm, providerId: provider.id, model: 'm' } });
+    store.addAgent(a);
+
+    store.removeProvider(provider.id);
+    const pg = useDomainStore.getState().playground!;
+    expect(pg.providers).toHaveLength(0);
+    expect(pg.agents[0].llm.providerId).toBeNull();
+  });
+});
+
 describe('removeAgent', () => {
   it('removes connected edges and preserves transcript, tagging it deleted (spec §9.4)', () => {
     const store = useDomainStore.getState();

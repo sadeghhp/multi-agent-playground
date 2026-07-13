@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDomainStore } from '../store/domainStore';
 import { useRuntimeStore } from '../store/runtimeStore';
 import { Message } from './transcript/Message';
@@ -29,6 +29,26 @@ export function BottomPanel() {
   const [tab, setTab] = useState<Tab>('transcript');
   const transcript = playground?.transcript ?? [];
 
+  // Aggregate run stats (spec §6 "token and latency estimates when available").
+  const stats = useMemo(() => {
+    let tokens = 0;
+    let duration = 0;
+    let hasTokens = false;
+    for (const m of transcript) {
+      if (m.totalTokens != null) { tokens += m.totalTokens; hasTokens = true; }
+      if (m.durationMs != null) duration += m.durationMs;
+    }
+    return { tokens, duration, hasTokens };
+  }, [transcript]);
+
+  // Auto-scroll the transcript to the newest message as it arrives.
+  const contentRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (tab === 'transcript' && !collapsed && contentRef.current) {
+      contentRef.current.scrollTop = contentRef.current.scrollHeight;
+    }
+  }, [transcript.length, tab, collapsed]);
+
   return (
     <section className={styles.panel} data-collapsed={collapsed || undefined} aria-label="Execution panel">
       <header className={styles.header}>
@@ -44,6 +64,12 @@ export function BottomPanel() {
           </button>
         </div>
         <div className={styles.headerRight}>
+          {transcript.length > 0 && (
+            <span className={styles.stats}>
+              {stats.duration > 0 && `${(stats.duration / 1000).toFixed(1)}s`}
+              {stats.hasTokens && ` · ~${stats.tokens} tok`}
+            </span>
+          )}
           <span className={`${styles.status} ${styles[`status_${status}`] ?? ''}`}>
             {RUN_STATUS_LABEL[status]}{status === 'running' ? ` · turn ${currentTurn}` : ''}
           </span>
@@ -61,7 +87,7 @@ export function BottomPanel() {
       </header>
 
       {!collapsed && (
-        <div className={styles.content}>
+        <div className={styles.content} ref={contentRef}>
           {tab === 'transcript' && (
             transcript.length === 0 ? (
               <p className={styles.empty}>No conversation yet. Configure agents, connect them, and press Run.</p>

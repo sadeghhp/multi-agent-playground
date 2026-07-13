@@ -1,10 +1,10 @@
-import { useMemo } from 'react';
-import type { Agent } from '../../domain/schema';
+import { useMemo, useState } from 'react';
+import type { Agent, ConnectionType } from '../../domain/schema';
 import { useDomainStore } from '../../store/domainStore';
 import { useUiStore } from '../../store/uiStore';
 import { useRuntimeStore } from '../../store/runtimeStore';
-import { newSkillId } from '../../domain/ids';
-import { buildSystemPrompt, buildTaskPrompt } from '../../agents/promptAssembly';
+import { newConnectionId, newSkillId } from '../../domain/ids';
+import { assembleMessages, boundHistory, buildSystemPrompt, buildTaskPrompt, estimateTokens } from '../../agents/promptAssembly';
 import { validateForRun } from '../../orchestrator/validate';
 import { Section } from './Section';
 import styles from './Inspector.module.css';
@@ -16,12 +16,38 @@ export function AgentInspector({ agent }: { agent: Agent }) {
   const update = useDomainStore((s) => s.updateAgent);
   const duplicate = useDomainStore((s) => s.duplicateAgentById);
   const remove = useDomainStore((s) => s.removeAgent);
+  const addConnection = useDomainStore((s) => s.addConnection);
+  const removeConnection = useDomainStore((s) => s.removeConnection);
   const selectAgent = useUiStore((s) => s.selectAgent);
+  const selectConnection = useUiStore((s) => s.selectConnection);
   const clearSelection = useUiStore((s) => s.clearSelection);
   const isRunning = useRuntimeStore((s) => s.status === 'running');
 
+  const [newTarget, setNewTarget] = useState('');
+  const [newType, setNewType] = useState<ConnectionType>('conversation');
+
   const providers = playground.providers;
   const selectedProvider = providers.find((p) => p.id === agent.llm.providerId);
+
+  // Outgoing connections + which agents are still available as new targets.
+  const outgoing = playground.connections.filter((c) => c.source === agent.id);
+  const outgoingTargets = new Set(outgoing.map((c) => c.target));
+  const availableTargets = playground.agents.filter(
+    (a) => a.id !== agent.id && !outgoingTargets.has(a.id),
+  );
+
+  function handleAddConnection() {
+    if (!newTarget) return;
+    addConnection({
+      id: newConnectionId(),
+      source: agent.id,
+      target: newTarget,
+      enabled: true,
+      type: newType,
+      priority: 0,
+    });
+    setNewTarget('');
+  }
 
   const agentIssues = useMemo(
     () => validateForRun(playground).filter((i) => i.agentId === agent.id),
@@ -58,32 +84,35 @@ export function AgentInspector({ agent }: { agent: Agent }) {
     clearSelection();
   }
 
-  const preview = useMemo(() => {
-    const ctx = {
-      agent,
-      conversation: playground.conversation,
-      history: [],
-      incoming: null,
-      isFirstTurn: true,
-    };
-    return `${buildSystemPrompt(ctx)}\n\n--- USER TURN ---\n${buildTaskPrompt(ctx)}`;
-  }, [agent, playground.conversation]);
+  const { preview, estTokens } = useMemo(() => {
+    // Preview against the actual bounded history so the estimate reflects a real
+    // request, not an empty one (spec §11.6 — clearly an estimate).
+    const history = agent.runtime.includeHistory
+      ? boundHistory(playground.transcript, agent.runtime.historyWindow)
+      : [];
+    const ctx = { agent, conversation: playground.conversation, history, incoming: null, isFirstTurn: true };
+    const text = `${buildSystemPrompt(ctx)}\n\n--- USER TURN ---\n${buildTaskPrompt(ctx)}`;
+    const full = assembleMessages(ctx)
+      .map((m) => m.content)
+      .join('\n');
+    return { preview: text, estTokens: estimateTokens(full) };
+  }, [agent, playground.conversation, playground.transcript]);
 
   return (
-    <div className={styles.body}>
+    <fieldset className={styles.body} disabled={isRunning}>
+      {isRunning && <p className={styles.hint}>Editing is locked while a conversation is running.</p>}
       <div className={styles.actions}>
         <label className={styles.enableToggle}>
           <input
             type="checkbox"
             checked={agent.runtime.enabled}
             onChange={(e) => patchRuntime({ enabled: e.target.checked })}
-            disabled={isRunning}
           />
           Enabled
         </label>
         <div className={styles.actionButtons}>
-          <button type="button" onClick={handleDuplicate} disabled={isRunning}>Duplicate</button>
-          <button type="button" className="danger" onClick={handleDelete} disabled={isRunning}>Delete</button>
+          <button type="button" onClick={handleDuplicate}>Duplicate</button>
+          <button type="button" className="danger" onClick={handleDelete}>Delete</button>
         </div>
       </div>
 
@@ -273,10 +302,45 @@ export function AgentInspector({ agent }: { agent: Agent }) {
         </label>
       </Section>
 
+      <Section title={`Connections (${outgoing.length} outgoing)`}>
+        <p className={styles.hint}>Directed edges from this agent. A button alternative to dragging between nodes.</p>
+        {outgoing.length === 0 && <p className="muted" style={{ fontSize: 12 }}>No outgoing connections.</p>}
+        {outgoing.map((c) => {
+          const target = playground.agents.find((a) => a.id === c.target);
+          return (
+            <div key={c.id} className={styles.connItem}>
+              <button type="button" className={styles.connLink} onClick={() => selectConnection(c.id)}>
+                → {target?.name ?? 'deleted'} <span className="chip">{c.type}</span>
+              </button>
+              <button type="button" className="danger" aria-label="Remove connection" onClick={() => removeConnection(c.id)}>✕</button>
+            </div>
+          );
+        })}
+        {availableTargets.length > 0 && (
+          <div className={styles.connAdd}>
+            <select aria-label="Connection target" value={newTarget} onChange={(e) => setNewTarget(e.target.value)}>
+              <option value="">Connect to…</option>
+              {availableTargets.map((a) => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+            <select aria-label="Connection type" value={newType} onChange={(e) => setNewType(e.target.value as ConnectionType)}>
+              <option value="conversation">talk</option>
+              <option value="review">review</option>
+              <option value="handoff">handoff</option>
+            </select>
+            <button type="button" onClick={handleAddConnection} disabled={!newTarget}>Add</button>
+          </div>
+        )}
+      </Section>
+
       <Section title="Effective prompt (preview)">
-        <p className={styles.hint}>Read-only. Shows how this agent's configuration becomes a model instruction.</p>
+        <p className={styles.hint}>
+          Read-only. Shows how this agent's configuration becomes a model instruction.
+          {' '}Estimated context: ~{estTokens} tokens (character-based estimate).
+        </p>
         <pre className={styles.preview}>{preview}</pre>
       </Section>
-    </div>
+    </fieldset>
   );
 }

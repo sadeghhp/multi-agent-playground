@@ -3,7 +3,8 @@ import { useDomainStore } from '../store/domainStore';
 import { useUiStore } from '../store/uiStore';
 import { useRuntimeStore } from '../store/runtimeStore';
 import { exportToJson, importFromJson } from '../persistence/serialization';
-import { stopRun } from '../orchestrator/orchestrator';
+import { startRun, stopRun } from '../orchestrator/orchestrator';
+import { hasBlockingErrors, validateForRun } from '../orchestrator/validate';
 import styles from './Toolbar.module.css';
 
 const SAVE_LABEL: Record<string, string> = {
@@ -30,6 +31,19 @@ export function Toolbar() {
   const clearTranscript = useDomainStore((s) => s.clearTranscript);
 
   const fileInput = useRef<HTMLInputElement>(null);
+
+  // Rerun from beginning (spec §14): clear the transcript and start again with the
+  // saved conversation settings, without reopening the setup dialog.
+  function handleRerun() {
+    if (!playground) return;
+    if (hasBlockingErrors(validateForRun(playground))) {
+      showToast('warn', 'Fix configuration issues before running. Opening run setup.');
+      setPanel('run');
+      return;
+    }
+    clearTranscript();
+    void startRun();
+  }
 
   async function handleExport() {
     if (!playground) return;
@@ -98,9 +112,16 @@ export function Toolbar() {
             Stop
           </button>
         ) : (
-          <button type="button" className="primary" onClick={() => setPanel('run')} disabled={!playground}>
-            Run…
-          </button>
+          <>
+            {(playground?.transcript.length ?? 0) > 0 && (
+              <button type="button" onClick={handleRerun} title="Clear transcript and run again">
+                Rerun
+              </button>
+            )}
+            <button type="button" className="primary" onClick={() => setPanel('run')} disabled={!playground}>
+              Run…
+            </button>
+          </>
         )}
         <button type="button" aria-label="Toggle theme" onClick={toggleTheme} title="Toggle theme">
           {theme === 'dark' ? '☀' : '☾'}

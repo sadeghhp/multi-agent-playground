@@ -84,7 +84,13 @@ function CanvasInner() {
 
   const onNodesChange = useCallback(
     (changes: NodeChange<AgentFlowNode>[]) => {
-      if (isRunning) return; // graph locked during execution (spec §10.3)
+      if (isRunning) {
+        // Structure is locked during a run (spec §10.3), but allow selection and
+        // measurement so a user can still click a node to inspect it read-only.
+        const safe = changes.filter((c) => c.type === 'select' || c.type === 'dimensions');
+        if (safe.length) onNodesChangeInternal(safe);
+        return;
+      }
       onNodesChangeInternal(changes);
     },
     [isRunning, onNodesChangeInternal],
@@ -159,7 +165,7 @@ function CanvasInner() {
         onPaneClick={() => clearSelection()}
         nodesDraggable={!isRunning}
         nodesConnectable={!isRunning}
-        elementsSelectable={!isRunning}
+        elementsSelectable
         deleteKeyCode={isRunning ? null : ['Backspace', 'Delete']}
         fitView
         proOptions={{ hideAttribution: true }}

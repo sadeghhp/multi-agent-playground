@@ -1,0 +1,54 @@
+.message {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  background: var(--surface);
+}
+.failed { border-color: var(--danger); background: var(--danger-bg); }
+
+.msgHeader { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.msgAgent { font-weight: 600; }
+.msgMeta { font-size: 11px; color: var(--text-subtle); }
+.msgActions { margin-left: auto; display: flex; gap: 4px; }
+.msgActions button { padding: 2px 8px; font-size: 12px; }
+
+.msgSource { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+.msgBody { margin-top: 6px; font-size: 13px; line-height: 1.5; }
+.msgBody :global(p) { margin: 0 0 8px; }
+.msgBody :global(p:last-child) { margin-bottom: 0; }
+.msgBody :global(pre) {
+  background: var(--surface-2);
+  padding: 8px;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+.msgBody :global(code) { font-family: var(--mono); font-size: 12px; }
+
+.errText { color: var(--danger); font-size: 13px; }
+
+.request {
+  margin-top: 8px;
+  border-top: 1px dashed var(--border);
+  padding-top: 8px;
+  font-size: 12px;
+}
+.reqRow { display: flex; gap: 8px; padding: 2px 0; }
+.reqRow > span { color: var(--text-subtle); width: 64px; flex-shrink: 0; }
+.reqRow > code { font-family: var(--mono); word-break: break-all; }
+.request details { margin-top: 6px; }
+.request summary { cursor: pointer; color: var(--accent); }
+.reqPre {
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--surface-2);
+  border-radius: 6px;
+  padding: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.reqNote { font-size: 11px; color: var(--text-muted); margin: 6px 0 0; }

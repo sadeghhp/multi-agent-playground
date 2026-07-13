@@ -1,0 +1,37 @@
+.palette {
+  width: 200px;
+  flex-shrink: 0;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  overflow-y: auto;
+}
+
+.section { display: flex; flex-direction: column; gap: 8px; }
+
+.heading {
+  margin: 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-subtle);
+}
+
+.block { width: 100%; text-align: left; }
+
+.templates { display: flex; flex-direction: column; gap: 6px; }
+.template { width: 100%; text-align: left; font-size: 13px; }
+
+.spacer { flex: 1; }
+
+.warn {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  margin: 0;
+}

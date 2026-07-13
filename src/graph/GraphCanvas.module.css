@@ -1,0 +1,50 @@
+.canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: var(--canvas-bg);
+}
+
+.canvas[data-running] {
+  cursor: not-allowed;
+}
+
+.empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--text-muted);
+}
+
+.minimap {
+  background: var(--surface) !important;
+}
+
+.lockBadge {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  border: 1px solid var(--warn-border);
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.viewButtons {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 10;
+  display: flex;
+  gap: 6px;
+}
+
+.viewButtons button {
+  font-size: 12px;
+  padding: 5px 10px;
+}

@@ -1,0 +1,49 @@
+.warning { margin-bottom: 14px; }
+
+.layout { display: flex; gap: 16px; min-height: 360px; }
+
+.list {
+  width: 200px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-right: 1px solid var(--border);
+  padding-right: 12px;
+}
+.addBtn { width: 100%; margin-bottom: 8px; }
+
+.listItem {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+}
+.listActive { border-color: var(--accent); background: var(--surface-2); }
+.listName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.editor { flex: 1; min-width: 0; overflow-y: auto; max-height: 60vh; padding-right: 4px; }
+
+.editorActions { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+
+.inline { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); margin: 4px 0; }
+.inline input { width: auto; }
+
+.keyRow { display: flex; gap: 6px; }
+
+.err { font-size: 12px; color: var(--danger); margin: 4px 0 0; }
+
+.testBox { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
+.testRow { display: flex; gap: 8px; }
+
+.testOk, .testFail { margin-top: 10px; font-size: 12px; padding: 8px 10px; border-radius: 6px; }
+.testOk { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+.testFail { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger); }
+:root[data-theme='dark'] .testOk { background: #14321f; color: #4ade80; border-color: #166534; }
+
+.testResp { margin-top: 4px; font-family: var(--mono); }
+.testDetail { margin-top: 4px; opacity: 0.85; }

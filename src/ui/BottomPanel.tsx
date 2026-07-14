@@ -50,13 +50,31 @@ export function BottomPanel() {
     return { tokens, duration, hasTokens };
   }, [transcript]);
 
-  // Auto-scroll the transcript to the newest message as it arrives.
+  // Auto-scroll to the newest message ONLY when the reader is already near the
+  // bottom, so scrolling up to read history isn't yanked back on every token.
   const contentRef = useRef<HTMLDivElement>(null);
+  const [atBottom, setAtBottom] = useState(true);
+
+  function scrollToBottom(behavior: ScrollBehavior = 'auto') {
+    const el = contentRef.current;
+    if (!el) return;
+    // el.scrollTo isn't implemented in jsdom; fall back to a direct assignment.
+    if (typeof el.scrollTo === 'function') el.scrollTo({ top: el.scrollHeight, behavior });
+    else el.scrollTop = el.scrollHeight;
+  }
+
+  function handleScroll() {
+    const el = contentRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setAtBottom(distanceFromBottom < 40);
+  }
+
   useEffect(() => {
-    if (tab === 'transcript' && !collapsed && contentRef.current) {
-      contentRef.current.scrollTop = contentRef.current.scrollHeight;
-    }
-  }, [transcript.length, tab, collapsed, liveText]);
+    if (tab === 'transcript' && !collapsed && atBottom) scrollToBottom();
+  }, [transcript.length, tab, collapsed, liveText, atBottom]);
+
+  const showJumpToLatest = tab === 'transcript' && !collapsed && !atBottom && (transcript.length > 0 || !!liveAgent);
 
   return (
     <section className={styles.panel} data-collapsed={collapsed || undefined} aria-label="Execution panel">
@@ -96,7 +114,7 @@ export function BottomPanel() {
       </header>
 
       {!collapsed && (
-        <div className={styles.content} ref={contentRef}>
+        <div className={styles.content} ref={contentRef} onScroll={handleScroll}>
           {tab === 'transcript' && (
             transcript.length === 0 && !liveAgent ? (
               <p className={styles.empty}>No conversation yet. Configure agents, connect them, and press Run.</p>
@@ -141,6 +159,16 @@ export function BottomPanel() {
             )
           )}
         </div>
+      )}
+
+      {showJumpToLatest && (
+        <button
+          type="button"
+          className={`${styles.jumpBtn} primary`}
+          onClick={() => { scrollToBottom('smooth'); setAtBottom(true); }}
+        >
+          ↓ Jump to latest
+        </button>
       )}
     </section>
   );

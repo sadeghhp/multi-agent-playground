@@ -21,9 +21,35 @@
   --warn-text: #854d0e;
   --warn-border: #fde047;
   --ok: #16a34a;
+  --ok-bg: #dcfce7;
+  --ok-border: #86efac;
+  --ok-text: #166534;
+  --overlay: rgba(0, 0, 0, 0.45);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.08);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.12);
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Spacing scale (theme-independent) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  /* Radius scale */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-pill: 999px;
+
+  /* Type scale */
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fw-medium: 500;
+  --fw-semibold: 600;
 }
 
 :root[data-theme='dark'] {
@@ -48,6 +74,10 @@
   --warn-text: #fde047;
   --warn-border: #665420;
   --ok: #4ade80;
+  --ok-bg: #14321f;
+  --ok-border: #166534;
+  --ok-text: #4ade80;
+  --overlay: rgba(0, 0, 0, 0.6);
 }
 
 * {
@@ -86,6 +116,35 @@ button.primary {
 }
 button.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
 button.danger { color: var(--danger); border-color: var(--danger); background: transparent; }
+button.danger:hover:not(:disabled) { background: var(--danger-bg); }
+
+/* Low-emphasis neutral action */
+button.secondary {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+button.secondary:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+
+/* Borderless action, for dense toolbars */
+button.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+button.ghost:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+
+/* Square icon-only button with a consistent hit area */
+button.icon {
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+button.icon.ghost { border-color: transparent; }
 
 /* Visible focus everywhere (spec §22) */
 :focus-visible {
@@ -132,4 +191,14 @@ a { color: var(--accent); }
   border-radius: 6px;
   padding: 8px 10px;
   font-size: 12px;
+}
+
+/* Honor the OS "reduce motion" setting globally (spec §22). */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }

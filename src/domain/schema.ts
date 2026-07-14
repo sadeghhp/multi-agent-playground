@@ -149,7 +149,9 @@ export const Provider = z.object({
   path: z.string().default('/v1/chat/completions'),
   authMethod: AuthMethod.default('bearer'),
   authHeaderName: z.string().default('Authorization'),
-  authPrefix: z.string().default('Bearer'),
+  // Empty by default: the bearer path supplies the "Bearer" scheme itself, and
+  // custom-header schemes send the raw key. Set this only for a non-standard prefix.
+  authPrefix: z.string().default(''),
   /** Not persisted in exports. Present in memory / session / local per storage mode. */
   apiKey: z.string().optional(),
   credentialStorage: CredentialStorage.default('session'),

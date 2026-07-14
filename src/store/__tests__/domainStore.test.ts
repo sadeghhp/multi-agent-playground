@@ -9,6 +9,7 @@ vi.mock('../../persistence/db', () => ({
 }));
 
 import { createAgent, createProvider } from '../../domain/factories';
+import { savePlayground } from '../../persistence/db';
 import { useDomainStore } from '../domainStore';
 
 beforeEach(() => {
@@ -42,6 +43,39 @@ describe('duplicatePlayground', () => {
     // The agent's provider reference is remapped to the copy's provider.
     expect(copy.agents[0].llm.providerId).toBe(copy.providers[0].id);
     expect(copy.name).toBe('Original (copy)');
+  });
+});
+
+describe('flushPending on playground switch (H2)', () => {
+  it('persists the outgoing playground before switching, keeping its unsaved edits', () => {
+    const store = useDomainStore.getState();
+    store.newPlayground('A');
+    const a = createAgent({ name: 'Agent A' });
+    store.addAgent(a); // marks unsaved and arms the debounced save
+    expect(useDomainStore.getState().saveStatus).toBe('unsaved');
+    const outgoing = useDomainStore.getState().playground!;
+    vi.mocked(savePlayground).mockClear();
+
+    // Switch within the debounce window — A's edits must be flushed, not dropped.
+    store.newPlayground('B');
+
+    expect(savePlayground).toHaveBeenCalledTimes(1);
+    const saved = vi.mocked(savePlayground).mock.calls[0][0];
+    expect(saved.id).toBe(outgoing.id);
+    expect(saved.agents.find((x) => x.id === a.id)).toBeDefined();
+    // The new playground is active afterwards.
+    expect(useDomainStore.getState().playground!.name).toBe('B');
+  });
+
+  it('does not flush when there are no unsaved edits', () => {
+    const store = useDomainStore.getState();
+    store.newPlayground('A');
+    useDomainStore.setState({ saveStatus: 'saved' });
+    vi.mocked(savePlayground).mockClear();
+
+    store.loadPlayground('nonexistent'); // a switch entry point
+
+    expect(savePlayground).not.toHaveBeenCalled();
   });
 });
 

@@ -117,16 +117,22 @@ export async function startRun(): Promise<void> {
         continue;
       }
 
-      const history = boundHistory(
-        useDomainStore.getState().playground!.transcript,
-        agent.runtime.historyWindow,
-      );
+      const liveTranscript = useDomainStore.getState().playground!.transcript;
+      const history = boundHistory(liveTranscript, agent.runtime.historyWindow);
+      // The source agent's most recent output, always available to review/handoff
+      // targets regardless of the history window (spec §12).
+      const sourceOutput = item.sourceAgentId
+        ? [...liveTranscript]
+            .reverse()
+            .find((m) => m.agentId === item.sourceAgentId && m.content)?.content ?? null
+        : null;
       const messages = assembleMessages({
         agent,
         conversation: pg.conversation,
         history,
         incoming: connection,
         sourceAgentName: sourceName,
+        sourceOutput,
         isFirstTurn: turnNumber === 1,
       });
 

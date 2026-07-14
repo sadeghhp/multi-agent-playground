@@ -1,1 +1,1 @@
-{"root":["./vite.config.ts"],"version":"5.9.3"}
+{"root":["./vite.config.ts","./vite/providerDevProxyPlugin.ts","./vite/__tests__/providerDevProxyPlugin.test.ts"],"version":"5.9.3"}

@@ -10,6 +10,7 @@ export type ProviderErrorKind =
   | 'network'
   | 'auth'
   | 'model-not-found'
+  | 'bad-request'
   | 'rate-limit'
   | 'malformed-response'
   | 'timeout'
@@ -43,6 +44,7 @@ const KIND_SUMMARY: Record<ProviderErrorKind, string> = {
   network: 'Could not reach the provider (network error).',
   auth: 'Authentication failed. Check the API key and auth header.',
   'model-not-found': 'The requested model was not found on this provider.',
+  'bad-request': 'The provider rejected the request (check the model and parameters).',
   'rate-limit': 'The provider rate-limited this request.',
   'malformed-response': 'The provider response could not be parsed.',
   timeout: 'The request timed out.',
@@ -63,8 +65,12 @@ export function summaryFor(kind: ProviderErrorKind): string {
 export function classifyStatus(status: number): ProviderErrorKind {
   if (status === 401 || status === 403) return 'auth';
   if (status === 404) return 'model-not-found';
+  if (status === 408) return 'timeout';
   if (status === 429) return 'rate-limit';
   if (status >= 500) return 'server-error';
+  // Other 4xx (400/402/409/413/422, …) are client errors: a retry with the same
+  // request can't succeed, so classify them as non-retryable rather than server-error.
+  if (status >= 400) return 'bad-request';
   return 'server-error';
 }
 
@@ -101,7 +107,9 @@ export function classifyThrown(err: unknown): ProviderError {
           'This usually means the provider did not allow cross-origin (CORS) ' +
           'requests from this page, but can also mean the host is unreachable. ' +
           'Providers built for server-to-server use often cannot be called ' +
-          'directly from a browser.',
+          'directly from a browser. In `pnpm dev`, remote HTTPS endpoints are ' +
+          'routed through a local proxy automatically; production builds still ' +
+          'require CORS or a server-side proxy.',
       });
     }
     return new ProviderError('network', summaryFor('network'), {

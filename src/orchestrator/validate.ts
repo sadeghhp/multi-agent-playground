@@ -24,6 +24,11 @@ export function validateForRun(pg: Playground): ValidationIssue[] {
     issues.push({ level: 'error', message: 'The starting agent is disabled.', agentId: start.id });
   }
 
+  // Subject is the one required conversation field (spec §11.1).
+  if (!pg.conversation.subject.trim()) {
+    issues.push({ level: 'error', message: 'A conversation subject is required.' });
+  }
+
   // Max turns
   if (pg.conversation.maxTotalTurns < 1) {
     issues.push({ level: 'error', message: 'Maximum turns must be at least 1.' });
@@ -59,6 +64,16 @@ export function validateForRun(pg: Playground): ValidationIssue[] {
       issues.push({ level: 'error', message: `Agent "${agent.name}" has no provider assigned.`, agentId: agent.id });
     } else if (!provider.enabled) {
       issues.push({ level: 'error', message: `Agent "${agent.name}" uses a disabled provider.`, agentId: agent.id });
+    } else if (
+      (provider.authMethod === 'bearer' || provider.authMethod === 'custom-header') &&
+      !provider.apiKey?.trim()
+    ) {
+      // Spec §19: a run cannot begin when required provider credentials are unavailable.
+      issues.push({
+        level: 'error',
+        message: `Agent "${agent.name}" has no API key for its provider "${provider.displayName}".`,
+        agentId: agent.id,
+      });
     }
     if (!agent.llm.model.trim()) {
       issues.push({ level: 'error', message: `Agent "${agent.name}" has no model set.`, agentId: agent.id });

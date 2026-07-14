@@ -13,6 +13,7 @@ function readyPlayground(): { pg: Playground; aId: string; bId: string } {
   pg.agents.push(a, b);
   pg.connections.push({ id: 'c', source: a.id, target: b.id, enabled: true, type: 'conversation', priority: 0 });
   pg.conversation.startingAgentId = a.id;
+  pg.conversation.subject = 'S';
   return { pg, aId: a.id, bId: b.id };
 }
 
@@ -73,6 +74,20 @@ describe('validateForRun', () => {
     const { pg, aId } = readyPlayground();
     pg.agents.find((a) => a.id === aId)!.runtime.enabled = false;
     expect(validateForRun(pg).some((i) => i.level === 'error' && /disabled/i.test(i.message))).toBe(true);
+  });
+
+  it('errors when the conversation subject is empty (spec §11.1)', () => {
+    const { pg } = readyPlayground();
+    pg.conversation.subject = '   ';
+    expect(validateForRun(pg).some((i) => i.level === 'error' && /subject/i.test(i.message))).toBe(true);
+  });
+
+  it('errors when a reachable agent uses a bearer provider with no API key (spec §19)', () => {
+    const { pg } = readyPlayground();
+    const provider = pg.providers[0];
+    provider.authMethod = 'bearer';
+    provider.apiKey = undefined;
+    expect(validateForRun(pg).some((i) => i.level === 'error' && /api key/i.test(i.message))).toBe(true);
   });
 });
 

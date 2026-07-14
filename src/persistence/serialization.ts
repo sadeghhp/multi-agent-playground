@@ -76,14 +76,28 @@ export function importFromJson(text: string, asCopy = true): ImportResult {
     };
   }
 
-  let playground = validated.data;
-  const warnings = collectWarnings(playground);
+  const validatedPg = validated.data;
+  // Warnings describe what will be dropped, so collect them before pruning.
+  const warnings = collectWarnings(validatedPg);
+
+  // Always drop dangling connections so the result matches the warning, on both
+  // the copy and non-copy paths (regenerateIds also prunes, so this is idempotent).
+  let playground = pruneDanglingConnections(validatedPg);
 
   if (asCopy) {
     playground = regenerateIds(playground);
   }
 
   return { ok: true, playground, warnings };
+}
+
+/** Drop connections whose source or target agent is not present (spec §15.3). */
+export function pruneDanglingConnections(pg: Playground): Playground {
+  const agentIds = new Set(pg.agents.map((a) => a.id));
+  const connections = pg.connections.filter(
+    (c) => agentIds.has(c.source) && agentIds.has(c.target),
+  );
+  return connections.length === pg.connections.length ? pg : { ...pg, connections };
 }
 
 /** Report references that don't resolve, without failing the import (spec §15.3). */

@@ -2,7 +2,7 @@
   position: fixed;
   inset: 0;
   z-index: 150;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--overlay);
   display: flex;
   justify-content: center;
 }
@@ -125,16 +125,6 @@
 .meta { font-size: 11px; color: var(--text-subtle); margin-left: auto; }
 .source { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 
-.body { margin-top: 6px; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
-.body :global(p) { margin: 0 0 8px; }
-.body :global(p:last-child) { margin-bottom: 0; }
-.body :global(pre) {
-  background: var(--surface-2);
-  padding: 8px;
-  border-radius: 6px;
-  overflow-x: auto;
-  font-size: 12px;
-}
-.body :global(code) { font-family: var(--mono); font-size: 12px; }
+.body { margin-top: 6px; font-size: 13px; overflow-wrap: anywhere; }
 
 .errText { color: var(--danger); font-size: 13px; }

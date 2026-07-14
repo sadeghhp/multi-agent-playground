@@ -17,6 +17,7 @@ export function AgentLibraryPanel() {
   const addAgent = useDomainStore((s) => s.addAgent);
   const selectAgent = useUiStore((s) => s.selectAgent);
   const setPanel = useUiStore((s) => s.setPanel);
+  const requestConfirm = useUiStore((s) => s.requestConfirm);
   const isRunning = useRuntimeStore((s) => s.status === 'running');
 
   // Stagger re-added nodes so they don't stack, matching the Palette behaviour.
@@ -58,18 +59,28 @@ export function AgentLibraryPanel() {
                 className="primary"
                 onClick={() => handleAdd(s.id)}
                 disabled={isRunning || !playground}
-                title={isRunning ? 'Cannot add agents while a conversation is running' : undefined}
+                title={
+                  isRunning
+                    ? 'Cannot add agents while a conversation is running'
+                    : !playground
+                      ? 'Open or create a playground first'
+                      : undefined
+                }
               >
                 Add to playground
               </button>
               <button
                 type="button"
-                className="danger"
+                className={`${styles.disposeBtn} secondary`}
                 aria-label={`Dispose ${s.name}`}
-                onClick={() => {
-                  if (window.confirm(`Dispose saved agent "${s.name}"? This removes it from the library.`)) {
-                    void disposeAgent(s.id);
-                  }
+                onClick={async () => {
+                  const ok = await requestConfirm({
+                    title: 'Dispose saved agent',
+                    message: `Dispose saved agent "${s.name}"? This removes it from the library.`,
+                    confirmLabel: 'Dispose',
+                    danger: true,
+                  });
+                  if (ok) void disposeAgent(s.id);
                 }}
               >
                 Dispose

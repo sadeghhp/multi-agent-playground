@@ -19,7 +19,9 @@ import { useProviderStore } from '../store/providerStore';
 import { useUiStore } from '../store/uiStore';
 import { useRuntimeStore } from '../store/runtimeStore';
 import { newConnectionId } from '../domain/ids';
+import { createAgent } from '../domain/factories';
 import { AgentNode } from './AgentNode';
+import { agentColor } from './colors';
 import { agentsToNodes, connectionsToEdges, type AgentFlowNode } from './graphAdapter';
 import styles from './GraphCanvas.module.css';
 
@@ -31,6 +33,7 @@ function CanvasInner() {
   const removeAgent = useDomainStore((s) => s.removeAgent);
   const removeConnection = useDomainStore((s) => s.removeConnection);
   const addConnection = useDomainStore((s) => s.addConnection);
+  const addAgent = useDomainStore((s) => s.addAgent);
 
   const selectAgent = useUiStore((s) => s.selectAgent);
   const selectConnection = useUiStore((s) => s.selectConnection);
@@ -174,8 +177,39 @@ function CanvasInner() {
       >
         <Background gap={18} />
         <Controls showInteractive={false} />
-        <MiniMap pannable zoomable className={styles.minimap} />
+        <MiniMap
+          pannable
+          zoomable
+          className={styles.minimap}
+          nodeColor={(n) => agentColor((n.data as AgentFlowNode['data']).colorCategory)}
+        />
       </ReactFlow>
+      {playground.agents.length === 0 && !isRunning && (
+        <div className={styles.emptyGraph}>
+          <div className={styles.emptyCard}>
+            <h2 className={styles.emptyTitle}>Start building your agent graph</h2>
+            <p className={styles.emptyText}>
+              Add an agent, then drag from its right edge to another agent's left edge to
+              wire them into a conversation.
+            </p>
+            <button
+              type="button"
+              className="primary"
+              onClick={() => {
+                const n = playground.agents.length;
+                const agent = createAgent({
+                  name: 'New Agent',
+                  position: { x: 120 + (n % 4) * 60, y: 100 + Math.floor(n / 4) * 60 },
+                });
+                addAgent(agent);
+                selectAgent(agent.id);
+              }}
+            >
+              + Add your first agent
+            </button>
+          </div>
+        </div>
+      )}
       {isRunning && <div className={styles.lockBadge}>Graph locked during run</div>}
       <div className={styles.viewButtons}>
         <button type="button" onClick={() => void fitView({ duration: 200 })}>

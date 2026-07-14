@@ -24,3 +24,17 @@
 }
 .name { font-weight: 600; }
 .date { font-size: 11px; color: var(--text-subtle); }
+
+/* Per-row destructive action stays quiet until hover/focus so it doesn't compete
+ * with the row's primary open action. */
+.deleteBtn {
+  border-color: transparent;
+  color: var(--text-subtle);
+  background: transparent;
+}
+.deleteBtn:hover:not(:disabled),
+.deleteBtn:focus-visible {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: var(--danger-bg);
+}

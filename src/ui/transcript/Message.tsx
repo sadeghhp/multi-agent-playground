@@ -76,7 +76,11 @@ export function Message({ msg, color }: { msg: TranscriptMessage; color?: string
         </div>
       )}
       {expanded && (
-        <div className={styles.msgBody} dir="auto">
+        // No explicit dir here: inherits the deterministic direction from the
+        // message container above, driven by the agent's configured language.
+        // dir="auto" would instead guess from content, which stays LTR until
+        // enough RTL script accumulates — wrong for streaming/short replies.
+        <div className={styles.msgBody}>
           {msg.status === 'failed' ? (
             <span className={styles.errText}>Failed: {msg.error}</span>
           ) : (

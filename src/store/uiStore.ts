@@ -5,7 +5,15 @@ import { type Theme, getTheme, setTheme } from './prefs';
  * Transient UI state (spec §16). Never persisted with the domain model.
  */
 
-export type OpenPanel = 'none' | 'providers' | 'skills' | 'run' | 'playgrounds' | 'settings' | 'timeline';
+export type OpenPanel =
+  | 'none'
+  | 'providers'
+  | 'skills'
+  | 'run'
+  | 'playgrounds'
+  | 'library'
+  | 'settings'
+  | 'timeline';
 
 export type Selection =
   | { kind: 'none' }

@@ -65,6 +65,9 @@ export function Palette() {
         <button type="button" className={styles.block} onClick={() => setPanel('playgrounds')}>
           Saved playgrounds
         </button>
+        <button type="button" className={styles.block} onClick={() => setPanel('library')}>
+          Agent library
+        </button>
       </section>
 
       <div className={styles.spacer} />

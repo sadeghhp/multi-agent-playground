@@ -3,6 +3,7 @@ import type { Agent, ConnectionType, Skill } from '../../domain/schema';
 import { useDomainStore } from '../../store/domainStore';
 import { useProviderStore } from '../../store/providerStore';
 import { useUiStore } from '../../store/uiStore';
+import { useAgentLibraryStore } from '../../store/agentLibraryStore';
 import { useRuntimeStore } from '../../store/runtimeStore';
 import { newConnectionId, newSkillId } from '../../domain/ids';
 import { SKILL_PRESETS } from '../../domain/factories';
@@ -28,6 +29,7 @@ export function AgentInspector({ agent }: { agent: Agent }) {
   const selectConnection = useUiStore((s) => s.selectConnection);
   const clearSelection = useUiStore((s) => s.clearSelection);
   const showToast = useUiStore((s) => s.showToast);
+  const saveToLibrary = useAgentLibraryStore((s) => s.saveAgent);
   const isRunning = useRuntimeStore((s) => s.status === 'running');
 
   const [newTarget, setNewTarget] = useState('');
@@ -202,6 +204,12 @@ export function AgentInspector({ agent }: { agent: Agent }) {
     if (copy) selectAgent(copy.id);
   }
 
+  async function handleSaveToLibrary() {
+    // Snapshot the agent's current config into the cross-playground library.
+    await saveToLibrary(agent);
+    showToast('info', `Saved "${agent.name}" to the agent library.`);
+  }
+
   function handleDelete() {
     const hasHistory = playground.transcript.some((m) => m.agentId === agent.id);
     const hasConnections = playground.connections.some((c) => c.source === agent.id || c.target === agent.id);
@@ -241,6 +249,7 @@ export function AgentInspector({ agent }: { agent: Agent }) {
           Enabled
         </label>
         <div className={styles.actionButtons}>
+          <button type="button" onClick={() => void handleSaveToLibrary()}>Save to library</button>
           <button type="button" onClick={handleDuplicate}>Duplicate</button>
           <button type="button" className="danger" onClick={handleDelete}>Delete</button>
         </div>

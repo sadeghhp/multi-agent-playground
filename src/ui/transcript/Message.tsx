@@ -1,10 +1,17 @@
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeSanitize from 'rehype-sanitize';
-import type { TranscriptMessage } from '../../domain/schema';
+import type { AgentLanguage, TranscriptMessage } from '../../domain/schema';
 import { useUiStore } from '../../store/uiStore';
 import { useRuntimeStore } from '../../store/runtimeStore';
 import styles from './Transcript.module.css';
+
+/** Writing direction per agent language — Persian is right-to-left. */
+const LANGUAGE_DIR: Record<AgentLanguage, 'ltr' | 'rtl'> = {
+  en: 'ltr',
+  fa: 'rtl',
+  fr: 'ltr',
+};
 
 /**
  * One transcript message (spec §13.1). Model output is rendered as sanitized
@@ -18,9 +25,12 @@ export function Message({ msg }: { msg: TranscriptMessage }) {
   const snapshot = useRuntimeStore((s) => s.requestSnapshots[msg.id]);
 
   const time = new Date(msg.timestamp).toLocaleTimeString();
+  // Mirror the whole message (header, alignment, body) for RTL languages so
+  // Persian output reads naturally right-to-left.
+  const dir = LANGUAGE_DIR[msg.language];
 
   return (
-    <div className={`${styles.message} ${msg.status === 'failed' ? styles.failed : ''}`}>
+    <div className={`${styles.message} ${msg.status === 'failed' ? styles.failed : ''}`} dir={dir}>
       <div className={styles.msgHeader}>
         <span className={styles.msgAgent}>
           {msg.agentName}
@@ -76,7 +86,7 @@ export function Message({ msg }: { msg: TranscriptMessage }) {
       )}
 
       {showRequest && snapshot && (
-        <div className={styles.request}>
+        <div className={styles.request} dir="ltr">
           <div className={styles.reqRow}><span>URL</span><code>{snapshot.url}</code></div>
           <div className={styles.reqRow}><span>Provider</span><code>{snapshot.providerName}</code></div>
           <div className={styles.reqRow}><span>Model</span><code>{snapshot.model}</code></div>

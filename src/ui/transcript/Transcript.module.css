@@ -47,7 +47,7 @@
 .msgHeader { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .msgAgent { font-weight: 600; }
 .msgMeta { font-size: 11px; color: var(--text-subtle); }
-.msgActions { margin-left: auto; display: flex; gap: 4px; }
+.msgActions { margin-inline-start: auto; display: flex; gap: 4px; }
 .msgActions button { padding: 2px 8px; font-size: 12px; }
 
 .msgSource { font-size: 11px; color: var(--text-muted); margin-top: 2px; }

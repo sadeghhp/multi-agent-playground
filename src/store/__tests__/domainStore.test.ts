@@ -112,7 +112,7 @@ describe('removeAgent', () => {
     store.addAgent(b);
     store.addConnection({ id: 'c1', source: a.id, target: b.id, enabled: true, type: 'conversation', priority: 0 });
     store.appendTranscript({
-      id: 'm1', turn: 1, agentId: a.id, agentName: 'A', agentDeleted: false, role: '', model: 'm',
+      id: 'm1', turn: 1, agentId: a.id, agentName: 'A', agentDeleted: false, role: '', language: 'en', model: 'm',
       providerId: null, content: 'hi', status: 'completed', sourceAgentId: null, connectionType: null, timestamp: 0,
     });
 

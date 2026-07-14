@@ -29,6 +29,23 @@ function okChat() {
   );
 }
 
+/** An SSE chat response that emits `text` one space-delimited word per chunk. */
+function sseChat(text: string) {
+  const words = text.split(' ');
+  const chunks = words.map(
+    (w, i) => `data: {"choices":[{"delta":{"content":${JSON.stringify((i ? ' ' : '') + w)}}}]}\n\n`,
+  );
+  chunks.push('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n', 'data: [DONE]\n\n');
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const c of chunks) controller.enqueue(encoder.encode(c));
+      controller.close();
+    },
+  });
+  return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+}
+
 /** Two agents A<->B in a cycle, both using a localhost provider. */
 function cyclePlayground(maxTurns: number, maxPerAgent: number): Playground {
   const pg = createPlayground('Test');
@@ -152,6 +169,34 @@ describe('orchestrator cycle controls', () => {
     const transcript = useDomainStore.getState().playground!.transcript;
     // Only A ever responds; B is disabled so the run ends after A hits its own cap.
     expect(transcript.every((m) => m.agentId === pg.agents[0].id)).toBe(true);
+  });
+});
+
+describe('orchestrator streaming', () => {
+  it('fills streamingText as tokens arrive, then clears it when the turn finalizes', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(sseChat('streamed reply here'))));
+    const pg = cyclePlayground(1, 5);
+    useDomainStore.setState({ playground: pg });
+    const agentId = pg.agents[0].id;
+
+    // Observe intermediate live-buffer states without timing hacks.
+    const seen: string[] = [];
+    const unsub = useRuntimeStore.subscribe((s) => {
+      const t = s.streamingText[agentId];
+      if (t) seen.push(t);
+    });
+
+    await startRun();
+    unsub();
+
+    // The buffer grew as deltas arrived (partial text was visible mid-turn)...
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen[seen.length - 1]).toBe('streamed reply here');
+    // ...and finalizing the message cleared the live buffer.
+    expect(useRuntimeStore.getState().streamingText).toEqual({});
+    // The assembled stream became the finalized transcript entry.
+    const transcript = useDomainStore.getState().playground!.transcript;
+    expect(transcript[0].content).toBe('streamed reply here');
   });
 });
 

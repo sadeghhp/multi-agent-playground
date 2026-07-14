@@ -131,7 +131,6 @@ export function createPlayground(name = 'Untitled Playground'): Playground {
     updatedAt: ts,
     agents: [],
     connections: [],
-    providers: [],
     conversation: defaultConversationSettings(),
     transcript: [],
     ui: defaultUiLayout(),

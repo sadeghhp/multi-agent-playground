@@ -1,6 +1,7 @@
 import type { Agent, Connection, Playground, TranscriptMessage } from '../domain/schema';
 import { newLogId, newMessageId, newRunId } from '../domain/ids';
 import { useDomainStore } from '../store/domainStore';
+import { useProviderStore } from '../store/providerStore';
 import { useRuntimeStore } from '../store/runtimeStore';
 import { ProviderError, retryEligible, summaryFor } from '../providers/errors';
 import { sendChat } from '../providers/openaiAdapter';
@@ -59,9 +60,13 @@ export async function startRun(): Promise<void> {
   if (runtime.status === 'running') return; // one run at a time (spec §19)
 
   // Snapshot structure — the graph is locked during a run (spec §10.3), so agents,
-  // connections and providers won't change under us. Transcript still appends live.
+  // connections and providers won't change under us. Providers are application-
+  // global (store/providerStore.ts); freeze the current registry here. Transcript
+  // still appends live.
   const agentsById = new Map(pg.agents.map((a) => [a.id, a]));
-  const providersById = new Map(pg.providers.map((p) => [p.id, p]));
+  const providersById = new Map(
+    useProviderStore.getState().providers.map((p) => [p.id, p]),
+  );
 
   const controller = new AbortController();
   const runId = newRunId();

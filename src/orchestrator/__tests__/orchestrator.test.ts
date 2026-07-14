@@ -6,11 +6,15 @@ vi.mock('../../persistence/db', () => ({
   loadPlayground: vi.fn().mockResolvedValue(undefined),
   loadAllPlaygrounds: vi.fn().mockResolvedValue([]),
   deletePlayground: vi.fn().mockResolvedValue(undefined),
+  saveProvider: vi.fn().mockResolvedValue(undefined),
+  loadAllProviders: vi.fn().mockResolvedValue([]),
+  deleteProvider: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { createAgent, createPlayground, createProvider } from '../../domain/factories';
 import type { Playground } from '../../domain/schema';
 import { useDomainStore } from '../../store/domainStore';
+import { useProviderStore } from '../../store/providerStore';
 import { useRuntimeStore } from '../../store/runtimeStore';
 import { startRun, stopRun } from '../orchestrator';
 
@@ -47,7 +51,9 @@ function cyclePlayground(maxTurns: number, maxPerAgent: number): Playground {
     systemInstruction: 'do',
     llm: { ...base.llm, providerId: provider.id, model: 'test' },
   });
-  pg.providers.push(provider);
+  // Providers are application-global now; register it in the provider store so
+  // the orchestrator can resolve agent.llm.providerId against the live registry.
+  useProviderStore.setState({ providers: [provider] });
   pg.agents.push(a, b);
   pg.connections.push(
     { id: 'c1', source: a.id, target: b.id, enabled: true, type: 'conversation', priority: 0 },
@@ -65,6 +71,7 @@ function cyclePlayground(maxTurns: number, maxPerAgent: number): Playground {
 
 beforeEach(() => {
   useRuntimeStore.getState().reset();
+  useProviderStore.setState({ providers: [] });
 });
 
 afterEach(() => {

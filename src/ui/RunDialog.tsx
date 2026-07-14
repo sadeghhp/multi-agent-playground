@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useDomainStore } from '../store/domainStore';
+import { useProviderStore } from '../store/providerStore';
 import { useUiStore } from '../store/uiStore';
 import { Modal } from './Modal';
 import { validateForRun, hasBlockingErrors, reachableFrom } from '../orchestrator/validate';
@@ -10,6 +11,7 @@ import styles from './RunDialog.module.css';
 export function RunDialog() {
   const playground = useDomainStore((s) => s.playground);
   const updateConversation = useDomainStore((s) => s.updateConversation);
+  const providers = useProviderStore((s) => s.providers);
   const setPanel = useUiStore((s) => s.setPanel);
 
   const conversation = playground?.conversation;
@@ -25,7 +27,10 @@ export function RunDialog() {
     return new Set(enabledAgents.filter((a) => !withIncoming.has(a.id)).map((a) => a.id));
   }, [playground, enabledAgents]);
 
-  const issues = useMemo(() => (playground ? validateForRun(playground) : []), [playground]);
+  const issues = useMemo(
+    () => (playground ? validateForRun(playground, providers) : []),
+    [playground, providers],
+  );
   const blocking = hasBlockingErrors(issues);
 
   if (!playground || !conversation) return null;

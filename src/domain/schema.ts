@@ -7,7 +7,7 @@ import { z } from 'zod';
  * schema version"). Bump it whenever a breaking shape change lands and add a
  * migration in persistence/migrate.ts.
  */
-export const SCHEMA_VERSION = 1 as const;
+export const SCHEMA_VERSION = 2 as const;
 
 // ---------------------------------------------------------------------------
 // Enums / small value types
@@ -220,6 +220,13 @@ export type UiLayoutState = z.infer<typeof UiLayoutState>;
 
 // ---------------------------------------------------------------------------
 // Playground (spec §7.1) — the complete saved workspace.
+//
+// As of schema v2 providers are application-scoped, not embedded here: they live
+// in a separate global store so every playground can reuse providers already
+// created (see store/providerStore.ts, persistence/db.ts). Agents still reference
+// a provider by id via `llm.providerId`; that reference now resolves against the
+// global registry. Exports/imports re-embed the referenced providers so a file
+// stays self-contained and portable (see PlaygroundExport below, spec §15.3).
 // ---------------------------------------------------------------------------
 
 export const Playground = z.object({
@@ -231,7 +238,6 @@ export const Playground = z.object({
   updatedAt: z.number().int(),
   agents: z.array(Agent).default([]),
   connections: z.array(Connection).default([]),
-  providers: z.array(Provider).default([]),
   conversation: ConversationSettings,
   transcript: z.array(TranscriptMessage).default([]),
   ui: UiLayoutState,
@@ -239,8 +245,11 @@ export const Playground = z.object({
 export type Playground = z.infer<typeof Playground>;
 
 /**
- * Export shape: identical to Playground but API keys are guaranteed absent
- * (spec §15.3, §21). We validate exported/imported files against this.
+ * Export shape (spec §15.3, §21): a Playground with the providers referenced by
+ * its agents re-embedded, API keys guaranteed absent. This keeps an exported
+ * file self-contained and portable even though providers live globally in the
+ * running app. Imports are validated against this same schema, then the embedded
+ * providers are merged back into the global registry.
  */
 export const ProviderExport = Provider.omit({ apiKey: true });
 export const PlaygroundExport = Playground.extend({

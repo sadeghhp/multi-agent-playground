@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { CredentialStorage, Provider } from '../domain/schema';
 import { deriveAuthMethod, schemeFromAuthMethod, type AuthScheme } from './providerAuth';
-import { useDomainStore } from '../store/domainStore';
+import { useProviderStore } from '../store/providerStore';
 import { useUiStore } from '../store/uiStore';
 import { createProvider } from '../domain/factories';
 import { clearCredential, saveCredential } from '../persistence/credentialStore';
@@ -12,13 +12,12 @@ import { Modal } from './Modal';
 import styles from './ProviderManager.module.css';
 
 export function ProviderManager() {
-  const playground = useDomainStore((s) => s.playground)!;
-  const addProvider = useDomainStore((s) => s.addProvider);
-  const updateProvider = useDomainStore((s) => s.updateProvider);
-  const removeProvider = useDomainStore((s) => s.removeProvider);
+  const addProvider = useProviderStore((s) => s.addProvider);
+  const updateProvider = useProviderStore((s) => s.updateProvider);
+  const removeProvider = useProviderStore((s) => s.removeProvider);
   const setPanel = useUiStore((s) => s.setPanel);
 
-  const providers = playground.providers;
+  const providers = useProviderStore((s) => s.providers);
   const [selectedId, setSelectedId] = useState<string | null>(providers[0]?.id ?? null);
   const selected = providers.find((p) => p.id === selectedId) ?? null;
 
@@ -55,8 +54,9 @@ export function ProviderManager() {
   return (
     <Modal title="Provider manager" onClose={() => setPanel('none')} width={780}>
       <div className={styles.warning + ' warning-banner'}>
-        Provider credentials are stored and used in this browser. Do not use unrestricted production
-        keys. Browser storage is not a secure secret vault.
+        Providers are shared across all playgrounds in this browser — create one here and any
+        playground can use it. Credentials are stored and used in this browser; do not use
+        unrestricted production keys. Browser storage is not a secure secret vault.
       </div>
       <div className={styles.layout}>
         <div className={styles.list}>

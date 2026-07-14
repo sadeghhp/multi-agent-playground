@@ -1,4 +1,4 @@
-import type { Playground } from './schema';
+import type { Playground, Provider } from './schema';
 import {
   createPlayground,
   createProvider,
@@ -11,8 +11,12 @@ import { newConnectionId } from './ids';
  * the acceptance scenario (§24): Strategist → Critic → Moderator, wired to a
  * local Ollama provider. The user only needs to confirm the provider/model and
  * press Run. No API key is baked in.
+ *
+ * Providers are application-global (schema v2), so the example's provider is
+ * returned alongside the playground for the caller to register into the global
+ * registry (reusing an equivalent one if it already exists).
  */
-export function createExamplePlayground(): Playground {
+export function createExamplePlayground(): { playground: Playground; provider: Provider } {
   const pg = createPlayground('Example: Open-source decision');
 
   const provider = createProvider({
@@ -43,7 +47,6 @@ export function createExamplePlayground(): Playground {
     llm: { providerId: provider.id, model: 'llama3.1', temperature: 0.5, maxOutputTokens: 512 },
   });
 
-  pg.providers.push(provider);
   pg.agents.push(strategist, critic, moderator);
   pg.connections.push(
     { id: newConnectionId(), source: strategist.id, target: critic.id, enabled: true, type: 'conversation', priority: 0 },
@@ -58,5 +61,5 @@ export function createExamplePlayground(): Playground {
     maxTotalTurns: 6,
   };
 
-  return pg;
+  return { playground: pg, provider };
 }

@@ -34,9 +34,11 @@ export default defineConfig({
       output: {
         // Split heavy vendors into their own chunks so app edits don't bust their
         // browser cache, and the initial parse is spread across files.
-        manualChunks: {
-          reactflow: ['@xyflow/react'],
-          markdown: ['react-markdown', 'rehype-sanitize'],
+        manualChunks(id) {
+          if (id.includes('node_modules/@xyflow/react')) return 'reactflow';
+          if (id.includes('node_modules/react-markdown') || id.includes('node_modules/rehype-sanitize')) {
+            return 'markdown';
+          }
         },
       },
     },

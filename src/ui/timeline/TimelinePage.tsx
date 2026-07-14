@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { TranscriptMessage } from '../../domain/schema';
+import { dirForLanguage } from '../../domain/language';
 import { useDomainStore } from '../../store/domainStore';
 import { useUiStore } from '../../store/uiStore';
 import { agentColor } from '../../graph/colors';
@@ -137,11 +138,13 @@ export function TimelinePage() {
 function TimelineItem({ msg, color }: { msg: TranscriptMessage; color: string }) {
   const time = new Date(msg.timestamp).toLocaleTimeString();
   const failed = msg.status === 'failed';
+  // Mirror the card (header + body) for RTL languages; the spine node stays put.
+  const dir = dirForLanguage(msg.language);
 
   return (
     <div className={`${styles.item} ${failed ? styles.itemFailed : ''}`}>
       <span className={styles.node} style={{ backgroundColor: color }} aria-hidden="true" />
-      <div className={styles.card}>
+      <div className={styles.card} dir={dir}>
         <div className={styles.cardHeader}>
           <span className={styles.agent}>
             {msg.agentName}
@@ -158,6 +161,8 @@ function TimelineItem({ msg, color }: { msg: TranscriptMessage; color: string })
         {msg.sourceAgentId && msg.connectionType && (
           <div className={styles.source}>via {msg.connectionType} connection</div>
         )}
+        {/* No explicit dir: inherits the forced direction from the card
+            above (driven by the agent's language), not a content guess. */}
         <div className={styles.body}>
           {failed ? (
             <span className={styles.errText}>Failed: {msg.error}</span>

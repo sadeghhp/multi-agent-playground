@@ -169,6 +169,7 @@ export function BottomPanel() {
                     role={liveAgent.role}
                     text={liveText ?? ''}
                     color={agentColor(liveAgent.colorCategory)}
+                    language={liveAgent.language}
                   />
                 )}
               </>

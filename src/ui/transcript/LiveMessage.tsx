@@ -1,4 +1,6 @@
 import { type CSSProperties } from 'react';
+import type { AgentLanguage } from '../../domain/schema';
+import { dirForLanguage } from '../../domain/language';
 import styles from './Transcript.module.css';
 
 /**
@@ -12,22 +14,29 @@ export function LiveMessage({
   role,
   text,
   color,
+  language,
 }: {
   agentName: string;
   role: string | null;
   text: string;
   color?: string;
+  language: AgentLanguage;
 }) {
   const style = color ? ({ '--agent-color': color } as CSSProperties) : undefined;
   const thinking = text.length === 0;
+  const dir = dirForLanguage(language);
   return (
-    <div className={`${styles.message} ${styles.live}`} style={style} aria-live="polite">
+    <div className={`${styles.message} ${styles.live}`} style={style} dir={dir} aria-live="polite">
       <div className={styles.msgHeader}>
         <span className={styles.dot} style={{ backgroundColor: color }} aria-hidden="true" />
         <span className={styles.msgAgent}>{agentName}</span>
         {role && <span className="chip">{role}</span>}
         <span className={styles.liveBadge}>{thinking ? 'thinking…' : 'streaming…'}</span>
       </div>
+      {/* No explicit dir: inherits the forced direction above. dir="auto"
+          would guess from the streamed text so far, which stays LTR until
+          enough RTL script has arrived — the opposite of what we want while
+          a Persian agent is still typing its first few characters. */}
       <div className={`${styles.msgBody} ${styles.liveBody}`}>
         {text}
         <span className={styles.caret} aria-hidden="true" />

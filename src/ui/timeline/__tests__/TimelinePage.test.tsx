@@ -67,6 +67,23 @@ describe('TimelinePage', () => {
     expect(screen.getByText(/Failed: timeout/)).toBeInTheDocument();
   });
 
+  it('renders a Persian message card right-to-left', () => {
+    const agent = createAgent({ name: 'تحلیل‌گر', language: 'fa' });
+    const playground = {
+      ...createPlayground('Demo'),
+      agents: [agent],
+      transcript: [msg({ id: 'fa1', agentId: agent.id, agentName: 'تحلیل‌گر', language: 'fa', content: 'سلام دنیا' })],
+    };
+    useDomainStore.setState({ playground });
+
+    render(<TimelinePage />);
+    const card = screen.getByText('سلام دنیا').closest('[dir="rtl"]');
+    expect(card).not.toBeNull();
+    // Regression guard: no descendant (e.g. the body) may re-declare its own
+    // dir (such as dir="auto"), which would silently override this forced rtl.
+    expect(card!.querySelectorAll('[dir]')).toHaveLength(0);
+  });
+
   it('shows the empty state when there is no transcript', () => {
     useDomainStore.setState({ playground: createPlayground('Empty') });
     render(<TimelinePage />);

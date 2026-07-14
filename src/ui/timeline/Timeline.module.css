@@ -122,7 +122,7 @@
 
 .cardHeader { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .agent { font-weight: 600; }
-.meta { font-size: 11px; color: var(--text-subtle); margin-left: auto; }
+.meta { font-size: 11px; color: var(--text-subtle); margin-inline-start: auto; }
 .source { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 
 .body { margin-top: 6px; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }

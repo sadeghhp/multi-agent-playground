@@ -104,7 +104,7 @@ export function BottomPanel() {
               <>
                 {transcript.map((msg) => <Message key={msg.id} msg={msg} />)}
                 {liveAgent && liveText && (
-                  <LiveMessage agentName={liveAgent.name} role={liveAgent.role} text={liveText} />
+                  <LiveMessage agentName={liveAgent.name} role={liveAgent.role} text={liveText} language={liveAgent.language} />
                 )}
               </>
             )

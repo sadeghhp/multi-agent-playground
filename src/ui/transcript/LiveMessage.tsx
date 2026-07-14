@@ -1,3 +1,5 @@
+import type { AgentLanguage } from '../../domain/schema';
+import { dirForLanguage } from '../../domain/language';
 import styles from './Transcript.module.css';
 
 /**
@@ -5,24 +7,30 @@ import styles from './Transcript.module.css';
  * streaming). Rendered as plain text with a blinking caret: partial Markdown is
  * often mid-token, so we don't parse it until the message finalizes into a real
  * transcript entry. Provider text is inserted as a text node, never as HTML.
+ *
+ * The agent's language drives the writing direction so RTL languages (Persian)
+ * stream right-to-left, matching how the finalized message will render.
  */
 export function LiveMessage({
   agentName,
   role,
   text,
+  language,
 }: {
   agentName: string;
   role: string | null;
   text: string;
+  language: AgentLanguage;
 }) {
+  const dir = dirForLanguage(language);
   return (
-    <div className={`${styles.message} ${styles.live}`}>
+    <div className={`${styles.message} ${styles.live}`} dir={dir}>
       <div className={styles.msgHeader}>
         <span className={styles.msgAgent}>{agentName}</span>
         {role && <span className="chip">{role}</span>}
         <span className={styles.liveBadge}>streaming…</span>
       </div>
-      <div className={`${styles.msgBody} ${styles.liveBody}`}>
+      <div className={`${styles.msgBody} ${styles.liveBody}`} dir="auto">
         {text}
         <span className={styles.caret} aria-hidden="true" />
       </div>

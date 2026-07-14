@@ -240,6 +240,18 @@ export function AgentInspector({ agent }: { agent: Agent }) {
             </div>
           )}
         </div>
+        <div className="field">
+          <label htmlFor="ag-lang">Language</label>
+          <select
+            id="ag-lang"
+            value={agent.language}
+            onChange={(e) => patch({ language: e.target.value as Agent['language'] })}
+          >
+            <option value="en">English</option>
+            <option value="fa">فارسی (Persian)</option>
+            <option value="fr">Français (French)</option>
+          </select>
+        </div>
       </Section>
 
       <Section title="Characteristics">

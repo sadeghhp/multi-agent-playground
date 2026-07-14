@@ -1,5 +1,6 @@
 import type {
   Agent,
+  AgentLanguage,
   Connection,
   ConversationSettings,
   TranscriptMessage,
@@ -36,6 +37,17 @@ const CONNECTION_RULE: Record<Connection['type'], string> = {
   conversation: 'Respond to the latest relevant messages in the conversation.',
   review: "Review the previous agent's most recent response. Focus on weaknesses, errors, and gaps.",
   handoff: "Treat the previous agent's output as your primary task context and continue the work.",
+};
+
+/**
+ * The agent's conversation language (spec: per-agent language). Placed late in
+ * the system prompt so it carries weight, and phrased bilingually (English +
+ * native) so smaller local models are less likely to ignore it.
+ */
+const LANGUAGE_DIRECTIVE: Record<AgentLanguage, string> = {
+  en: 'Write all of your responses in English.',
+  fa: 'Write all of your responses in Persian (Farsi). همه‌ی پاسخ‌های خود را به زبان فارسی بنویسید.',
+  fr: 'Write all of your responses in French. Rédige toutes tes réponses en français.',
 };
 
 /** Build the system prompt text (sections 1–6, 9 of spec §12). */
@@ -75,6 +87,9 @@ export function buildSystemPrompt(ctx: PromptContext): string {
       sections.push(ctx.incoming.instructionOverride.trim());
     }
   }
+
+  // 8. Language directive — governs both what the agent asks and answers.
+  sections.push(LANGUAGE_DIRECTIVE[agent.language]);
 
   // 9. Output constraints (final-response instruction)
   if (agent.runtime.finalResponseInstruction?.trim()) {

@@ -34,7 +34,8 @@ export interface PromptContext {
 }
 
 const CONNECTION_RULE: Record<Connection['type'], string> = {
-  conversation: 'Respond to the latest relevant messages in the conversation.',
+  conversation:
+    'Respond to the latest relevant messages in the conversation. Do not repeat or restate a previous message verbatim — contribute your own distinct perspective, new information, or a disagreement.',
   review: "Review the previous agent's most recent response. Focus on weaknesses, errors, and gaps.",
   handoff: "Treat the previous agent's output as your primary task context and continue the work.",
 };

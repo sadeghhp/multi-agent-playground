@@ -1,23 +1,42 @@
 .node {
   width: 200px;
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   border: 2px solid var(--node-border, var(--border));
+  border-left: 4px solid var(--agent-color, var(--border));
   background: var(--node-bg, var(--surface));
   padding: 10px 12px;
   box-shadow: var(--shadow-sm);
   font-size: 13px;
   color: var(--text);
-  transition: box-shadow 0.12s ease, border-color 0.12s ease;
+  cursor: grab;
+  transition: box-shadow 0.12s ease, border-color 0.12s ease, transform 0.12s ease;
 }
+
+/* Nodes should feel draggable/interactive (identity survives via the left bar + dot). */
+.node:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+.node:active { cursor: grabbing; }
 
 .header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
+}
+
+/* Persistent identity dot — stays visible even while status recolors the border. */
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--agent-color, var(--edge));
+  flex-shrink: 0;
 }
 
 .name {
+  flex: 1;
+  min-width: 0;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -54,20 +73,14 @@
 }
 
 .handle {
-  width: 9px;
-  height: 9px;
+  width: 11px;
+  height: 11px;
   background: var(--accent);
   border: 2px solid var(--surface);
+  transition: transform 0.12s ease, background 0.12s ease;
 }
-
-/* Color category — left accent stripe so identity isn't color-only text */
-.color_slate { --node-border: #64748b; }
-.color_blue { --node-border: #3b82f6; }
-.color_green { --node-border: #22c55e; }
-.color_amber { --node-border: #f59e0b; }
-.color_red { --node-border: #ef4444; }
-.color_violet { --node-border: #8b5cf6; }
-.color_teal { --node-border: #14b8a6; }
+/* Grow the handles on node hover so wiring targets are easy to hit. */
+.node:hover .handle { transform: scale(1.25); }
 
 .selected {
   box-shadow: 0 0 0 3px var(--accent-ring);
@@ -79,17 +92,18 @@
   filter: grayscale(0.4);
 }
 
-/* Runtime states (spec §10.3). Distinct border + badge, not color alone. */
+/* Runtime states (spec §10.3). Status recolors the outer border + badge; the
+ * identity dot and left bar stay, so an agent's identity survives a run. */
 .state_generating {
   border-color: var(--accent);
   animation: pulse 1.2s ease-in-out infinite;
 }
-.state_completed { --node-border: #22c55e; }
-.state_failed, .errored { --node-border: #ef4444; }
+.state_completed { --node-border: var(--ok); }
+.state_failed, .errored { --node-border: var(--danger); }
 
-.badge_generating { background: var(--accent); color: #fff; border-color: var(--accent); }
-.badge_completed { background: #dcfce7; color: #166534; border-color: #86efac; }
-.badge_failed { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
+.badge_generating { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.badge_completed { background: var(--ok-bg); color: var(--ok-text); border-color: var(--ok-border); }
+.badge_failed { background: var(--danger-bg); color: var(--danger); border-color: var(--danger); }
 .badge_queued { background: var(--chip-bg); color: var(--chip-text); }
 
 @keyframes pulse {

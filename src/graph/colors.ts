@@ -1,10 +1,10 @@
 import type { ColorCategory } from '../domain/schema';
 
 /**
- * Agent identity colors keyed by category. These MUST stay in sync with the
- * `.color_<category>` accent stripes in `AgentNode.module.css` — the graph node
- * styles them via CSS classes; JS consumers (e.g. the conversation timeline)
- * read the same hex values from here so the two never diverge.
+ * Agent identity colors keyed by category. This is the single source of truth for
+ * the agent palette: the graph node reads it via an inline `--agent-color` CSS
+ * variable (see `AgentNode.tsx`), and other JS consumers (timeline, transcript,
+ * minimap) call `agentColor()` — so there is no CSS/JS hand-syncing to drift.
  */
 export const AGENT_COLORS: Record<ColorCategory, string> = {
   slate: '#64748b',

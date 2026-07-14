@@ -17,6 +17,7 @@ import { AgentLibraryPanel } from './ui/AgentLibraryPanel';
 import { useAgentLibraryStore } from './store/agentLibraryStore';
 import { CreateAgentWithAiModal } from './ui/CreateAgentWithAiModal';
 import { Toast } from './ui/Toast';
+import { ConfirmDialog } from './ui/ConfirmDialog';
 import styles from './App.module.css';
 
 export default function App() {
@@ -78,6 +79,7 @@ export default function App() {
       {openPanel === 'library' && <AgentLibraryPanel />}
       {openPanel === 'createAgentAi' && <CreateAgentWithAiModal />}
       <Toast />
+      <ConfirmDialog />
     </div>
   );
 }

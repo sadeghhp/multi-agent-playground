@@ -9,6 +9,7 @@ import { Inspector } from './ui/Inspector';
 import { BottomPanel } from './ui/BottomPanel';
 import { GraphCanvas } from './graph/GraphCanvas';
 import { ProviderManager } from './ui/ProviderManager';
+import { SkillLibraryManager } from './ui/SkillLibraryManager';
 import { RunDialog } from './ui/RunDialog';
 import { PlaygroundsPanel } from './ui/PlaygroundsPanel';
 import { TimelinePage } from './ui/timeline/TimelinePage';
@@ -64,6 +65,7 @@ export default function App() {
       <BottomPanel />
 
       {openPanel === 'providers' && <ProviderManager />}
+      {openPanel === 'skills' && <SkillLibraryManager />}
       {openPanel === 'run' && <RunDialog />}
       {openPanel === 'playgrounds' && <PlaygroundsPanel />}
       {openPanel === 'timeline' && <TimelinePage />}

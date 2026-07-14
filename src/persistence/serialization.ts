@@ -3,7 +3,7 @@ import {
   type Provider,
   PlaygroundExport as PlaygroundExportSchema,
 } from '../domain/schema';
-import { newAgentId, newConnectionId, newPlaygroundId } from '../domain/ids';
+import { newAgentId, newConnectionId, newPlaygroundId, newSkillId } from '../domain/ids';
 import { migrateToCurrent } from './migrate';
 
 /**
@@ -148,11 +148,32 @@ function collectWarnings(pg: Playground, providers: Provider[]): string[] {
  */
 export function regenerateIds(pg: Playground): Playground {
   const agentMap = new Map<string, string>();
+  // Old→new library-skill ids. Built before agents so each agent skill's
+  // libraryId can be remapped; without this, a duplicated playground's agent
+  // skills would alias the original's library entries.
+  const libraryMap = new Map<string, string>();
+
+  const skillLibrary = pg.skillLibrary.map((s) => {
+    const id = newSkillId();
+    libraryMap.set(s.id, id);
+    return { ...s, id };
+  });
 
   const agents = pg.agents.map((a) => {
     const id = newAgentId();
     agentMap.set(a.id, id);
-    return { ...a, id };
+    return {
+      ...a,
+      id,
+      // Fresh skill ids (so copies never alias) and remapped provenance pointers.
+      skills: a.skills.map((sk) => ({
+        ...sk,
+        id: newSkillId(),
+        libraryId: sk.libraryId ? libraryMap.get(sk.libraryId) : undefined,
+      })),
+      // Providers are application-global (schema v2); llm.providerId references
+      // are preserved unchanged so a copy keeps pointing at the same provider.
+    };
   });
 
   // Drop connections whose endpoints didn't survive; remap the rest.
@@ -174,6 +195,7 @@ export function regenerateIds(pg: Playground): Playground {
     id: newPlaygroundId(),
     agents,
     connections,
+    skillLibrary,
     conversation: { ...pg.conversation, startingAgentId },
     // A fresh copy starts with no transcript history.
     transcript: [],

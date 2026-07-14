@@ -2,6 +2,7 @@ import {
   type Agent,
   type Characteristics,
   type ConversationSettings,
+  type LibrarySkill,
   type LlmConfig,
   type Playground,
   type Provider,
@@ -121,6 +122,38 @@ export function createProvider(overrides: Partial<Provider> = {}): Provider {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Skill library (spec §7.2 "Skills"). Declared capabilities, NOT executable
+// tools — the presets below are the spec's example capabilities. The picker in
+// the agent editor always offers these, even when a playground's stored
+// skillLibrary is empty (e.g. pre-existing playgrounds).
+// ---------------------------------------------------------------------------
+
+export const SKILL_PRESETS: Omit<LibrarySkill, 'id'>[] = [
+  { name: 'analysis', description: 'Structured analysis', instruction: 'Decompose the problem into parts and reason from evidence, weighing trade-offs explicitly.' },
+  { name: 'brainstorming', description: 'Idea generation', instruction: 'Enumerate relevant angles, options, and open questions before converging.' },
+  { name: 'summarization', description: 'Concise synthesis', instruction: 'Produce a concise, faithful summary that preserves the key points.' },
+  { name: 'critique', description: 'Critical review', instruction: 'Challenge unsupported claims and identify factual weaknesses and logical gaps.' },
+  { name: 'prioritization', description: 'Ranking by impact', instruction: 'Rank items by impact and effort, and justify the ordering.' },
+  { name: 'technical design', description: 'Design reasoning', instruction: 'Consider constraints, alternatives, and trade-offs before proposing a design.' },
+  { name: 'risk analysis', description: 'Risk assessment', instruction: 'Surface failure modes, their likelihood, and mitigations.' },
+];
+
+export function createLibrarySkill(overrides: Partial<LibrarySkill> = {}): LibrarySkill {
+  return {
+    id: newSkillId(),
+    name: 'new skill',
+    description: '',
+    instruction: '',
+    ...overrides,
+  };
+}
+
+/** Seed a fresh playground's catalog from the built-in presets (spec §7.2). */
+export function defaultSkillLibrary(): LibrarySkill[] {
+  return SKILL_PRESETS.map((p) => createLibrarySkill(p));
+}
+
 export function createPlayground(name = 'Untitled Playground'): Playground {
   const ts = now();
   return {
@@ -132,6 +165,7 @@ export function createPlayground(name = 'Untitled Playground'): Playground {
     updatedAt: ts,
     agents: [],
     connections: [],
+    skillLibrary: defaultSkillLibrary(),
     conversation: defaultConversationSettings(),
     transcript: [],
     ui: defaultUiLayout(),

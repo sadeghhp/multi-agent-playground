@@ -1,12 +1,15 @@
-import { useMemo, useState } from 'react';
-import type { Agent, ConnectionType } from '../../domain/schema';
+import { useMemo, useRef, useState } from 'react';
+import type { Agent, ConnectionType, Skill } from '../../domain/schema';
 import { useDomainStore } from '../../store/domainStore';
 import { useProviderStore } from '../../store/providerStore';
 import { useUiStore } from '../../store/uiStore';
 import { useRuntimeStore } from '../../store/runtimeStore';
 import { newConnectionId, newSkillId } from '../../domain/ids';
+import { SKILL_PRESETS } from '../../domain/factories';
 import { assembleMessages, boundHistory, buildSystemPrompt, buildTaskPrompt, estimateTokens } from '../../agents/promptAssembly';
 import { enhanceSystemInstruction, type EnhancePromptResult } from '../../agents/enhancePrompt';
+import { exportSkillSet, importSkillSet } from '../../persistence/skillSets';
+import { downloadJson } from '../fileDownload';
 import { validateForRun } from '../../orchestrator/validate';
 import { Section } from './Section';
 import { parseBoundedInt } from '../inputUtils';
@@ -24,10 +27,14 @@ export function AgentInspector({ agent }: { agent: Agent }) {
   const selectAgent = useUiStore((s) => s.selectAgent);
   const selectConnection = useUiStore((s) => s.selectConnection);
   const clearSelection = useUiStore((s) => s.clearSelection);
+  const showToast = useUiStore((s) => s.showToast);
   const isRunning = useRuntimeStore((s) => s.status === 'running');
 
   const [newTarget, setNewTarget] = useState('');
   const [newType, setNewType] = useState<ConnectionType>('conversation');
+  const skillFileInput = useRef<HTMLInputElement>(null);
+
+  const library = playground.skillLibrary;
 
   // System-prompt enhancer state (in-flight flag, the proposed rewrite awaiting
   // Apply/Discard, and any sanitized provider error).
@@ -108,6 +115,86 @@ export function AgentInspector({ agent }: { agent: Agent }) {
   }
   function patchChar(p: Partial<Agent['characteristics']>) {
     update(agent.id, { characteristics: { ...agent.characteristics, ...p } });
+  }
+
+  // ---- Skills -------------------------------------------------------------
+  function patchSkillAt(idx: number, p: Partial<Skill>) {
+    const skills = agent.skills.map((s, i) => (i === idx ? { ...s, ...p } : s));
+    patch({ skills });
+  }
+  function removeSkill(id: string) {
+    patch({ skills: agent.skills.filter((s) => s.id !== id) });
+  }
+  function duplicateSkill(idx: number) {
+    const skill = agent.skills[idx];
+    const skills = [...agent.skills];
+    // Fresh id + drop the library link so the copy is an independent skill.
+    skills.splice(idx + 1, 0, { ...skill, id: newSkillId(), libraryId: undefined });
+    patch({ skills });
+  }
+  function moveSkill(idx: number, dir: -1 | 1) {
+    const to = idx + dir;
+    if (to < 0 || to >= agent.skills.length) return;
+    const skills = [...agent.skills];
+    [skills[idx], skills[to]] = [skills[to], skills[idx]];
+    patch({ skills });
+  }
+  function addBlankSkill() {
+    patch({ skills: [...agent.skills, { id: newSkillId(), name: 'new skill', description: '', instruction: '', enabled: true }] });
+  }
+  /** Attach a copy of a library entry (value = library id) or preset (value = `preset:<name>`). */
+  function addFromLibrary(value: string) {
+    if (!value) return;
+    let source: { name: string; description: string; instruction: string } | undefined;
+    let libraryId: string | undefined;
+    if (value.startsWith('preset:')) {
+      source = SKILL_PRESETS.find((p) => p.name === value.slice('preset:'.length));
+    } else {
+      const entry = library.find((s) => s.id === value);
+      if (entry) {
+        source = entry;
+        libraryId = entry.id;
+      }
+    }
+    if (!source) return;
+    patch({
+      skills: [
+        ...agent.skills,
+        { id: newSkillId(), name: source.name, description: source.description, instruction: source.instruction, enabled: true, libraryId },
+      ],
+    });
+  }
+  /** Overwrite a linked skill's content from its library entry, keeping enabled state. */
+  function resyncSkill(idx: number) {
+    const skill = agent.skills[idx];
+    const entry = skill.libraryId ? library.find((s) => s.id === skill.libraryId) : undefined;
+    if (!entry) return;
+    patchSkillAt(idx, { name: entry.name, description: entry.description, instruction: entry.instruction });
+  }
+
+  function handleExportSkills() {
+    if (agent.skills.length === 0) {
+      showToast('warn', 'This agent has no skills to export.');
+      return;
+    }
+    downloadJson(`${agent.name || 'agent'}-skills`, exportSkillSet(agent.skills));
+  }
+  async function handleImportSkills(file: File) {
+    const result = importSkillSet(await file.text());
+    if (!result.ok) {
+      showToast('error', result.error ?? 'Import failed.');
+      return;
+    }
+    // Imported skills are enabled and unlinked (their ids come from another set).
+    const imported: Skill[] = result.skills.map((s) => ({
+      id: s.id,
+      name: s.name,
+      description: s.description,
+      instruction: s.instruction,
+      enabled: true,
+    }));
+    patch({ skills: [...agent.skills, ...imported] });
+    showToast('info', `Imported ${imported.length} skill${imported.length === 1 ? '' : 's'}.`);
   }
 
   function handleDuplicate() {
@@ -278,49 +365,87 @@ export function AgentInspector({ agent }: { agent: Agent }) {
 
       <Section title={`Skills (${agent.skills.filter((s) => s.enabled).length}/${agent.skills.length})`}>
         <p className={styles.hint}>Declared capabilities merged into the prompt — not executable tools.</p>
-        {agent.skills.map((skill, idx) => (
-          <div key={skill.id} className={styles.skill}>
-            <div className={styles.skillHead}>
+        {agent.skills.map((skill, idx) => {
+          const linked = skill.libraryId ? library.find((s) => s.id === skill.libraryId) : undefined;
+          return (
+            <div key={skill.id} className={styles.skill}>
+              <div className={styles.skillHead}>
+                <input
+                  type="checkbox"
+                  aria-label="Skill enabled"
+                  checked={skill.enabled}
+                  onChange={(e) => patchSkillAt(idx, { enabled: e.target.checked })}
+                />
+                <input
+                  value={skill.name}
+                  placeholder="skill name"
+                  onChange={(e) => patchSkillAt(idx, { name: e.target.value })}
+                />
+                <button type="button" aria-label="Move skill up" disabled={idx === 0} onClick={() => moveSkill(idx, -1)}>↑</button>
+                <button type="button" aria-label="Move skill down" disabled={idx === agent.skills.length - 1} onClick={() => moveSkill(idx, 1)}>↓</button>
+                <button type="button" aria-label="Duplicate skill" onClick={() => duplicateSkill(idx)}>⧉</button>
+                <button type="button" className="danger" aria-label="Remove skill" onClick={() => removeSkill(skill.id)}>✕</button>
+              </div>
+              {linked && (
+                <div className={styles.skillLink}>
+                  <span className="chip">from library: {linked.name}</span>
+                  <button type="button" onClick={() => resyncSkill(idx)}>Re-sync from library</button>
+                </div>
+              )}
               <input
-                type="checkbox"
-                checked={skill.enabled}
-                onChange={(e) => {
-                  const skills = [...agent.skills];
-                  skills[idx] = { ...skill, enabled: e.target.checked };
-                  patch({ skills });
-                }}
+                value={skill.description}
+                placeholder="Short description"
+                onChange={(e) => patchSkillAt(idx, { description: e.target.value })}
               />
-              <input
-                value={skill.name}
-                placeholder="skill name"
-                onChange={(e) => {
-                  const skills = [...agent.skills];
-                  skills[idx] = { ...skill, name: e.target.value };
-                  patch({ skills });
-                }}
+              <textarea
+                rows={2}
+                placeholder="Optional instruction text"
+                value={skill.instruction}
+                onChange={(e) => patchSkillAt(idx, { instruction: e.target.value })}
               />
-              <button type="button" className="danger" aria-label="Remove skill" onClick={() => patch({ skills: agent.skills.filter((s) => s.id !== skill.id) })}>✕</button>
             </div>
-            <textarea
-              rows={2}
-              placeholder="Optional instruction text"
-              value={skill.instruction}
-              onChange={(e) => {
-                const skills = [...agent.skills];
-                skills[idx] = { ...skill, instruction: e.target.value };
-                patch({ skills });
-              }}
-            />
-          </div>
-        ))}
-        <button
-          type="button"
-          onClick={() =>
-            patch({ skills: [...agent.skills, { id: newSkillId(), name: 'new skill', description: '', instruction: '', enabled: true }] })
-          }
-        >
-          + Add skill
-        </button>
+          );
+        })}
+        <div className={styles.skillActions}>
+          <select
+            aria-label="Add skill from library"
+            value=""
+            onChange={(e) => {
+              addFromLibrary(e.target.value);
+              e.target.value = '';
+            }}
+          >
+            <option value="">+ Add from library…</option>
+            {library.length > 0 && (
+              <optgroup label="Library">
+                {library.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </optgroup>
+            )}
+            <optgroup label="Presets">
+              {SKILL_PRESETS.filter((p) => !library.some((s) => s.name === p.name)).map((p) => (
+                <option key={p.name} value={`preset:${p.name}`}>{p.name}</option>
+              ))}
+            </optgroup>
+          </select>
+          <button type="button" onClick={addBlankSkill}>+ Blank skill</button>
+        </div>
+        <div className={styles.skillActions}>
+          <button type="button" onClick={handleExportSkills}>Export skills</button>
+          <button type="button" onClick={() => skillFileInput.current?.click()}>Import skills</button>
+          <input
+            ref={skillFileInput}
+            type="file"
+            accept="application/json,.json"
+            hidden
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void handleImportSkills(file);
+              e.target.value = '';
+            }}
+          />
+        </div>
       </Section>
 
       <Section title="Provider & model" defaultOpen>

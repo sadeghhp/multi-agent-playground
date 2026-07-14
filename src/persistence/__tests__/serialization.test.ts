@@ -88,6 +88,43 @@ describe('import', () => {
     expect(agentIds).toContain(conn.target);
   });
 
+  it('regenerates library skill ids and remaps agent libraryId references on copy', () => {
+    const pg = createPlayground('Lib');
+    const libSkill = pg.skillLibrary[0];
+    // An agent skill copied from that library entry.
+    const agent = createAgent({
+      name: 'A',
+      skills: [{ id: 'sk_orig', name: libSkill.name, description: '', instruction: '', enabled: true, libraryId: libSkill.id }],
+    });
+    pg.agents.push(agent);
+
+    const res = importFromJson(exportToJson(pg, []), true);
+    expect(res.ok).toBe(true);
+    const copy = res.playground!;
+
+    const copiedLib = copy.skillLibrary[0];
+    // Library id changed…
+    expect(copiedLib.id).not.toBe(libSkill.id);
+    // …and the agent skill's provenance pointer was remapped to the new library id.
+    const copiedSkill = copy.agents[0].skills[0];
+    expect(copiedSkill.id).not.toBe('sk_orig');
+    expect(copiedSkill.libraryId).toBe(copiedLib.id);
+  });
+
+  it('drops a dangling libraryId (no matching library entry) on copy', () => {
+    const pg = createPlayground('Dangling');
+    pg.skillLibrary = [];
+    const agent = createAgent({
+      name: 'A',
+      skills: [{ id: 'sk_orig', name: 'x', description: '', instruction: '', enabled: true, libraryId: 'lib_gone' }],
+    });
+    pg.agents.push(agent);
+
+    const res = importFromJson(exportToJson(pg, []), true);
+    expect(res.ok).toBe(true);
+    expect(res.playground!.agents[0].skills[0].libraryId).toBeUndefined();
+  });
+
   it('warns about agents referencing a provider not in the file', () => {
     const pg = createPlayground('W');
     pg.agents.push(createAgent({ name: 'A', llm: { ...createAgent().llm, providerId: 'pv_missing', model: 'm' } }));

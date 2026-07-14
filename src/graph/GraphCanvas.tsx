@@ -15,6 +15,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useDomainStore } from '../store/domainStore';
+import { useProviderStore } from '../store/providerStore';
 import { useUiStore } from '../store/uiStore';
 import { useRuntimeStore } from '../store/runtimeStore';
 import { newConnectionId } from '../domain/ids';
@@ -36,6 +37,7 @@ function CanvasInner() {
   const clearSelection = useUiStore((s) => s.clearSelection);
   const showToast = useUiStore((s) => s.showToast);
 
+  const providers = useProviderStore((s) => s.providers);
   const isRunning = useRuntimeStore((s) => s.status === 'running');
   const agentStates = useRuntimeStore((s) => s.agentStates);
   const activeConnectionId = useRuntimeStore((s) => s.activeConnectionId);
@@ -58,11 +60,11 @@ function CanvasInner() {
   // changes (not during a drag, which doesn't touch the domain).
   const desiredNodes = useMemo<AgentFlowNode[]>(() => {
     if (!playground) return [];
-    return agentsToNodes(playground.agents, playground.providers, {
+    return agentsToNodes(playground.agents, providers, {
       agentStates,
       erroredAgentIds,
     });
-  }, [playground, agentStates, erroredAgentIds]);
+  }, [playground, providers, agentStates, erroredAgentIds]);
 
   useEffect(() => {
     // Merge desired data onto existing nodes, preserving each node's live

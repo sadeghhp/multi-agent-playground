@@ -1,12 +1,14 @@
 import { useMemo, useState } from 'react';
 import type { Agent, ConnectionType } from '../../domain/schema';
 import { useDomainStore } from '../../store/domainStore';
+import { useProviderStore } from '../../store/providerStore';
 import { useUiStore } from '../../store/uiStore';
 import { useRuntimeStore } from '../../store/runtimeStore';
 import { newConnectionId, newSkillId } from '../../domain/ids';
 import { assembleMessages, boundHistory, buildSystemPrompt, buildTaskPrompt, estimateTokens } from '../../agents/promptAssembly';
 import { validateForRun } from '../../orchestrator/validate';
 import { Section } from './Section';
+import { parseBoundedInt } from '../inputUtils';
 import styles from './Inspector.module.css';
 
 const COLORS: Agent['colorCategory'][] = ['slate', 'blue', 'green', 'amber', 'red', 'violet', 'teal'];
@@ -26,7 +28,7 @@ export function AgentInspector({ agent }: { agent: Agent }) {
   const [newTarget, setNewTarget] = useState('');
   const [newType, setNewType] = useState<ConnectionType>('conversation');
 
-  const providers = playground.providers;
+  const providers = useProviderStore((s) => s.providers);
   const selectedProvider = providers.find((p) => p.id === agent.llm.providerId);
 
   // Outgoing connections + which agents are still available as new targets.
@@ -50,8 +52,8 @@ export function AgentInspector({ agent }: { agent: Agent }) {
   }
 
   const agentIssues = useMemo(
-    () => validateForRun(playground).filter((i) => i.agentId === agent.id),
-    [playground, agent.id],
+    () => validateForRun(playground, providers).filter((i) => i.agentId === agent.id),
+    [playground, providers, agent.id],
   );
 
   function patch(p: Partial<Agent>) {
@@ -276,7 +278,7 @@ export function AgentInspector({ agent }: { agent: Agent }) {
         <div className="field-row">
           <div className="field">
             <label htmlFor="ag-maxtok">Max output tokens</label>
-            <input id="ag-maxtok" type="number" min={1} value={agent.llm.maxOutputTokens} onChange={(e) => patchLlm({ maxOutputTokens: Number(e.target.value) })} />
+            <input id="ag-maxtok" type="number" min={1} value={agent.llm.maxOutputTokens} onChange={(e) => { const n = parseBoundedInt(e.target.value, 1); if (n !== null) patchLlm({ maxOutputTokens: n }); }} />
           </div>
           <div className="field">
             <label htmlFor="ag-topp">Top-p (optional)</label>
@@ -289,11 +291,11 @@ export function AgentInspector({ agent }: { agent: Agent }) {
         <div className="field-row">
           <div className="field">
             <label htmlFor="ag-maxresp">Max responses / run</label>
-            <input id="ag-maxresp" type="number" min={1} value={agent.runtime.maxResponsesPerRun} onChange={(e) => patchRuntime({ maxResponsesPerRun: Number(e.target.value) })} />
+            <input id="ag-maxresp" type="number" min={1} value={agent.runtime.maxResponsesPerRun} onChange={(e) => { const n = parseBoundedInt(e.target.value, 1); if (n !== null) patchRuntime({ maxResponsesPerRun: n }); }} />
           </div>
           <div className="field">
             <label htmlFor="ag-hist">History window</label>
-            <input id="ag-hist" type="number" min={0} value={agent.runtime.historyWindow} onChange={(e) => patchRuntime({ historyWindow: Number(e.target.value) })} />
+            <input id="ag-hist" type="number" min={1} value={agent.runtime.historyWindow} onChange={(e) => { const n = parseBoundedInt(e.target.value, 1); if (n !== null) patchRuntime({ historyWindow: n }); }} />
           </div>
         </div>
         <label className={styles.enableToggle}>

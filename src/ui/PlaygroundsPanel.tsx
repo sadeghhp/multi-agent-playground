@@ -1,4 +1,5 @@
 import { useDomainStore } from '../store/domainStore';
+import { useProviderStore } from '../store/providerStore';
 import { useUiStore } from '../store/uiStore';
 import { createExamplePlayground } from '../domain/example';
 import { Modal } from './Modal';
@@ -12,7 +13,28 @@ export function PlaygroundsPanel() {
   const duplicatePlayground = useDomainStore((s) => s.duplicatePlayground);
   const newPlayground = useDomainStore((s) => s.newPlayground);
   const replacePlayground = useDomainStore((s) => s.replacePlayground);
+  const ensureProvider = useProviderStore((s) => s.ensureProvider);
   const setPanel = useUiStore((s) => s.setPanel);
+
+  // Register the example's provider globally (reusing an equivalent one if it
+  // already exists), then load the playground wired to whatever id came back.
+  function loadExample() {
+    const { playground, provider } = createExamplePlayground();
+    const pid = ensureProvider(provider);
+    const wired =
+      pid === provider.id
+        ? playground
+        : {
+            ...playground,
+            agents: playground.agents.map((a) =>
+              a.llm.providerId === provider.id
+                ? { ...a, llm: { ...a.llm, providerId: pid } }
+                : a,
+            ),
+          };
+    replacePlayground(wired);
+    setPanel('none');
+  }
 
   return (
     <Modal title="Saved playgrounds" onClose={() => setPanel('none')} width={520}>
@@ -20,7 +42,7 @@ export function PlaygroundsPanel() {
         <button type="button" className="primary" onClick={() => { newPlayground('Untitled Playground'); setPanel('none'); }}>
           + New playground
         </button>
-        <button type="button" onClick={() => { replacePlayground(createExamplePlayground()); setPanel('none'); }}>
+        <button type="button" onClick={loadExample}>
           Load example
         </button>
         {current && <button type="button" onClick={() => duplicatePlayground()}>Duplicate current</button>}

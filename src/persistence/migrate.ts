@@ -3,8 +3,13 @@ import { SCHEMA_VERSION } from '../domain/schema';
 /**
  * Schema migration boundary (spec §7.1, §15.3). Persisted and imported
  * playgrounds carry a schemaVersion; this is where we upgrade older shapes to
- * the current one before zod validation. For the MVP there is only version 1,
- * so this is a stub that rejects anything from the future and passes v1 through.
+ * the current one before zod validation.
+ *
+ * v1 → v2: providers moved from being embedded in each playground to an
+ * application-global registry. We only need to re-stamp the version here — the
+ * providers themselves are handled per caller: the IndexedDB upgrade hoists
+ * embedded providers into the global store (persistence/db.ts), and imports read
+ * the still-embedded providers off the export schema before merging them.
  */
 
 export interface MigrationResult {
@@ -27,6 +32,12 @@ export function migrateToCurrent(raw: unknown): MigrationResult {
       reason: `This file was created by a newer version (schema ${version}). Update the app to open it.`,
     };
   }
-  // Future: switch(version) { case 0: raw = upgrade0to1(raw); /* fallthrough */ }
-  return { ok: true, data: raw };
+  let data = raw;
+  if (version < 2) {
+    // v1 → v2: re-stamp the version. `providers` (if present) is left on the
+    // object so import can read it; the DB upgrade strips it from stored records
+    // and zod drops it when parsing against the provider-less Playground schema.
+    data = { ...(raw as object), schemaVersion: 2 };
+  }
+  return { ok: true, data };
 }

@@ -12,6 +12,8 @@ interface ModalProps {
 /** Accessible modal dialog: Escape closes, focus is trapped-ish, backdrop click closes. */
 export function Modal({ title, onClose, children, footer, width = 560 }: ModalProps) {
   const ref = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     // Remember what was focused so we can restore it on close (spec §22).
@@ -26,7 +28,7 @@ export function Modal({ title, onClose, children, footer, width = 560 }: ModalPr
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        onClose();
+        onCloseRef.current();
         return;
       }
       // Simple focus trap: keep Tab within the dialog.
@@ -54,7 +56,7 @@ export function Modal({ title, onClose, children, footer, width = 560 }: ModalPr
       window.removeEventListener('keydown', onKey);
       previouslyFocused?.focus?.();
     };
-  }, [onClose]);
+  }, []);
 
   return (
     <div className={styles.backdrop} onMouseDown={onClose}>

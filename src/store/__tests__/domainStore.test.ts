@@ -8,7 +8,8 @@ vi.mock('../../persistence/db', () => ({
   deletePlayground: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { createAgent, createProvider } from '../../domain/factories';
+import { createAgent } from '../../domain/factories';
+import { savePlayground } from '../../persistence/db';
 import { useDomainStore } from '../domainStore';
 
 beforeEach(() => {
@@ -17,31 +18,59 @@ beforeEach(() => {
 });
 
 describe('duplicatePlayground', () => {
-  it('gives the copy fresh playground/agent/provider ids and remaps references', () => {
+  it('gives the copy fresh playground/agent ids but preserves the global provider reference', () => {
     const store = useDomainStore.getState();
     store.newPlayground('Original');
 
-    const provider = createProvider({ displayName: 'P', baseUrl: 'http://localhost:11434' });
-    store.addProvider(provider);
+    const providerId = 'pv_global_1';
     const base = createAgent();
-    store.addAgent(createAgent({ name: 'A', llm: { ...base.llm, providerId: provider.id, model: 'm' } }));
+    store.addAgent(createAgent({ name: 'A', llm: { ...base.llm, providerId, model: 'm' } }));
 
     const original = useDomainStore.getState().playground!;
-    const origProviderId = original.providers[0].id;
-    const origAgentProviderRef = original.agents[0].llm.providerId;
-    expect(origAgentProviderRef).toBe(origProviderId);
+    expect(original.agents[0].llm.providerId).toBe(providerId);
 
     useDomainStore.getState().duplicatePlayground();
     const copy = useDomainStore.getState().playground!;
 
-    // Distinct playground + provider + agent ids (no cross-playground id sharing,
-    // which would let deleting one clear the other's credentials).
+    // Distinct playground + agent ids…
     expect(copy.id).not.toBe(original.id);
-    expect(copy.providers[0].id).not.toBe(origProviderId);
     expect(copy.agents[0].id).not.toBe(original.agents[0].id);
-    // The agent's provider reference is remapped to the copy's provider.
-    expect(copy.agents[0].llm.providerId).toBe(copy.providers[0].id);
+    // …but providers are application-global, so the reference is shared unchanged.
+    expect(copy.agents[0].llm.providerId).toBe(providerId);
     expect(copy.name).toBe('Original (copy)');
+  });
+});
+
+describe('flushPending on playground switch (H2)', () => {
+  it('persists the outgoing playground before switching, keeping its unsaved edits', () => {
+    const store = useDomainStore.getState();
+    store.newPlayground('A');
+    const a = createAgent({ name: 'Agent A' });
+    store.addAgent(a); // marks unsaved and arms the debounced save
+    expect(useDomainStore.getState().saveStatus).toBe('unsaved');
+    const outgoing = useDomainStore.getState().playground!;
+    vi.mocked(savePlayground).mockClear();
+
+    // Switch within the debounce window — A's edits must be flushed, not dropped.
+    store.newPlayground('B');
+
+    expect(savePlayground).toHaveBeenCalledTimes(1);
+    const saved = vi.mocked(savePlayground).mock.calls[0][0];
+    expect(saved.id).toBe(outgoing.id);
+    expect(saved.agents.find((x) => x.id === a.id)).toBeDefined();
+    // The new playground is active afterwards.
+    expect(useDomainStore.getState().playground!.name).toBe('B');
+  });
+
+  it('does not flush when there are no unsaved edits', () => {
+    const store = useDomainStore.getState();
+    store.newPlayground('A');
+    useDomainStore.setState({ saveStatus: 'saved' });
+    vi.mocked(savePlayground).mockClear();
+
+    store.loadPlayground('nonexistent'); // a switch entry point
+
+    expect(savePlayground).not.toHaveBeenCalled();
   });
 });
 
@@ -59,19 +88,16 @@ describe('addConnection', () => {
   });
 });
 
-describe('removeProvider', () => {
-  it('unassigns the provider from agents that used it', () => {
+describe('unassignProvider', () => {
+  it('clears the provider reference from agents in the active playground', () => {
     const store = useDomainStore.getState();
     store.newPlayground('P');
-    const provider = createProvider({ displayName: 'P' });
-    store.addProvider(provider);
+    const providerId = 'pv_x';
     const base = createAgent();
-    const a = createAgent({ name: 'A', llm: { ...base.llm, providerId: provider.id, model: 'm' } });
-    store.addAgent(a);
+    store.addAgent(createAgent({ name: 'A', llm: { ...base.llm, providerId, model: 'm' } }));
 
-    store.removeProvider(provider.id);
+    store.unassignProvider(providerId);
     const pg = useDomainStore.getState().playground!;
-    expect(pg.providers).toHaveLength(0);
     expect(pg.agents[0].llm.providerId).toBeNull();
   });
 });

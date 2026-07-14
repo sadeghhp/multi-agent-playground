@@ -1,14 +1,17 @@
 import { useMemo } from 'react';
 import { useDomainStore } from '../store/domainStore';
+import { useProviderStore } from '../store/providerStore';
 import { useUiStore } from '../store/uiStore';
 import { Modal } from './Modal';
 import { validateForRun, hasBlockingErrors, reachableFrom } from '../orchestrator/validate';
 import { startRun } from '../orchestrator/orchestrator';
+import { parseBoundedInt } from './inputUtils';
 import styles from './RunDialog.module.css';
 
 export function RunDialog() {
   const playground = useDomainStore((s) => s.playground);
   const updateConversation = useDomainStore((s) => s.updateConversation);
+  const providers = useProviderStore((s) => s.providers);
   const setPanel = useUiStore((s) => s.setPanel);
 
   const conversation = playground?.conversation;
@@ -24,7 +27,10 @@ export function RunDialog() {
     return new Set(enabledAgents.filter((a) => !withIncoming.has(a.id)).map((a) => a.id));
   }, [playground, enabledAgents]);
 
-  const issues = useMemo(() => (playground ? validateForRun(playground) : []), [playground]);
+  const issues = useMemo(
+    () => (playground ? validateForRun(playground, providers) : []),
+    [playground, providers],
+  );
   const blocking = hasBlockingErrors(issues);
 
   if (!playground || !conversation) return null;
@@ -105,7 +111,10 @@ export function RunDialog() {
             type="number"
             min={1}
             value={conversation.maxTotalTurns}
-            onChange={(e) => updateConversation({ maxTotalTurns: Number(e.target.value) })}
+            onChange={(e) => {
+              const n = parseBoundedInt(e.target.value, 1);
+              if (n !== null) updateConversation({ maxTotalTurns: n });
+            }}
           />
         </div>
         <div className="field">
@@ -115,7 +124,10 @@ export function RunDialog() {
             type="number"
             min={1}
             value={conversation.maxResponsesPerAgent}
-            onChange={(e) => updateConversation({ maxResponsesPerAgent: Number(e.target.value) })}
+            onChange={(e) => {
+              const n = parseBoundedInt(e.target.value, 1);
+              if (n !== null) updateConversation({ maxResponsesPerAgent: n });
+            }}
           />
         </div>
       </div>

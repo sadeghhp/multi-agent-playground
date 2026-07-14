@@ -1,5 +1,6 @@
 import { useRef } from 'react';
 import { useDomainStore } from '../store/domainStore';
+import { useProviderStore } from '../store/providerStore';
 import { useUiStore } from '../store/uiStore';
 import { useRuntimeStore } from '../store/runtimeStore';
 import { exportToJson, importFromJson } from '../persistence/serialization';
@@ -21,6 +22,8 @@ export function Toolbar() {
   const newPlayground = useDomainStore((s) => s.newPlayground);
   const replacePlayground = useDomainStore((s) => s.replacePlayground);
   const flushSave = useDomainStore((s) => s.flushSave);
+  const providers = useProviderStore((s) => s.providers);
+  const mergeProviders = useProviderStore((s) => s.mergeProviders);
 
   const setPanel = useUiStore((s) => s.setPanel);
   const toggleTheme = useUiStore((s) => s.toggleTheme);
@@ -36,7 +39,7 @@ export function Toolbar() {
   // saved conversation settings, without reopening the setup dialog.
   function handleRerun() {
     if (!playground) return;
-    if (hasBlockingErrors(validateForRun(playground))) {
+    if (hasBlockingErrors(validateForRun(playground, providers))) {
       showToast('warn', 'Fix configuration issues before running. Opening run setup.');
       setPanel('run');
       return;
@@ -48,7 +51,7 @@ export function Toolbar() {
   async function handleExport() {
     if (!playground) return;
     await flushSave();
-    const json = exportToJson(playground);
+    const json = exportToJson(playground, providers);
     const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -66,6 +69,9 @@ export function Toolbar() {
       showToast('error', result.error ?? 'Import failed.');
       return;
     }
+    // Merge the file's providers into the global registry (deduped by id) so the
+    // imported agents' providerId references resolve.
+    if (result.providers?.length) mergeProviders(result.providers);
     replacePlayground(result.playground);
     if (result.warnings.length) {
       showToast('warn', result.warnings[0]);

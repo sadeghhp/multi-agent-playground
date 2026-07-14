@@ -6,20 +6,31 @@ function playgroundWithSecret() {
   const pg = createPlayground('Test');
   const provider = createProvider({ displayName: 'Local', baseUrl: 'http://localhost:11434', apiKey: 'super-secret' });
   const agent = createAgent({ name: 'A', role: 'r', systemInstruction: 'do', llm: { ...createAgent().llm, providerId: provider.id, model: 'm' } });
-  pg.providers.push(provider);
   pg.agents.push(agent);
-  return { pg, provider, agent };
+  return { pg, providers: [provider], provider, agent };
 }
 
 describe('export', () => {
-  it('excludes API keys from the export object and JSON string', () => {
-    const { pg } = playgroundWithSecret();
-    const exported = toExport(pg);
+  it('re-embeds the referenced providers, key-stripped', () => {
+    const { pg, providers, provider } = playgroundWithSecret();
+    const exported = toExport(pg, providers);
+    expect(exported.providers).toHaveLength(1);
+    expect(exported.providers[0].id).toBe(provider.id);
     expect((exported.providers[0] as Record<string, unknown>).apiKey).toBeUndefined();
+  });
 
-    const json = exportToJson(pg);
+  it('excludes API keys from the export JSON string', () => {
+    const { pg, providers } = playgroundWithSecret();
+    const json = exportToJson(pg, providers);
     expect(json).not.toContain('super-secret');
     expect(json).toContain('"schemaVersion"');
+  });
+
+  it('only embeds providers actually referenced by an agent', () => {
+    const { pg, providers } = playgroundWithSecret();
+    const unused = createProvider({ displayName: 'Unused', baseUrl: 'http://localhost:9999' });
+    const exported = toExport(pg, [...providers, unused]);
+    expect(exported.providers.map((p) => p.id)).not.toContain(unused.id);
   });
 });
 
@@ -42,32 +53,34 @@ describe('import', () => {
     expect(res.error).toMatch(/invalid playground/i);
   });
 
-  it('round-trips a valid export and preserves references when not copying', () => {
-    const { pg, provider, agent } = playgroundWithSecret();
-    const json = exportToJson(pg);
+  it('round-trips a valid export, returning providers separately and preserving references', () => {
+    const { pg, providers, provider, agent } = playgroundWithSecret();
+    const json = exportToJson(pg, providers);
     const res = importFromJson(json, false);
     expect(res.ok).toBe(true);
-    expect(res.playground!.providers[0].id).toBe(provider.id);
+    // Providers come back on the result, not on the playground.
+    expect(res.playground).not.toHaveProperty('providers');
+    expect(res.providers!.map((p) => p.id)).toContain(provider.id);
     expect(res.playground!.agents[0].llm.providerId).toBe(agent.llm.providerId);
   });
 
-  it('regenerates ids as a copy while keeping internal references consistent', () => {
-    const { pg, provider, agent } = playgroundWithSecret();
+  it('regenerates playground/agent/connection ids as a copy but preserves provider ids', () => {
+    const { pg, providers, provider, agent } = playgroundWithSecret();
     // add a connection to verify remap
     const other = createAgent({ name: 'B' });
     pg.agents.push(other);
     pg.connections.push({ id: 'cn_x', source: agent.id, target: other.id, enabled: true, type: 'conversation', priority: 0 });
 
-    const json = exportToJson(pg);
+    const json = exportToJson(pg, providers);
     const res = importFromJson(json, true);
     expect(res.ok).toBe(true);
     const copy = res.playground!;
 
-    // ids changed
+    // playground id changed…
     expect(copy.id).not.toBe(pg.id);
-    expect(copy.providers[0].id).not.toBe(provider.id);
-    // agent still points at the remapped provider
-    expect(copy.agents[0].llm.providerId).toBe(copy.providers[0].id);
+    // …but provider ids are stable so the merge can dedupe and refs still resolve.
+    expect(res.providers!.map((p) => p.id)).toContain(provider.id);
+    expect(copy.agents.find((a) => a.name === 'A')!.llm.providerId).toBe(provider.id);
     // connection endpoints remapped to the new agent ids
     const conn = copy.connections[0];
     const agentIds = copy.agents.map((a) => a.id);
@@ -75,10 +88,10 @@ describe('import', () => {
     expect(agentIds).toContain(conn.target);
   });
 
-  it('warns about agents referencing a missing provider', () => {
+  it('warns about agents referencing a provider not in the file', () => {
     const pg = createPlayground('W');
     pg.agents.push(createAgent({ name: 'A', llm: { ...createAgent().llm, providerId: 'pv_missing', model: 'm' } }));
-    const res = importFromJson(exportToJson(pg), false);
+    const res = importFromJson(exportToJson(pg, []), false);
     expect(res.ok).toBe(true);
     expect(res.warnings.join(' ')).toMatch(/provider/i);
   });

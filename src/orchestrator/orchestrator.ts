@@ -1,5 +1,5 @@
 import type { Agent, Connection, Playground, TranscriptMessage } from '../domain/schema';
-import { newLogId, newMessageId, newRunId } from '../domain/ids';
+import { newErrorId, newLogId, newMessageId, newRunId } from '../domain/ids';
 import { useDomainStore } from '../store/domainStore';
 import { useProviderStore } from '../store/providerStore';
 import { useRuntimeStore } from '../store/runtimeStore';
@@ -41,6 +41,19 @@ function outgoing(pg: Playground, agentId: string): Connection[] {
 
 function responseLimitFor(agent: Agent, pg: Playground): number {
   return Math.min(agent.runtime.maxResponsesPerRun, pg.conversation.maxResponsesPerAgent);
+}
+
+/** Most recent non-empty message from `sourceAgentId`, walked backwards in place. */
+function findLastSourceOutput(
+  transcript: TranscriptMessage[],
+  sourceAgentId: string | null,
+): string | null {
+  if (!sourceAgentId) return null;
+  for (let i = transcript.length - 1; i >= 0; i--) {
+    const m = transcript[i];
+    if (m.agentId === sourceAgentId && m.content) return m.content;
+  }
+  return null;
 }
 
 export function stopRun(): void {
@@ -119,19 +132,17 @@ export async function startRun(): Promise<void> {
 
       if (!provider) {
         recordFailure(agent, turnNumber, newMessageId(), item, 'No provider configured for this agent.', 'run');
-        if (pg.conversation.stopOnError) return finish('error');
+        if (pg.conversation.stopOnError) return finish(runId, 'error');
         continue;
       }
 
       const liveTranscript = useDomainStore.getState().playground!.transcript;
       const history = boundHistory(liveTranscript, agent.runtime.historyWindow);
       // The source agent's most recent output, always available to review/handoff
-      // targets regardless of the history window (spec §12).
-      const sourceOutput = item.sourceAgentId
-        ? [...liveTranscript]
-            .reverse()
-            .find((m) => m.agentId === item.sourceAgentId && m.content)?.content ?? null
-        : null;
+      // targets regardless of the history window (spec §12). Walked backwards
+      // in place rather than cloning+reversing the whole transcript every turn
+      // (which would be O(n) per turn, O(n²) over a long conversation).
+      const sourceOutput = findLastSourceOutput(liveTranscript, item.sourceAgentId);
       const messages = assembleMessages({
         agent,
         conversation: pg.conversation,
@@ -221,7 +232,7 @@ export async function startRun(): Promise<void> {
           error: detail,
         });
         recordFailure(agent, turnNumber, messageId, item, detail, 'agent', provider.displayName, pe);
-        if (pg.conversation.stopOnError) return finish('error');
+        if (pg.conversation.stopOnError) return finish(runId, 'error');
         continue; // skip enqueuing this agent's targets on failure
       }
 
@@ -239,12 +250,19 @@ export async function startRun(): Promise<void> {
       }
     }
 
-    if (useRuntimeStore.getState().status === 'running') finish('completed');
+    if (useRuntimeStore.getState().runId === runId && useRuntimeStore.getState().status === 'running') {
+      finish(runId, 'completed');
+    }
   } catch (err) {
     log('run-error', err instanceof Error ? err.message : 'Unknown run error.');
-    finish('error');
+    finish(runId, 'error');
   } finally {
-    useRuntimeStore.getState().setActive(null, null);
+    // Only clear the active-agent highlight if this run is still the one the
+    // store thinks is current — otherwise a stopped run's late cleanup could
+    // stomp on a newer run's in-flight state (spec §19: one run at a time).
+    if (useRuntimeStore.getState().runId === runId) {
+      useRuntimeStore.getState().setActive(null, null);
+    }
   }
 }
 
@@ -261,6 +279,7 @@ function recordFailure(
   const runtime = useRuntimeStore.getState();
   runtime.setAgentState(agent.id, 'failed');
   runtime.addError({
+    id: newErrorId(),
     level,
     agentId: agent.id,
     summary: `${agent.name} failed`,
@@ -298,8 +317,10 @@ function safeExcerpt(raw: unknown): string | undefined {
   }
 }
 
-function finish(status: 'completed' | 'error') {
+function finish(runId: string, status: 'completed' | 'error') {
   const runtime = useRuntimeStore.getState();
+  // A stale/aborted run's tail must never overwrite a newer run's state.
+  if (runtime.runId !== runId) return;
   runtime.setStatus(status);
   runtime.setActive(null, null);
   log(status === 'completed' ? 'run-completed' : 'run-error', `Run ${status}.`);

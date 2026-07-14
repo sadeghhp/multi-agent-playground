@@ -51,7 +51,7 @@ const LANGUAGE_DIRECTIVE: Record<AgentLanguage, string> = {
   fr: 'Write all of your responses in French. Rédige toutes tes réponses en français.',
 };
 
-/** Build the system prompt text (sections 1–6, 9 of spec §12). */
+/** Build the system prompt text (sections 1–8 of spec §12). */
 export function buildSystemPrompt(ctx: PromptContext): string {
   const { agent } = ctx;
   const sections: string[] = [];
@@ -89,10 +89,10 @@ export function buildSystemPrompt(ctx: PromptContext): string {
     }
   }
 
-  // 8. Language directive — governs both what the agent asks and answers.
+  // 7. Language directive — governs both what the agent asks and answers.
   sections.push(LANGUAGE_DIRECTIVE[agent.language]);
 
-  // 9. Output constraints (final-response instruction)
+  // 8. Output constraints (final-response instruction)
   if (agent.runtime.finalResponseInstruction?.trim()) {
     sections.push(`Output constraint: ${agent.runtime.finalResponseInstruction.trim()}`);
   }
@@ -100,7 +100,7 @@ export function buildSystemPrompt(ctx: PromptContext): string {
   return sections.join('\n');
 }
 
-/** Build the user-turn content (sections 7–8 of spec §12). */
+/** Build the user-turn content (the task/subject portion of spec §12, sent as the user message). */
 export function buildTaskPrompt(ctx: PromptContext): string {
   const { conversation, agent } = ctx;
   const sections: string[] = [];

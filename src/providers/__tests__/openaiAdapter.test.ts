@@ -23,6 +23,28 @@ function sseResponse(chunks: string[]): Response {
   });
 }
 
+/**
+ * An SSE response that sends `initialChunks` then goes silent — it never
+ * closes or errors on its own. The stream only ever settles if `signal`
+ * (the same signal the mocked `fetch` receives) aborts, mirroring how a real
+ * network connection is torn down when its request is aborted mid-stream.
+ */
+function stalledSseResponse(initialChunks: string[], signal: AbortSignal): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const c of initialChunks) controller.enqueue(encoder.encode(c));
+      const onAbort = () => controller.error(signal.reason ?? new DOMException('aborted', 'AbortError'));
+      if (signal.aborted) onAbort();
+      else signal.addEventListener('abort', onAbort, { once: true });
+    },
+  });
+  return new Response(stream, {
+    status: 200,
+    headers: { 'Content-Type': 'text/event-stream' },
+  });
+}
+
 const sampleBody = {
   model: 'test-model',
   choices: [{ message: { role: 'assistant', content: 'hello world' }, finish_reason: 'stop' }],
@@ -84,6 +106,26 @@ describe('sendChat', () => {
     const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
     expect(headers['x-api-key']).toBe('sk-raw');
     expect(headers.Authorization).toBeUndefined();
+  });
+
+  it('falls back to Authorization when authHeaderName is a forbidden header name (L-1 regression)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse(sampleBody));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = createProvider({
+      baseUrl: 'https://api.example.com',
+      authMethod: 'bearer',
+      authHeaderName: 'User-Agent',
+      apiKey: 'secret-key',
+    });
+
+    await sendChat(provider, { model: 'm', messages: [{ role: 'user', content: 'hi' }] });
+
+    const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
+    // The forbidden name must never be used to carry the key...
+    expect(headers['User-Agent']).toBeUndefined();
+    // ...it falls back to the safe default instead.
+    expect(headers.Authorization).toBe('Bearer secret-key');
   });
 
   it('strips forbidden custom headers but keeps allowed ones', async () => {
@@ -203,5 +245,90 @@ describe('sendChat', () => {
     await expect(
       sendChat(provider, { model: 'm', messages: [{ role: 'user', content: 'hi' }] }),
     ).rejects.toMatchObject({ kind: 'unsupported-response' });
+  });
+
+  it('surfaces an in-band SSE error instead of silently returning empty text', async () => {
+    const sse = [
+      'data: {"model":"test-model","choices":[{"delta":{"content":"partial"}}]}\n\n',
+      'data: {"error":{"message":"context length exceeded"}}\n\n',
+    ];
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse(sse)));
+    const provider = createProvider({ baseUrl: 'https://api.example.com', apiKey: 'k' });
+
+    await expect(
+      sendChat(
+        provider,
+        { model: 'test-model', messages: [{ role: 'user', content: 'hi' }] },
+        { onToken: () => {} },
+      ),
+    ).rejects.toMatchObject({ kind: 'server-error', detail: 'context length exceeded' });
+  });
+
+  it('times out a stream that stalls mid-response instead of hanging forever', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((_url: string, init: RequestInit) =>
+        Promise.resolve(
+          stalledSseResponse(
+            ['data: {"model":"test-model","choices":[{"delta":{"content":"partial"}}]}\n\n'],
+            init.signal!,
+          ),
+        ),
+      ),
+    );
+    const provider = createProvider({ baseUrl: 'https://api.example.com', apiKey: 'k' });
+
+    await expect(
+      sendChat(
+        provider,
+        { model: 'test-model', messages: [{ role: 'user', content: 'hi' }] },
+        { onToken: () => {}, timeoutMs: 30 },
+      ),
+    ).rejects.toMatchObject({ kind: 'timeout' });
+  });
+
+  it('does not leak abort listeners on a reused long-lived caller signal (L-2 regression)', async () => {
+    // Force the AbortSignal.any-less fallback merge path, which is the one
+    // that historically leaked a listener per call on a signal that never aborts.
+    const originalAny = AbortSignal.any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (AbortSignal as any).any;
+    try {
+      // A fresh Response per call — a Response body can only be read once, and
+      // this test calls sendChat repeatedly against the same mock.
+      vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(okResponse(sampleBody))));
+      const provider = createProvider({ baseUrl: 'https://api.example.com', apiKey: 'k' });
+
+      // A long-lived signal reused across many requests, e.g. a per-conversation
+      // "stop" controller — it never aborts over the life of this test.
+      const controller = new AbortController();
+      let added = 0;
+      let removed = 0;
+      const originalAdd = controller.signal.addEventListener.bind(controller.signal);
+      const originalRemove = controller.signal.removeEventListener.bind(controller.signal);
+      controller.signal.addEventListener = ((...args: Parameters<typeof originalAdd>) => {
+        added += 1;
+        return originalAdd(...args);
+      }) as typeof originalAdd;
+      controller.signal.removeEventListener = ((...args: Parameters<typeof originalRemove>) => {
+        removed += 1;
+        return originalRemove(...args);
+      }) as typeof originalRemove;
+
+      for (let i = 0; i < 5; i++) {
+        await sendChat(
+          provider,
+          { model: 'm', messages: [{ role: 'user', content: 'hi' }] },
+          { signal: controller.signal },
+        );
+      }
+
+      expect(added).toBe(5);
+      // Every listener this attached to the caller's signal must have been
+      // detached again once its own request settled — none left dangling.
+      expect(removed).toBe(5);
+    } finally {
+      if (originalAny) AbortSignal.any = originalAny;
+    }
   });
 });

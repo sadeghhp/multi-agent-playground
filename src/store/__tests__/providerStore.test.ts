@@ -12,6 +12,7 @@ vi.mock('../../persistence/db', () => ({
 }));
 
 import { createAgent, createProvider } from '../../domain/factories';
+import { loadAllProviders, saveProvider } from '../../persistence/db';
 import { useDomainStore } from '../domainStore';
 import { useProviderStore } from '../providerStore';
 
@@ -87,5 +88,61 @@ describe('mergeProviders', () => {
     // The existing entry is untouched (dedupe by id, no overwrite).
     expect(providers.find((p) => p.id === known.id)?.displayName).toBe('Known');
     expect(providers.some((p) => p.id === fresh.id)).toBe(true);
+  });
+});
+
+describe('flush race safety (M-1 regression)', () => {
+  it('does not resave a provider removed while an earlier save in the same debounce batch is in flight', async () => {
+    // The debounce timer/dirty-id set are module-scoped in providerStore.ts,
+    // shared across every test in this file — let any leftover flush from an
+    // earlier test settle first so it can't pollute this test's assertions.
+    await new Promise((r) => setTimeout(r, 450));
+    vi.mocked(saveProvider).mockClear();
+
+    const a = createProvider({ displayName: 'A', baseUrl: 'http://localhost:5' });
+    const b = createProvider({ displayName: 'B', baseUrl: 'http://localhost:6' });
+
+    let resolveA: (() => void) | undefined;
+    vi.mocked(saveProvider).mockImplementation((p) => {
+      if (p.id === a.id) return new Promise<void>((resolve) => (resolveA = resolve));
+      return Promise.resolve();
+    });
+
+    const store = useProviderStore.getState();
+    store.addProvider(a);
+    store.addProvider(b); // one debounced flush batch covers both a and b
+
+    // Wait past the real debounce so flush() starts and calls saveProvider(a)
+    // first — that call is now pending (held open via resolveA).
+    await new Promise((r) => setTimeout(r, 450));
+    expect(resolveA).toBeDefined();
+
+    // Remove b while a's save is still in flight — the exact race window.
+    store.removeProvider(b.id);
+
+    // Let a's save resolve so the flush loop proceeds to (what was) b.
+    resolveA?.();
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(vi.mocked(saveProvider)).not.toHaveBeenCalledWith(
+      expect.objectContaining({ id: b.id }),
+    );
+
+    vi.mocked(saveProvider).mockReset();
+    vi.mocked(saveProvider).mockResolvedValue(undefined);
+  });
+});
+
+describe('hydrate resilience (L-10 regression)', () => {
+  it('does not throw and degrades to an empty registry when loadAllProviders rejects', async () => {
+    vi.mocked(loadAllProviders).mockRejectedValueOnce(new Error('IDB unavailable'));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await expect(useProviderStore.getState().hydrate()).resolves.toBeUndefined();
+    expect(useProviderStore.getState().providers).toEqual([]);
+    expect(useProviderStore.getState().hydrated).toBe(true);
+
+    vi.mocked(loadAllProviders).mockResolvedValue([]);
+    vi.restoreAllMocks();
   });
 });

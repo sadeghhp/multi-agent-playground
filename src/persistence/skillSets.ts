@@ -47,7 +47,9 @@ export interface SkillSetImportResult {
  * id so the result can be appended anywhere without collisions.
  */
 export function importSkillSet(text: string): SkillSetImportResult {
-  if (text.length > MAX_IMPORT_BYTES) {
+  // See serialization.ts's importFromJson: measure actual bytes, not UTF-16
+  // code units, so multi-byte content doesn't undercount the real file size.
+  if (new TextEncoder().encode(text).length > MAX_IMPORT_BYTES) {
     return { ok: false, skills: [], error: 'File is too large to import.' };
   }
 

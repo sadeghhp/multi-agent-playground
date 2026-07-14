@@ -67,9 +67,13 @@ export function BottomPanel() {
   function scrollToBottom(behavior: ScrollBehavior = 'auto') {
     const el = contentRef.current;
     if (!el) return;
-    // el.scrollTo isn't implemented in jsdom; fall back to a direct assignment.
-    if (typeof el.scrollTo === 'function') el.scrollTo({ top: el.scrollHeight, behavior });
-    else el.scrollTop = el.scrollHeight;
+    // Smooth scrolling uses scrollTo when available; the default 'auto' path sets
+    // scrollTop directly so it works in jsdom (which lacks a functional scrollTo).
+    if (behavior === 'smooth' && typeof el.scrollTo === 'function') {
+      el.scrollTo({ top: el.scrollHeight, behavior });
+    } else {
+      el.scrollTop = el.scrollHeight;
+    }
   }
 
   function handleScroll() {
@@ -151,6 +155,7 @@ export function BottomPanel() {
       {!collapsed && (
         <div
           className={styles.content}
+          data-testid="bottom-panel-content"
           ref={contentRef}
           onScroll={handleScroll}
           role="tabpanel"
@@ -196,8 +201,8 @@ export function BottomPanel() {
             errors.length === 0 ? (
               <p className={styles.empty}>No errors.</p>
             ) : (
-              errors.map((err, i) => (
-                <div key={i} className={styles.errorItem}>
+              errors.map((err) => (
+                <div key={err.id} className={styles.errorItem}>
                   <strong>[{err.level}] {err.summary}</strong>
                   {err.provider && <span className="muted"> · {err.provider}</span>}
                   {err.retryEligible && <span className="chip"> retry-eligible</span>}

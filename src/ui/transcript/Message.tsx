@@ -59,8 +59,14 @@ export function Message({ msg, color }: { msg: TranscriptMessage; color?: string
             aria-label="Copy response"
             title="Copy"
             onClick={() => {
-              void navigator.clipboard?.writeText(msg.content);
-              showToast('info', 'Copied response.');
+              if (!navigator.clipboard) {
+                showToast('error', 'Clipboard is not available in this context.');
+                return;
+              }
+              navigator.clipboard.writeText(msg.content).then(
+                () => showToast('info', 'Copied response.'),
+                () => showToast('error', 'Could not copy the response.'),
+              );
             }}
           >
             ⧉
@@ -76,7 +82,7 @@ export function Message({ msg, color }: { msg: TranscriptMessage; color?: string
         </div>
       )}
       {expanded && (
-        <div className={styles.msgBody} dir="auto">
+        <div className={styles.msgBody}>
           {msg.status === 'failed' ? (
             <span className={styles.errText}>Failed: {msg.error}</span>
           ) : (

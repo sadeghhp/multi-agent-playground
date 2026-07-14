@@ -231,6 +231,9 @@ export const TranscriptMessage = z.object({
   agentName: z.string(),
   agentDeleted: z.boolean().default(false),
   role: z.string().default(''),
+  /** Snapshot of the agent's language, so the transcript can render RTL/LTR
+   * correctly even after the agent is deleted or its language changes. */
+  language: AgentLanguage.default('en'),
   model: z.string().default(''),
   providerId: z.string().nullable().default(null),
   content: z.string().default(''),

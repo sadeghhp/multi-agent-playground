@@ -21,9 +21,35 @@
   --warn-text: #854d0e;
   --warn-border: #fde047;
   --ok: #16a34a;
+  --ok-bg: #dcfce7;
+  --ok-border: #86efac;
+  --ok-text: #166534;
+  --overlay: rgba(0, 0, 0, 0.45);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.08);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.12);
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Spacing scale (theme-independent) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  /* Radius scale */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-pill: 999px;
+
+  /* Type scale */
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fw-medium: 500;
+  --fw-semibold: 600;
 }
 
 :root[data-theme='dark'] {
@@ -48,6 +74,10 @@
   --warn-text: #fde047;
   --warn-border: #665420;
   --ok: #4ade80;
+  --ok-bg: #14321f;
+  --ok-border: #166534;
+  --ok-text: #4ade80;
+  --overlay: rgba(0, 0, 0, 0.6);
 }
 
 * {
@@ -86,6 +116,35 @@ button.primary {
 }
 button.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
 button.danger { color: var(--danger); border-color: var(--danger); background: transparent; }
+button.danger:hover:not(:disabled) { background: var(--danger-bg); }
+
+/* Low-emphasis neutral action */
+button.secondary {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+button.secondary:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+
+/* Borderless action, for dense toolbars */
+button.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+button.ghost:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+
+/* Square icon-only button with a consistent hit area */
+button.icon {
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+button.icon.ghost { border-color: transparent; }
 
 /* Visible focus everywhere (spec §22) */
 :focus-visible {
@@ -125,6 +184,51 @@ a { color: var(--accent); }
 .muted { color: var(--text-muted); }
 .mono { font-family: var(--mono); font-size: 12px; }
 
+/* Shared rendered-Markdown styling for agent output (transcript + timeline). */
+.markdown { line-height: 1.55; word-break: break-word; }
+.markdown > :first-child { margin-top: 0; }
+.markdown > :last-child { margin-bottom: 0; }
+.markdown p { margin: 0 0 0.6em; }
+.markdown h1, .markdown h2, .markdown h3, .markdown h4 {
+  margin: 1em 0 0.4em;
+  line-height: 1.3;
+  font-weight: var(--fw-semibold);
+}
+.markdown h1 { font-size: 1.35em; }
+.markdown h2 { font-size: 1.2em; }
+.markdown h3 { font-size: 1.08em; }
+.markdown h4 { font-size: 1em; }
+.markdown ul, .markdown ol { margin: 0 0 0.6em; padding-inline-start: 1.4em; }
+.markdown li { margin: 0.15em 0; }
+.markdown li > p { margin: 0; }
+.markdown a { color: var(--accent); text-decoration: underline; }
+.markdown blockquote {
+  margin: 0 0 0.6em;
+  padding: 2px 0 2px 12px;
+  border-inline-start: 3px solid var(--border-strong);
+  color: var(--text-muted);
+}
+.markdown code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+  background: var(--surface-2);
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+}
+.markdown pre {
+  margin: 0 0 0.6em;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+}
+.markdown pre code { background: none; padding: 0; font-size: 0.85em; }
+.markdown hr { border: none; border-top: 1px solid var(--border); margin: 0.8em 0; }
+.markdown table { border-collapse: collapse; margin: 0 0 0.6em; font-size: 0.95em; display: block; overflow-x: auto; }
+.markdown th, .markdown td { border: 1px solid var(--border); padding: 4px 8px; text-align: start; }
+.markdown th { background: var(--surface-2); font-weight: var(--fw-semibold); }
+
 .warning-banner {
   background: var(--warn-bg);
   color: var(--warn-text);
@@ -132,4 +236,14 @@ a { color: var(--accent); }
   border-radius: 6px;
   padding: 8px 10px;
   font-size: 12px;
+}
+
+/* Honor the OS "reduce motion" setting globally (spec §22). */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }

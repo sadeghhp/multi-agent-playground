@@ -34,6 +34,7 @@ export function AgentInspector({ agent }: { agent: Agent }) {
   const selectConnection = useUiStore((s) => s.selectConnection);
   const clearSelection = useUiStore((s) => s.clearSelection);
   const showToast = useUiStore((s) => s.showToast);
+  const requestConfirm = useUiStore((s) => s.requestConfirm);
   const saveToLibrary = useAgentLibraryStore((s) => s.saveAgent);
   const isRunning = useRuntimeStore((s) => s.status === 'running');
 
@@ -223,15 +224,18 @@ export function AgentInspector({ agent }: { agent: Agent }) {
     showToast('info', `Saved "${agent.name}" to the agent library.`);
   }
 
-  function handleDelete() {
-    const hasHistory = playground?.transcript.some((m) => m.agentId === agent.id) ?? false;
+  async function handleDelete() {
     const hasConnections =
       playground?.connections.some((c) => c.source === agent.id || c.target === agent.id) ?? false;
-    if (hasHistory || hasConnections) {
-      if (!window.confirm(`Delete "${agent.name}"? Its connections will be removed. Transcript history is preserved.`)) {
-        return;
-      }
-    }
+    const ok = await requestConfirm({
+      title: 'Delete agent',
+      message: hasConnections
+        ? `Delete "${agent.name}"? Its connections will be removed. Transcript history is preserved.`
+        : `Delete "${agent.name}"? Transcript history is preserved.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
     remove(agent.id);
     clearSelection();
   }

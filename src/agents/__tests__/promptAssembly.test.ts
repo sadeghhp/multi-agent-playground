@@ -18,6 +18,7 @@ function msg(agentId: string, agentName: string, content: string, turn: number):
     agentName,
     agentDeleted: false,
     role: '',
+    language: 'en',
     model: 'm',
     providerId: null,
     content,

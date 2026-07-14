@@ -18,7 +18,7 @@ import { BottomPanel } from '../BottomPanel';
 function msg(id: string): TranscriptMessage {
   return {
     id, turn: 1, agentId: null, agentName: 'Agent', agentDeleted: false,
-    role: '', model: '', providerId: null, content: `content ${id}`, status: 'completed',
+    role: '', language: 'en', model: '', providerId: null, content: `content ${id}`, status: 'completed',
     sourceAgentId: null, connectionType: null, timestamp: 1_700_000_000_000,
   };
 }

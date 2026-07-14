@@ -97,30 +97,35 @@ export function Toolbar() {
       </div>
 
       <div className={styles.right}>
-        <button type="button" onClick={() => newPlayground('Untitled Playground')} disabled={isRunning}>
-          New
-        </button>
-        <button type="button" onClick={() => setPanel('playgrounds')}>Open</button>
-        <button type="button" onClick={() => fileInput.current?.click()} disabled={isRunning}>
-          Import
-        </button>
-        <button type="button" onClick={handleExport} disabled={!playground}>
-          Export
-        </button>
+        <div className={styles.group} role="group" aria-label="Playground file actions">
+          <button type="button" className="secondary" onClick={() => newPlayground('Untitled Playground')} disabled={isRunning}>
+            New
+          </button>
+          <button type="button" className="secondary" onClick={() => setPanel('playgrounds')}>Open</button>
+          <button type="button" className="secondary" onClick={() => fileInput.current?.click()} disabled={isRunning}>
+            Import
+          </button>
+          <button type="button" className="secondary" onClick={handleExport} disabled={!playground}>
+            Export
+          </button>
+        </div>
         <span className={styles.sep} />
-        <button type="button" onClick={() => setPanel('providers')}>Providers</button>
-        <button type="button" onClick={() => setPanel('skills')} disabled={!playground}>Skills</button>
-        <button
-          type="button"
-          onClick={() => setPanel('timeline')}
-          disabled={!playground}
-          title="View the conversation as a timeline"
-        >
-          Timeline
-        </button>
-        <button type="button" onClick={() => clearTranscript()} disabled={isRunning}>
-          Clear chat
-        </button>
+        <div className={styles.group} role="group" aria-label="Manage">
+          <button type="button" className="secondary" onClick={() => setPanel('providers')}>Providers</button>
+          <button type="button" className="secondary" onClick={() => setPanel('skills')} disabled={!playground}>Skills</button>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => setPanel('timeline')}
+            disabled={!playground}
+            title="View the conversation as a timeline"
+          >
+            Timeline
+          </button>
+          <button type="button" className="secondary" onClick={() => clearTranscript()} disabled={isRunning}>
+            Clear chat
+          </button>
+        </div>
         <span className={styles.sep} />
         {isRunning ? (
           <button type="button" className="danger" onClick={() => stopRun()}>
@@ -129,7 +134,7 @@ export function Toolbar() {
         ) : (
           <>
             {(playground?.transcript.length ?? 0) > 0 && (
-              <button type="button" onClick={handleRerun} title="Clear transcript and run again">
+              <button type="button" className="secondary" onClick={handleRerun} title="Clear transcript and run again">
                 Rerun
               </button>
             )}
@@ -138,7 +143,7 @@ export function Toolbar() {
             </button>
           </>
         )}
-        <button type="button" aria-label="Toggle theme" onClick={toggleTheme} title="Toggle theme">
+        <button type="button" className="icon ghost" aria-label="Toggle theme" onClick={toggleTheme} title="Toggle theme">
           {theme === 'dark' ? '☀' : '☾'}
         </button>
       </div>

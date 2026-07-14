@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useDomainStore } from './store/domainStore';
+import { useProviderStore } from './store/providerStore';
 import { useUiStore } from './store/uiStore';
 import { getSelectedPlaygroundId } from './store/prefs';
 import { Toolbar } from './ui/Toolbar';
@@ -18,6 +19,7 @@ export default function App() {
   const openPanel = useUiStore((s) => s.openPanel);
   const playground = useDomainStore((s) => s.playground);
   const hydrate = useDomainStore((s) => s.hydrate);
+  const hydrateProviders = useProviderStore((s) => s.hydrate);
   const loadPlayground = useDomainStore((s) => s.loadPlayground);
   const newPlayground = useDomainStore((s) => s.newPlayground);
 
@@ -29,7 +31,9 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      await hydrate();
+      // Providers are application-global; load the registry before any playground
+      // so agent/provider references resolve on first paint.
+      await Promise.all([hydrate(), hydrateProviders()]);
       if (cancelled) return;
       const selected = getSelectedPlaygroundId();
       if (selected) {

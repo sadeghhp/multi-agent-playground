@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { Agent, ConnectionType } from '../../domain/schema';
 import { useDomainStore } from '../../store/domainStore';
+import { useProviderStore } from '../../store/providerStore';
 import { useUiStore } from '../../store/uiStore';
 import { useRuntimeStore } from '../../store/runtimeStore';
 import { newConnectionId, newSkillId } from '../../domain/ids';
@@ -27,7 +28,7 @@ export function AgentInspector({ agent }: { agent: Agent }) {
   const [newTarget, setNewTarget] = useState('');
   const [newType, setNewType] = useState<ConnectionType>('conversation');
 
-  const providers = playground.providers;
+  const providers = useProviderStore((s) => s.providers);
   const selectedProvider = providers.find((p) => p.id === agent.llm.providerId);
 
   // Outgoing connections + which agents are still available as new targets.
@@ -51,8 +52,8 @@ export function AgentInspector({ agent }: { agent: Agent }) {
   }
 
   const agentIssues = useMemo(
-    () => validateForRun(playground).filter((i) => i.agentId === agent.id),
-    [playground, agent.id],
+    () => validateForRun(playground, providers).filter((i) => i.agentId === agent.id),
+    [playground, providers, agent.id],
   );
 
   function patch(p: Partial<Agent>) {

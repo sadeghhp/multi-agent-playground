@@ -1,15 +1,16 @@
 import {
   type Playground,
   type Provider,
-  Playground as PlaygroundSchema,
   PlaygroundExport as PlaygroundExportSchema,
 } from '../domain/schema';
-import { newAgentId, newConnectionId, newPlaygroundId, newProviderId } from '../domain/ids';
+import { newAgentId, newConnectionId, newPlaygroundId } from '../domain/ids';
 import { migrateToCurrent } from './migrate';
 
 /**
- * Import/export serialization (spec §15.3, §21). Exports never include API keys;
- * imports are validated, migrated, and (optionally) re-ID'd as a copy.
+ * Import/export serialization (spec §15.3, §21). Providers are application-global
+ * (schema v2), but an exported file re-embeds the providers its agents reference
+ * so the file stays self-contained and portable; imports merge those providers
+ * back into the global registry. Exports never include API keys.
  */
 
 /** Max import size in bytes — guards against oversized/hostile files (spec §21). */
@@ -22,32 +23,50 @@ function stripKey(provider: Provider): Omit<Provider, 'apiKey'> {
   return { ...rest, credentialStorage: 'session' };
 }
 
-/** Produce the credential-free export object (spec §15.3). */
-export function toExport(playground: Playground) {
+/** The subset of the global registry referenced by this playground's agents. */
+function referencedProviders(playground: Playground, providers: Provider[]): Provider[] {
+  const usedIds = new Set(
+    playground.agents.map((a) => a.llm.providerId).filter((id): id is string => Boolean(id)),
+  );
+  return providers.filter((p) => usedIds.has(p.id));
+}
+
+/**
+ * Produce the credential-free export object (spec §15.3): the playground plus the
+ * providers its agents use, key-stripped.
+ */
+export function toExport(playground: Playground, providers: Provider[]) {
   const stripped = {
     ...playground,
-    providers: playground.providers.map(stripKey),
+    providers: referencedProviders(playground, providers).map(stripKey),
   };
   // Validate against the export schema so a stray key can never slip through.
   return PlaygroundExportSchema.parse(stripped);
 }
 
-export function exportToJson(playground: Playground): string {
-  return JSON.stringify(toExport(playground), null, 2);
+export function exportToJson(playground: Playground, providers: Provider[]): string {
+  return JSON.stringify(toExport(playground, providers), null, 2);
 }
 
 export interface ImportResult {
   ok: boolean;
   playground?: Playground;
+  /** Providers embedded in the file, to be merged into the global registry. */
+  providers?: Provider[];
   /** Non-fatal warnings, e.g. agents referencing a missing provider (spec §15.3). */
   warnings: string[];
   error?: string;
 }
 
 /**
- * Parse and validate an imported playground JSON string.
- * When asCopy is true, all ids are regenerated so the import doesn't collide
- * with an existing playground (spec §15.3 "generate new IDs when importing as a copy").
+ * Parse and validate an imported playground JSON string. The embedded providers
+ * are returned separately (as `providers`) for the caller to merge into the
+ * global registry; the returned `playground` carries none.
+ *
+ * When asCopy is true, playground/agent/connection ids are regenerated so the
+ * import doesn't collide with an existing playground (spec §15.3). Provider ids
+ * are deliberately preserved so the merge can dedupe against providers already in
+ * the registry and agents' `providerId` references keep resolving.
  */
 export function importFromJson(text: string, asCopy = true): ImportResult {
   if (text.length > MAX_IMPORT_BYTES) {
@@ -66,7 +85,7 @@ export function importFromJson(text: string, asCopy = true): ImportResult {
     return { ok: false, warnings: [], error: migrated.reason };
   }
 
-  const validated = PlaygroundSchema.safeParse(migrated.data);
+  const validated = PlaygroundExportSchema.safeParse(migrated.data);
   if (!validated.success) {
     const first = validated.error.issues[0];
     return {
@@ -76,9 +95,12 @@ export function importFromJson(text: string, asCopy = true): ImportResult {
     };
   }
 
-  const validatedPg = validated.data;
+  // Split the embedded providers off; the domain Playground carries none.
+  const { providers, ...pgData } = validated.data;
+  const validatedPg = pgData as Playground;
+
   // Warnings describe what will be dropped, so collect them before pruning.
-  const warnings = collectWarnings(validatedPg);
+  const warnings = collectWarnings(validatedPg, providers);
 
   // Always drop dangling connections so the result matches the warning, on both
   // the copy and non-copy paths (regenerateIds also prunes, so this is idempotent).
@@ -88,7 +110,7 @@ export function importFromJson(text: string, asCopy = true): ImportResult {
     playground = regenerateIds(playground);
   }
 
-  return { ok: true, playground, warnings };
+  return { ok: true, playground, providers, warnings };
 }
 
 /** Drop connections whose source or target agent is not present (spec §15.3). */
@@ -101,10 +123,10 @@ export function pruneDanglingConnections(pg: Playground): Playground {
 }
 
 /** Report references that don't resolve, without failing the import (spec §15.3). */
-function collectWarnings(pg: Playground): string[] {
+function collectWarnings(pg: Playground, providers: Provider[]): string[] {
   const warnings: string[] = [];
   const agentIds = new Set(pg.agents.map((a) => a.id));
-  const providerIds = new Set(pg.providers.map((p) => p.id));
+  const providerIds = new Set(providers.map((p) => p.id));
 
   for (const conn of pg.connections) {
     if (!agentIds.has(conn.source) || !agentIds.has(conn.target)) {
@@ -119,28 +141,18 @@ function collectWarnings(pg: Playground): string[] {
   return warnings;
 }
 
-/** Regenerate all ids, keeping internal references consistent (spec §15.3). */
+/**
+ * Regenerate playground/agent/connection ids, keeping internal references
+ * consistent (spec §15.3). Providers are application-global, so `llm.providerId`
+ * references are preserved unchanged.
+ */
 export function regenerateIds(pg: Playground): Playground {
   const agentMap = new Map<string, string>();
-  const providerMap = new Map<string, string>();
-
-  const providers = pg.providers.map((p) => {
-    const id = newProviderId();
-    providerMap.set(p.id, id);
-    return { ...p, id };
-  });
 
   const agents = pg.agents.map((a) => {
     const id = newAgentId();
     agentMap.set(a.id, id);
-    return {
-      ...a,
-      id,
-      llm: {
-        ...a.llm,
-        providerId: a.llm.providerId ? providerMap.get(a.llm.providerId) ?? null : null,
-      },
-    };
+    return { ...a, id };
   });
 
   // Drop connections whose endpoints didn't survive; remap the rest.
@@ -162,7 +174,6 @@ export function regenerateIds(pg: Playground): Playground {
     id: newPlaygroundId(),
     agents,
     connections,
-    providers,
     conversation: { ...pg.conversation, startingAgentId },
     // A fresh copy starts with no transcript history.
     transcript: [],

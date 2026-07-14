@@ -1,26 +1,46 @@
-import { type IDBPDatabase, openDB } from 'idb';
-import { type Playground, Playground as PlaygroundSchema } from '../domain/schema';
+import { type IDBPDatabase, type IDBPTransaction, openDB } from 'idb';
+import {
+  type Playground,
+  type Provider,
+  Playground as PlaygroundSchema,
+  Provider as ProviderSchema,
+} from '../domain/schema';
 import { migrateToCurrent } from './migrate';
 import { clearCredential, loadCredential, saveCredential } from './credentialStore';
 
 /**
- * IndexedDB persistence for full playgrounds (spec §15.1). API keys are stripped
- * from the stored record and kept in the credential store instead (spec §8.4),
- * so the DB blob never contains secrets and session-only keys vanish with the tab.
+ * IndexedDB persistence (spec §15.1). Two object stores:
+ *   - `playgrounds`: full playground records (no providers as of schema v2).
+ *   - `providers`: the application-global provider registry (schema v2). Any
+ *     playground can reference these by id, so providers created once are reused
+ *     everywhere.
+ *
+ * API keys are never written to either store: they're stripped and kept in the
+ * credential store instead (spec §8.4), keyed by provider id, so the DB blob
+ * never contains secrets and session-only keys vanish with the tab.
  */
 
 const DB_NAME = 'multi-agent-playground';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = 'playgrounds';
+const PROVIDER_STORE = 'providers';
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
 function getDb(): Promise<IDBPDatabase> {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(db) {
+      async upgrade(db, oldVersion, _newVersion, tx) {
         if (!db.objectStoreNames.contains(STORE)) {
           db.createObjectStore(STORE, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(PROVIDER_STORE)) {
+          db.createObjectStore(PROVIDER_STORE, { keyPath: 'id' });
+        }
+        // v1 → v2: hoist providers that were embedded in each playground into the
+        // global registry, then strip them from the playground record. Runs once.
+        if (oldVersion > 0 && oldVersion < 2) {
+          await hoistEmbeddedProviders(tx);
         }
       },
     });
@@ -28,30 +48,44 @@ function getDb(): Promise<IDBPDatabase> {
   return dbPromise;
 }
 
-/** Strip API keys before persisting; persist each key to its credential store. */
-function prepareForStorage(pg: Playground): Playground {
-  const providers = pg.providers.map((p) => {
-    if (p.apiKey !== undefined) {
-      saveCredential(p.id, p.apiKey, p.credentialStorage);
+/**
+ * One-time migration: read providers off every stored playground (schema v1),
+ * write them to the global provider store (deduped by id — ids were unique
+ * across playgrounds), and rewrite each playground without its `providers` field
+ * and stamped as v2. Credentials already live in the credential store keyed by
+ * provider id, so hoisting the metadata keeps them resolvable.
+ */
+async function hoistEmbeddedProviders(
+  tx: IDBPTransaction<unknown, string[], 'versionchange'>,
+): Promise<void> {
+  const pgStore = tx.objectStore(STORE);
+  const provStore = tx.objectStore(PROVIDER_STORE);
+  const records = (await pgStore.getAll()) as unknown[];
+  const seen = new Set<string>();
+  for (const rec of records) {
+    if (typeof rec !== 'object' || rec === null) continue;
+    const record = rec as { id?: unknown; providers?: unknown };
+    const providers = Array.isArray(record.providers) ? record.providers : [];
+    for (const p of providers) {
+      const pid = (p as { id?: unknown })?.id;
+      if (typeof pid !== 'string' || seen.has(pid)) continue;
+      seen.add(pid);
+      // Stored records never carried apiKey, but drop it defensively.
+      const { apiKey: _drop, ...rest } = p as Record<string, unknown>;
+      await provStore.put(rest);
     }
-    const { apiKey: _drop, ...rest } = p;
-    return { ...rest };
-  });
-  return { ...pg, providers };
+    const { providers: _providers, ...withoutProviders } = record as Record<string, unknown>;
+    await pgStore.put({ ...withoutProviders, schemaVersion: 2 });
+  }
 }
 
-/** Rehydrate API keys from the credential store after loading. */
-function rehydrate(pg: Playground): Playground {
-  const providers = pg.providers.map((p) => {
-    const apiKey = loadCredential(p.id);
-    return apiKey ? { ...p, apiKey } : p;
-  });
-  return { ...pg, providers };
-}
+// ---------------------------------------------------------------------------
+// Playgrounds
+// ---------------------------------------------------------------------------
 
 export async function savePlayground(pg: Playground): Promise<void> {
   const db = await getDb();
-  await db.put(STORE, prepareForStorage(pg));
+  await db.put(STORE, pg);
 }
 
 export async function loadPlayground(id: string): Promise<Playground | undefined> {
@@ -74,26 +108,13 @@ export async function loadAllPlaygrounds(): Promise<Playground[]> {
 
 export async function deletePlayground(id: string): Promise<void> {
   const db = await getDb();
-  // Best-effort: also clear any stored credentials for this playground's providers.
-  // Read provider ids straight off the raw record so credentials are still cleared
-  // even when the record is too corrupt for parseStored to validate — otherwise the
-  // key is stranded in session/localStorage with no record left to ever clean it up.
-  const raw = await db.get(STORE, id);
-  rawProviderIds(raw).forEach((pid) => clearCredential(pid));
+  // Providers are global as of v2, so deleting a playground must NOT touch
+  // provider records or their credentials — other playgrounds may still use them.
   await db.delete(STORE, id);
 }
 
-/** Defensively pull provider ids from an unvalidated stored record. */
-function rawProviderIds(raw: unknown): string[] {
-  const providers = (raw as { providers?: unknown } | null | undefined)?.providers;
-  if (!Array.isArray(providers)) return [];
-  return providers
-    .map((p) => (p as { id?: unknown })?.id)
-    .filter((pid): pid is string => typeof pid === 'string');
-}
-
 /**
- * Validate a stored record, tolerating corruption (spec §21, §7.7 hardening).
+ * Validate a stored playground record, tolerating corruption (spec §21, §7.7).
  * A single bad record must not crash the whole app — it's skipped and reported.
  */
 function parseStored(raw: unknown): Playground | undefined {
@@ -107,5 +128,50 @@ function parseStored(raw: unknown): Playground | undefined {
     console.warn('Skipping corrupted playground record:', parsed.error.issues[0]?.message);
     return undefined;
   }
-  return rehydrate(parsed.data);
+  return parsed.data;
+}
+
+// ---------------------------------------------------------------------------
+// Providers (application-global registry, schema v2)
+// ---------------------------------------------------------------------------
+
+/** Strip the API key before persisting; route it to the credential store. */
+function prepareProviderForStorage(p: Provider): Omit<Provider, 'apiKey'> {
+  if (p.apiKey !== undefined) {
+    saveCredential(p.id, p.apiKey, p.credentialStorage);
+  }
+  const { apiKey: _drop, ...rest } = p;
+  return rest;
+}
+
+/** Rehydrate the API key from the credential store after loading. */
+function rehydrateProvider(p: Provider): Provider {
+  const apiKey = loadCredential(p.id);
+  return apiKey ? { ...p, apiKey } : p;
+}
+
+export async function saveProvider(p: Provider): Promise<void> {
+  const db = await getDb();
+  await db.put(PROVIDER_STORE, prepareProviderForStorage(p));
+}
+
+export async function loadAllProviders(): Promise<Provider[]> {
+  const db = await getDb();
+  const all = await db.getAll(PROVIDER_STORE);
+  const result: Provider[] = [];
+  for (const raw of all) {
+    const parsed = ProviderSchema.safeParse(raw);
+    if (!parsed.success) {
+      console.warn('Skipping corrupted provider record:', parsed.error.issues[0]?.message);
+      continue;
+    }
+    result.push(rehydrateProvider(parsed.data));
+  }
+  return result;
+}
+
+export async function deleteProvider(id: string): Promise<void> {
+  const db = await getDb();
+  clearCredential(id);
+  await db.delete(PROVIDER_STORE, id);
 }

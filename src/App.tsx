@@ -10,6 +10,7 @@ import { GraphCanvas } from './graph/GraphCanvas';
 import { ProviderManager } from './ui/ProviderManager';
 import { RunDialog } from './ui/RunDialog';
 import { PlaygroundsPanel } from './ui/PlaygroundsPanel';
+import { TimelinePage } from './ui/timeline/TimelinePage';
 import { Toast } from './ui/Toast';
 import styles from './App.module.css';
 
@@ -61,6 +62,7 @@ export default function App() {
       {openPanel === 'providers' && <ProviderManager />}
       {openPanel === 'run' && <RunDialog />}
       {openPanel === 'playgrounds' && <PlaygroundsPanel />}
+      {openPanel === 'timeline' && <TimelinePage />}
       <Toast />
     </div>
   );

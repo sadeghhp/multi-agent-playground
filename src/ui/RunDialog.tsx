@@ -4,6 +4,7 @@ import { useUiStore } from '../store/uiStore';
 import { Modal } from './Modal';
 import { validateForRun, hasBlockingErrors, reachableFrom } from '../orchestrator/validate';
 import { startRun } from '../orchestrator/orchestrator';
+import { parseBoundedInt } from './inputUtils';
 import styles from './RunDialog.module.css';
 
 export function RunDialog() {
@@ -105,7 +106,10 @@ export function RunDialog() {
             type="number"
             min={1}
             value={conversation.maxTotalTurns}
-            onChange={(e) => updateConversation({ maxTotalTurns: Number(e.target.value) })}
+            onChange={(e) => {
+              const n = parseBoundedInt(e.target.value, 1);
+              if (n !== null) updateConversation({ maxTotalTurns: n });
+            }}
           />
         </div>
         <div className="field">
@@ -115,7 +119,10 @@ export function RunDialog() {
             type="number"
             min={1}
             value={conversation.maxResponsesPerAgent}
-            onChange={(e) => updateConversation({ maxResponsesPerAgent: Number(e.target.value) })}
+            onChange={(e) => {
+              const n = parseBoundedInt(e.target.value, 1);
+              if (n !== null) updateConversation({ maxResponsesPerAgent: n });
+            }}
           />
         </div>
       </div>

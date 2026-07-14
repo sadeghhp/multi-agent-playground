@@ -1,17 +1,11 @@
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeSanitize from 'rehype-sanitize';
-import type { AgentLanguage, TranscriptMessage } from '../../domain/schema';
+import type { TranscriptMessage } from '../../domain/schema';
+import { dirForLanguage } from '../../domain/language';
 import { useUiStore } from '../../store/uiStore';
 import { useRuntimeStore } from '../../store/runtimeStore';
 import styles from './Transcript.module.css';
-
-/** Writing direction per agent language — Persian is right-to-left. */
-const LANGUAGE_DIR: Record<AgentLanguage, 'ltr' | 'rtl'> = {
-  en: 'ltr',
-  fa: 'rtl',
-  fr: 'ltr',
-};
 
 /**
  * One transcript message (spec §13.1). Model output is rendered as sanitized
@@ -27,7 +21,7 @@ export function Message({ msg }: { msg: TranscriptMessage }) {
   const time = new Date(msg.timestamp).toLocaleTimeString();
   // Mirror the whole message (header, alignment, body) for RTL languages so
   // Persian output reads naturally right-to-left.
-  const dir = LANGUAGE_DIR[msg.language];
+  const dir = dirForLanguage(msg.language);
 
   return (
     <div className={`${styles.message} ${msg.status === 'failed' ? styles.failed : ''}`} dir={dir}>

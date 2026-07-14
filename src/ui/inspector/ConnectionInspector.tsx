@@ -55,12 +55,12 @@ export function ConnectionInspector({ connection }: { connection: Connection }) 
 
       <div className="field">
         <label htmlFor="cn-label">Label (optional)</label>
-        <input id="cn-label" value={connection.label ?? ''} onChange={(e) => update(connection.id, { label: e.target.value })} />
+        <input id="cn-label" value={connection.label ?? ''} onChange={(e) => update(connection.id, { label: e.target.value })} disabled={isRunning} />
       </div>
 
       <div className="field">
         <label htmlFor="cn-priority">Priority (higher runs first)</label>
-        <input id="cn-priority" type="number" value={connection.priority} onChange={(e) => update(connection.id, { priority: Number(e.target.value) })} />
+        <input id="cn-priority" type="number" value={connection.priority} onChange={(e) => update(connection.id, { priority: Number(e.target.value) })} disabled={isRunning} />
       </div>
 
       <div className="field">

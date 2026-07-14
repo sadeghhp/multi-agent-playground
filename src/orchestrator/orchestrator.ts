@@ -106,6 +106,7 @@ export async function startRun(): Promise<void> {
       useRuntimeStore.getState().incTurn();
       runtime.setActive(agent.id, item.connectionId);
       runtime.setAgentState(agent.id, 'generating');
+      useRuntimeStore.getState().clearStreaming(agent.id); // reset any prior live buffer
       log('request-started', `Requesting response from "${agent.name}".`, agent.id);
 
       const provider = providersById.get(agent.llm.providerId ?? '');
@@ -166,6 +167,7 @@ export async function startRun(): Promise<void> {
         const res = await sendChat(provider, chatParams, {
           signal: controller.signal,
           timeoutMs: agent.runtime.responseTimeoutMs,
+          onToken: (chunk) => useRuntimeStore.getState().appendToken(agent.id, chunk),
         });
 
         useRuntimeStore.getState().recordSnapshot(messageId, {
@@ -195,10 +197,12 @@ export async function startRun(): Promise<void> {
           totalTokens: res.totalTokens,
         };
         useDomainStore.getState().appendTranscript(message);
+        useRuntimeStore.getState().clearStreaming(agent.id); // final message replaces the live buffer
         useRuntimeStore.getState().incAgentResponses(agent.id);
         runtime.setAgentState(agent.id, 'completed');
         log('request-completed', `"${agent.name}" responded in ${res.durationMs}ms.`, agent.id);
       } catch (err) {
+        useRuntimeStore.getState().clearStreaming(agent.id); // drop the partial live buffer
         if (controller.signal.aborted) {
           // Stop was pressed; leave the loop quietly (status already 'stopped').
           break;

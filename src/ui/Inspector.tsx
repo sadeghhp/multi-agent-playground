@@ -23,9 +23,12 @@ export function Inspector() {
         </h2>
       </header>
       {agent ? (
-        <AgentInspector agent={agent} />
+        // key resets the inspector's local form state (e.g. the "Connect to…"
+        // draft) when a different agent/connection is selected — otherwise the
+        // draft bleeds across selections and can create the wrong connection.
+        <AgentInspector key={agent.id} agent={agent} />
       ) : connection ? (
-        <ConnectionInspector connection={connection} />
+        <ConnectionInspector key={connection.id} connection={connection} />
       ) : (
         <div className={styles.emptyState}>
           <p>Select an agent or connection to edit it.</p>

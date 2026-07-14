@@ -105,7 +105,9 @@ export function createProvider(overrides: Partial<Provider> = {}): Provider {
     path: '/v1/chat/completions',
     authMethod: 'bearer',
     authHeaderName: 'Authorization',
-    authPrefix: 'Bearer',
+    // Empty: buildProviderHeaders supplies the "Bearer" scheme for bearer auth and
+    // sends the raw key for custom-header auth. Set only for a non-standard prefix.
+    authPrefix: '',
     credentialStorage: 'session',
     requestFormat: 'openai-chat',
     responseFormat: 'openai-chat',

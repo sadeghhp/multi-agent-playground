@@ -21,6 +21,14 @@ describe('classifyStatus', () => {
     expect(classifyStatus(500)).toBe('server-error');
     expect(classifyStatus(503)).toBe('server-error');
   });
+  it('maps 408 to timeout', () => {
+    expect(classifyStatus(408)).toBe('timeout');
+  });
+  it('maps other 4xx to a non-retryable bad-request', () => {
+    expect(classifyStatus(400)).toBe('bad-request');
+    expect(classifyStatus(422)).toBe('bad-request');
+    expect(retryEligible('bad-request')).toBe(false);
+  });
 });
 
 describe('classifyThrown', () => {

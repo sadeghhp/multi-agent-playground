@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { CredentialStorage, Provider } from '../domain/schema';
-import { deriveAuthMethod, schemeFromAuthMethod, type AuthScheme } from './providerAuth';
+import { deriveAuthMethod } from './providerAuth';
 import { useProviderStore } from '../store/providerStore';
 import { useUiStore } from '../store/uiStore';
 import { createProvider } from '../domain/factories';
@@ -119,29 +119,18 @@ function ProviderEditor({
   const [fetchModelsResult, setFetchModelsResult] = useState<string | null>(null);
   const [testModel, setTestModel] = useState(provider.defaultModel || provider.models[0] || '');
   const [modelsText, setModelsText] = useState(provider.models.join(', '));
-  // How to send the key when one is present. `authMethod` itself is derived from
-  // key presence (empty key ⇒ 'none'), so this remembers the choice meanwhile.
-  const [scheme, setScheme] = useState<AuthScheme>(schemeFromAuthMethod(provider.authMethod));
 
   const urlValidation = validateEndpoint(provider.baseUrl);
   const canQueryProvider = Boolean(provider.baseUrl) && urlValidation.ok;
 
   function setKey(apiKey: string) {
-    onChange({ apiKey, authMethod: deriveAuthMethod(apiKey, scheme) });
-    saveCredential(provider.id, apiKey, provider.credentialStorage);
-  }
-
-  function changeScheme(next: AuthScheme) {
-    setScheme(next);
-    const patch: Partial<Provider> = {
-      authMethod: deriveAuthMethod(provider.apiKey ?? '', next),
-      // Reset the prefix on switch so a stale "Bearer" can't leak into a
-      // custom-header scheme (bearer supplies its own default prefix).
+    onChange({
+      apiKey,
+      authMethod: deriveAuthMethod(apiKey),
+      authHeaderName: 'Authorization',
       authPrefix: '',
-    };
-    // Bearer always uses the standard Authorization header; drop any stale custom name.
-    if (next === 'bearer') patch.authHeaderName = 'Authorization';
-    onChange(patch);
+    });
+    saveCredential(provider.id, apiKey, provider.credentialStorage);
   }
 
   function clearKey() {
@@ -248,31 +237,6 @@ function ProviderEditor({
         </div>
         <p className={styles.hint}>Leave empty for servers that need no auth (e.g. local LM Studio / Ollama).</p>
       </div>
-
-      <div className="field">
-        <label>Scheme</label>
-        <label className={styles.inline}>
-          <input type="radio" name={`scheme-${provider.id}`} checked={scheme === 'bearer'} onChange={() => changeScheme('bearer')} />
-          Bearer token (sends Authorization: Bearer …)
-        </label>
-        <label className={styles.inline}>
-          <input type="radio" name={`scheme-${provider.id}`} checked={scheme === 'custom-header'} onChange={() => changeScheme('custom-header')} />
-          Custom header
-        </label>
-      </div>
-
-      {scheme === 'custom-header' && (
-        <div className="field-row">
-          <div className="field">
-            <label htmlFor="pv-header">Header name</label>
-            <input id="pv-header" value={provider.authHeaderName} onChange={(e) => onChange({ authHeaderName: e.target.value })} placeholder="x-api-key" />
-          </div>
-          <div className="field">
-            <label htmlFor="pv-prefix">Prefix</label>
-            <input id="pv-prefix" value={provider.authPrefix} onChange={(e) => onChange({ authPrefix: e.target.value })} placeholder="(none)" />
-          </div>
-        </div>
-      )}
 
       <div className="field">
         <label>Credential storage</label>

@@ -7,6 +7,7 @@ import { newConnectionId, newSkillId } from '../../domain/ids';
 import { assembleMessages, boundHistory, buildSystemPrompt, buildTaskPrompt, estimateTokens } from '../../agents/promptAssembly';
 import { validateForRun } from '../../orchestrator/validate';
 import { Section } from './Section';
+import { parseBoundedInt } from '../inputUtils';
 import styles from './Inspector.module.css';
 
 const COLORS: Agent['colorCategory'][] = ['slate', 'blue', 'green', 'amber', 'red', 'violet', 'teal'];
@@ -276,7 +277,7 @@ export function AgentInspector({ agent }: { agent: Agent }) {
         <div className="field-row">
           <div className="field">
             <label htmlFor="ag-maxtok">Max output tokens</label>
-            <input id="ag-maxtok" type="number" min={1} value={agent.llm.maxOutputTokens} onChange={(e) => patchLlm({ maxOutputTokens: Number(e.target.value) })} />
+            <input id="ag-maxtok" type="number" min={1} value={agent.llm.maxOutputTokens} onChange={(e) => { const n = parseBoundedInt(e.target.value, 1); if (n !== null) patchLlm({ maxOutputTokens: n }); }} />
           </div>
           <div className="field">
             <label htmlFor="ag-topp">Top-p (optional)</label>
@@ -289,11 +290,11 @@ export function AgentInspector({ agent }: { agent: Agent }) {
         <div className="field-row">
           <div className="field">
             <label htmlFor="ag-maxresp">Max responses / run</label>
-            <input id="ag-maxresp" type="number" min={1} value={agent.runtime.maxResponsesPerRun} onChange={(e) => patchRuntime({ maxResponsesPerRun: Number(e.target.value) })} />
+            <input id="ag-maxresp" type="number" min={1} value={agent.runtime.maxResponsesPerRun} onChange={(e) => { const n = parseBoundedInt(e.target.value, 1); if (n !== null) patchRuntime({ maxResponsesPerRun: n }); }} />
           </div>
           <div className="field">
             <label htmlFor="ag-hist">History window</label>
-            <input id="ag-hist" type="number" min={0} value={agent.runtime.historyWindow} onChange={(e) => patchRuntime({ historyWindow: Number(e.target.value) })} />
+            <input id="ag-hist" type="number" min={1} value={agent.runtime.historyWindow} onChange={(e) => { const n = parseBoundedInt(e.target.value, 1); if (n !== null) patchRuntime({ historyWindow: n }); }} />
           </div>
         </div>
         <label className={styles.enableToggle}>

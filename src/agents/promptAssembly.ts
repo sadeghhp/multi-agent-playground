@@ -21,6 +21,13 @@ export interface PromptContext {
   /** The connection feeding this agent, if any (spec §7.3, §11.6). */
   incoming?: Connection | null;
   sourceAgentName?: string | null;
+  /**
+   * The source agent's most recent output (spec §12 "source agent output, when
+   * applicable"). Included for review/handoff connections independently of the
+   * history window, so the agent can act on the response it was told to review
+   * even when includeHistory is off.
+   */
+  sourceOutput?: string | null;
   /** True on the very first turn of a run — enables the opening instruction. */
   isFirstTurn?: boolean;
 }
@@ -92,6 +99,17 @@ export function buildTaskPrompt(ctx: PromptContext): string {
 
   if (ctx.sourceAgentName && ctx.incoming) {
     sections.push(`You are responding after ${ctx.sourceAgentName} via a ${ctx.incoming.type} connection.`);
+  }
+
+  // For review/handoff, embed the source's actual output so the agent has the
+  // content it was instructed to review/continue, regardless of the history window.
+  if (
+    ctx.incoming &&
+    (ctx.incoming.type === 'review' || ctx.incoming.type === 'handoff') &&
+    ctx.sourceOutput?.trim()
+  ) {
+    const label = ctx.sourceAgentName ?? 'The previous agent';
+    sections.push(`${label}'s most recent response:\n${ctx.sourceOutput.trim()}`);
   }
 
   sections.push('Provide your response.');

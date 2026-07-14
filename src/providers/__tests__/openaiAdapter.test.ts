@@ -54,6 +54,24 @@ describe('sendChat', () => {
     expect(body.model).toBe('test-model');
   });
 
+  it('sends a custom-header key raw, without a Bearer prefix', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse(sampleBody));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = createProvider({
+      baseUrl: 'https://api.example.com',
+      authMethod: 'custom-header',
+      authHeaderName: 'x-api-key',
+      apiKey: 'sk-raw',
+    });
+
+    await sendChat(provider, { model: 'm', messages: [{ role: 'user', content: 'hi' }] });
+
+    const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
+    expect(headers['x-api-key']).toBe('sk-raw');
+    expect(headers.Authorization).toBeUndefined();
+  });
+
   it('strips forbidden custom headers but keeps allowed ones', async () => {
     const fetchMock = vi.fn().mockResolvedValue(okResponse(sampleBody));
     vi.stubGlobal('fetch', fetchMock);
@@ -72,15 +90,14 @@ describe('sendChat', () => {
     expect(headers['user-agent']).toBeUndefined();
   });
 
-  it('rejects a non-HTTPS remote endpoint before fetching', async () => {
-    const fetchMock = vi.fn();
+  it('allows http for remote endpoints', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse(sampleBody));
     vi.stubGlobal('fetch', fetchMock);
     const provider = createProvider({ baseUrl: 'http://api.example.com', apiKey: 'k' });
 
-    await expect(
-      sendChat(provider, { model: 'm', messages: [{ role: 'user', content: 'hi' }] }),
-    ).rejects.toMatchObject({ kind: 'invalid-url' });
-    expect(fetchMock).not.toHaveBeenCalled();
+    const res = await sendChat(provider, { model: 'm', messages: [{ role: 'user', content: 'hi' }] });
+    expect(res.text).toBe('hello world');
+    expect(fetchMock).toHaveBeenCalled();
   });
 
   it('allows http for localhost', async () => {

@@ -80,6 +80,25 @@ export const useDomainStore = create<DomainState>((set, get) => {
     saveTimer = setTimeout(() => void doSave(), SAVE_DEBOUNCE_MS);
   }
 
+  /**
+   * Persist any pending debounced edits to the CURRENT playground before it is
+   * replaced. Without this, switching playgrounds inside the ~600ms debounce
+   * window silently discards the outgoing playground's edits (they live only in
+   * memory until doSave runs). Kept synchronous so callers can swap `playground`
+   * immediately after; the IndexedDB write is captured against the outgoing
+   * playground and fired off (not awaited) so it still lands.
+   */
+  function flushPending() {
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    const pg = get().playground;
+    if (pg && get().saveStatus !== 'saved') {
+      void savePlayground(pg).catch((err) => console.error('Flush save failed', err));
+    }
+  }
+
   async function doSave() {
     const pg = get().playground;
     if (!pg) return;
@@ -116,10 +135,12 @@ export const useDomainStore = create<DomainState>((set, get) => {
     },
 
     newPlayground(name) {
+      flushPending();
       activate(createPlayground(name));
     },
 
     async loadPlayground(id) {
+      flushPending();
       const all = await loadAllPlaygrounds();
       const pg = all.find((p) => p.id === id);
       if (pg) {
@@ -135,6 +156,7 @@ export const useDomainStore = create<DomainState>((set, get) => {
     duplicatePlayground() {
       const pg = get().playground;
       if (!pg) return;
+      flushPending();
       // Regenerate every id (playground/agents/providers/connections) and remap
       // references. Sharing provider ids across playgrounds would let deleting one
       // clear the other's credentials (they're keyed globally by provider id).
@@ -153,6 +175,7 @@ export const useDomainStore = create<DomainState>((set, get) => {
     },
 
     replacePlayground(pg) {
+      flushPending();
       activate(pg);
     },
 

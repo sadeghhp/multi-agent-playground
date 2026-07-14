@@ -1,15 +1,18 @@
 import type { Provider } from '../domain/schema';
 import { ProviderError, retryEligible } from './errors';
+import { listModels } from './listModels';
 import { sendChat } from './openaiAdapter';
 
 /**
- * Provider "Test connection" (spec §8.2). Sends a minimal request and returns a
- * structured, secret-free result suitable for display.
+ * Provider "Test connection" (spec §8.2). Lists models first, then optionally
+ * sends a minimal chat request when a model id is available.
  */
 export interface TestConnectionResult {
   ok: boolean;
   status?: number;
   durationMs: number;
+  /** Models returned by GET /v1/models when that step succeeded. */
+  models?: string[];
   /** Parsed model text on success. */
   responseText?: string;
   model?: string;
@@ -22,15 +25,44 @@ export interface TestConnectionResult {
 
 export async function testConnection(
   provider: Provider,
-  model: string,
+  model?: string,
   signal?: AbortSignal,
 ): Promise<TestConnectionResult> {
   const start = Date.now();
+  const modelsResult = await listModels(provider, signal);
+  if (!modelsResult.ok) {
+    return {
+      ok: false,
+      durationMs: modelsResult.durationMs,
+      status: modelsResult.status,
+      errorKind: modelsResult.errorKind,
+      errorSummary: modelsResult.errorSummary,
+      errorDetail: modelsResult.errorDetail,
+      retryEligible: modelsResult.retryEligible,
+    };
+  }
+
+  const modelToTest =
+    model?.trim() || provider.defaultModel || provider.models[0] || modelsResult.models[0] || '';
+
+  if (!modelToTest) {
+    return {
+      ok: true,
+      status: modelsResult.status,
+      durationMs: modelsResult.durationMs,
+      models: modelsResult.models,
+      responseText:
+        modelsResult.models.length > 0
+          ? `Connected — ${modelsResult.models.length} model(s) listed.`
+          : 'Connected — /v1/models responded but listed no models.',
+    };
+  }
+
   try {
     const res = await sendChat(
       provider,
       {
-        model,
+        model: modelToTest,
         messages: [
           { role: 'system', content: 'You are a connectivity test.' },
           { role: 'user', content: 'Reply with the single word: ok' },
@@ -43,7 +75,8 @@ export async function testConnection(
     return {
       ok: true,
       status: res.status,
-      durationMs: res.durationMs,
+      durationMs: Date.now() - start,
+      models: modelsResult.models,
       responseText: res.text,
       model: res.model,
     };
@@ -53,6 +86,7 @@ export async function testConnection(
       ok: false,
       status: pe?.status,
       durationMs: Date.now() - start,
+      models: modelsResult.models,
       errorKind: pe?.kind ?? 'unknown',
       errorSummary: pe?.message ?? 'Unknown error',
       errorDetail: pe?.detail,

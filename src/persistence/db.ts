@@ -75,10 +75,21 @@ export async function loadAllPlaygrounds(): Promise<Playground[]> {
 export async function deletePlayground(id: string): Promise<void> {
   const db = await getDb();
   // Best-effort: also clear any stored credentials for this playground's providers.
+  // Read provider ids straight off the raw record so credentials are still cleared
+  // even when the record is too corrupt for parseStored to validate — otherwise the
+  // key is stranded in session/localStorage with no record left to ever clean it up.
   const raw = await db.get(STORE, id);
-  const pg = raw ? parseStored(raw) : undefined;
-  if (pg) pg.providers.forEach((p) => clearCredential(p.id));
+  rawProviderIds(raw).forEach((pid) => clearCredential(pid));
   await db.delete(STORE, id);
+}
+
+/** Defensively pull provider ids from an unvalidated stored record. */
+function rawProviderIds(raw: unknown): string[] {
+  const providers = (raw as { providers?: unknown } | null | undefined)?.providers;
+  if (!Array.isArray(providers)) return [];
+  return providers
+    .map((p) => (p as { id?: unknown })?.id)
+    .filter((pid): pid is string => typeof pid === 'string');
 }
 
 /**

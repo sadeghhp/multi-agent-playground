@@ -80,6 +80,34 @@ describe('buildTaskPrompt', () => {
     expect(task).toContain('Subject: Ship it?');
     expect(task).toContain('Objective: Decide');
   });
+
+  it('embeds the source output for a review connection even without history', () => {
+    const agent = createAgent({ name: 'Critic' });
+    const incoming: Connection = { id: 'c', source: 'a', target: agent.id, enabled: true, type: 'review', priority: 0 };
+    const task = buildTaskPrompt({
+      agent,
+      conversation: defaultConversationSettings(),
+      history: [],
+      incoming,
+      sourceAgentName: 'Author',
+      sourceOutput: 'The moon is made of cheese.',
+    });
+    expect(task).toContain('The moon is made of cheese.');
+  });
+
+  it('does not embed source output for a plain conversation connection', () => {
+    const agent = createAgent({ name: 'B' });
+    const incoming: Connection = { id: 'c', source: 'a', target: agent.id, enabled: true, type: 'conversation', priority: 0 };
+    const task = buildTaskPrompt({
+      agent,
+      conversation: defaultConversationSettings(),
+      history: [],
+      incoming,
+      sourceAgentName: 'Author',
+      sourceOutput: 'secret text',
+    });
+    expect(task).not.toContain('secret text');
+  });
 });
 
 describe('assembleMessages', () => {

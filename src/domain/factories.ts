@@ -87,16 +87,31 @@ export function createAgent(overrides: Partial<Agent> = {}): Agent {
   };
 }
 
+/** "Analyst" -> "Analyst (copy)" -> "Analyst (copy 2)" -> "Analyst (copy 3)" ...
+ * instead of blindly appending, which would cascade into "X (copy) (copy) (copy)". */
+function nextCopyName(name: string): string {
+  const match = name.match(/^(.*) \(copy(?: (\d+))?\)$/);
+  if (!match) return `${name} (copy)`;
+  const [, base, num] = match;
+  const next = num ? parseInt(num, 10) + 1 : 2;
+  return `${base} (copy ${next})`;
+}
+
 /**
  * Duplicate an agent (spec §9.3): copy everything except id, position, runtime
  * state, and transcript references. Skills get fresh ids so edits don't alias.
+ * Nested config objects are cloned too — not just skills — so editing the copy
+ * (or the original) can never mutate the other's shared reference.
  */
 export function duplicateAgent(agent: Agent): Agent {
   return {
     ...agent,
     id: newAgentId(),
-    name: `${agent.name} (copy)`,
+    name: nextCopyName(agent.name),
     position: { x: agent.position.x + 48, y: agent.position.y + 48 },
+    characteristics: { ...agent.characteristics },
+    llm: { ...agent.llm },
+    runtime: { ...agent.runtime },
     skills: agent.skills.map((s) => ({ ...s, id: newSkillId() })),
   };
 }
@@ -131,6 +146,11 @@ export function instantiateFromLibrary(
     ...saved.agent,
     id: newAgentId(),
     position,
+    // Cloned, not shared — this instance and the stored library template (or
+    // any other instance created from it) must never alias the same object.
+    characteristics: { ...saved.agent.characteristics },
+    llm: { ...saved.agent.llm },
+    runtime: { ...saved.agent.runtime },
     skills: saved.agent.skills.map((s) => ({ ...s, id: newSkillId() })),
   };
 }
@@ -190,6 +210,13 @@ export function defaultSkillLibrary(): LibrarySkill[] {
   return SKILL_PRESETS.map((p) => createLibrarySkill(p));
 }
 
+/** Look up a skill preset by name so template definitions don't re-type (and drift from) its wording. */
+function presetSkill(name: string): Omit<LibrarySkill, 'id'> {
+  const preset = SKILL_PRESETS.find((p) => p.name === name);
+  if (!preset) throw new Error(`Unknown skill preset: ${name}`);
+  return preset;
+}
+
 export function createPlayground(name = 'Untitled Playground'): Playground {
   const ts = now();
   return {
@@ -245,9 +272,7 @@ const TEMPLATES: Record<TemplateKey, TemplateDef> = {
       'Analyze the topic methodically. Break problems into parts and reason from evidence.',
     characteristics: { assertiveness: 60, skepticism: 60, creativity: 40 },
     color: 'blue',
-    skills: [
-      { name: 'analysis', description: 'Structured analysis', instruction: 'Decompose the problem and weigh trade-offs explicitly.' },
-    ],
+    skills: [presetSkill('analysis')],
   },
   critic: {
     label: 'Critic',
@@ -256,20 +281,16 @@ const TEMPLATES: Record<TemplateKey, TemplateDef> = {
       'Critically evaluate the previous responses. Challenge unsupported claims and identify weaknesses.',
     characteristics: { skepticism: 85, assertiveness: 70, cooperation: 35 },
     color: 'red',
-    skills: [
-      { name: 'critique', description: 'Critical review', instruction: 'Focus on factual weaknesses and logical gaps.' },
-    ],
+    skills: [presetSkill('critique')],
   },
   moderator: {
     label: 'Moderator',
     role: 'Moderator',
     systemInstruction:
       'Synthesize the discussion, resolve disagreements fairly, and produce a balanced conclusion.',
-    characteristics: { cooperation: 80, tone: 'balanced', assertiveness: 50 } as Partial<Characteristics>,
+    characteristics: { cooperation: 80, tone: 'balanced', assertiveness: 50 },
     color: 'green',
-    skills: [
-      { name: 'summarization', description: 'Synthesis', instruction: 'Fairly summarize each viewpoint before concluding.' },
-    ],
+    skills: [presetSkill('summarization')],
   },
   researcher: {
     label: 'Researcher',
@@ -278,19 +299,15 @@ const TEMPLATES: Record<TemplateKey, TemplateDef> = {
       'Gather relevant considerations and surface the most important facts and open questions.',
     characteristics: { creativity: 60, verbosity: 60, skepticism: 50 },
     color: 'teal',
-    skills: [
-      { name: 'brainstorming', description: 'Idea generation', instruction: 'Enumerate relevant angles and unknowns.' },
-    ],
+    skills: [presetSkill('brainstorming')],
   },
   summarizer: {
     label: 'Summarizer',
     role: 'Summarizer',
     systemInstruction: 'Produce a concise, faithful summary of the conversation so far.',
-    characteristics: { verbosity: 25, tone: 'concise' } as Partial<Characteristics>,
+    characteristics: { verbosity: 25, tone: 'concise' },
     color: 'violet',
-    skills: [
-      { name: 'summarization', description: 'Summarization', instruction: 'Be concise and preserve key points.' },
-    ],
+    skills: [presetSkill('summarization')],
   },
 };
 

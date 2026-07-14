@@ -7,6 +7,10 @@ import styles from './BottomPanel.module.css';
 
 type Tab = 'transcript' | 'log' | 'errors';
 
+const TABS: Tab[] = ['transcript', 'log', 'errors'];
+const tabId = (t: Tab) => `bottom-panel-tab-${t}`;
+const panelId = (t: Tab) => `bottom-panel-panel-${t}`;
+
 const RUN_STATUS_LABEL: Record<string, string> = {
   idle: 'Idle',
   running: 'Running…',
@@ -50,10 +54,23 @@ export function BottomPanel() {
     return { tokens, duration, hasTokens };
   }, [transcript]);
 
-  // Auto-scroll the transcript to the newest message as it arrives.
+  // Auto-scroll the transcript to the newest message as it arrives, but only
+  // while the user is already at (or near) the bottom — otherwise someone
+  // scrolling up to reread earlier messages mid-stream gets yanked back down
+  // on every token.
   const contentRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
+  const SCROLL_BOTTOM_THRESHOLD_PX = 48;
+
+  function handleScroll() {
+    const el = contentRef.current;
+    if (!el) return;
+    stickToBottomRef.current =
+      el.scrollTop + el.clientHeight >= el.scrollHeight - SCROLL_BOTTOM_THRESHOLD_PX;
+  }
+
   useEffect(() => {
-    if (tab === 'transcript' && !collapsed && contentRef.current) {
+    if (tab === 'transcript' && !collapsed && contentRef.current && stickToBottomRef.current) {
       contentRef.current.scrollTop = contentRef.current.scrollHeight;
     }
   }, [transcript.length, tab, collapsed, liveText]);
@@ -61,14 +78,49 @@ export function BottomPanel() {
   return (
     <section className={styles.panel} data-collapsed={collapsed || undefined} aria-label="Execution panel">
       <header className={styles.header}>
-        <div className={styles.tabs} role="tablist">
-          <button role="tab" aria-selected={tab === 'transcript'} className={tab === 'transcript' ? styles.tabActive : ''} onClick={() => setTab('transcript')}>
+        <div
+          className={styles.tabs}
+          role="tablist"
+          onKeyDown={(e) => {
+            if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+            e.preventDefault();
+            const i = TABS.indexOf(tab);
+            const next = TABS[(i + (e.key === 'ArrowRight' ? 1 : TABS.length - 1)) % TABS.length];
+            setTab(next);
+            document.getElementById(tabId(next))?.focus();
+          }}
+        >
+          <button
+            id={tabId('transcript')}
+            role="tab"
+            aria-selected={tab === 'transcript'}
+            aria-controls={panelId('transcript')}
+            tabIndex={tab === 'transcript' ? 0 : -1}
+            className={tab === 'transcript' ? styles.tabActive : ''}
+            onClick={() => setTab('transcript')}
+          >
             Transcript ({transcript.length})
           </button>
-          <button role="tab" aria-selected={tab === 'log'} className={tab === 'log' ? styles.tabActive : ''} onClick={() => setTab('log')}>
+          <button
+            id={tabId('log')}
+            role="tab"
+            aria-selected={tab === 'log'}
+            aria-controls={panelId('log')}
+            tabIndex={tab === 'log' ? 0 : -1}
+            className={tab === 'log' ? styles.tabActive : ''}
+            onClick={() => setTab('log')}
+          >
             Event log ({events.length})
           </button>
-          <button role="tab" aria-selected={tab === 'errors'} className={tab === 'errors' ? styles.tabActive : ''} onClick={() => setTab('errors')}>
+          <button
+            id={tabId('errors')}
+            role="tab"
+            aria-selected={tab === 'errors'}
+            aria-controls={panelId('errors')}
+            tabIndex={tab === 'errors' ? 0 : -1}
+            className={tab === 'errors' ? styles.tabActive : ''}
+            onClick={() => setTab('errors')}
+          >
             Errors ({errors.length})
           </button>
         </div>
@@ -96,7 +148,15 @@ export function BottomPanel() {
       </header>
 
       {!collapsed && (
-        <div className={styles.content} ref={contentRef}>
+        <div
+          className={styles.content}
+          ref={contentRef}
+          onScroll={handleScroll}
+          data-testid="bottom-panel-content"
+          role="tabpanel"
+          id={panelId(tab)}
+          aria-labelledby={tabId(tab)}
+        >
           {tab === 'transcript' && (
             transcript.length === 0 && !liveAgent ? (
               <p className={styles.empty}>No conversation yet. Configure agents, connect them, and press Run.</p>
@@ -130,8 +190,8 @@ export function BottomPanel() {
             errors.length === 0 ? (
               <p className={styles.empty}>No errors.</p>
             ) : (
-              errors.map((err, i) => (
-                <div key={i} className={styles.errorItem}>
+              errors.map((err) => (
+                <div key={err.id} className={styles.errorItem}>
                   <strong>[{err.level}] {err.summary}</strong>
                   {err.provider && <span className="muted"> · {err.provider}</span>}
                   {err.retryEligible && <span className="chip"> retry-eligible</span>}

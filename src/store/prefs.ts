@@ -9,16 +9,32 @@ const THEME_KEY = 'map.theme';
 export type Theme = 'light' | 'dark';
 
 export function getSelectedPlaygroundId(): string | null {
-  return window.localStorage.getItem(SELECTED_KEY);
+  try {
+    return window.localStorage.getItem(SELECTED_KEY);
+  } catch {
+    return null;
+  }
 }
 export function setSelectedPlaygroundId(id: string | null): void {
-  if (id) window.localStorage.setItem(SELECTED_KEY, id);
-  else window.localStorage.removeItem(SELECTED_KEY);
+  try {
+    if (id) window.localStorage.setItem(SELECTED_KEY, id);
+    else window.localStorage.removeItem(SELECTED_KEY);
+  } catch {
+    /* storage full / disabled (e.g. private-browsing quota) — non-fatal */
+  }
 }
 
 export function getTheme(): Theme {
-  return window.localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light';
+  try {
+    return window.localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light';
+  } catch {
+    return 'light';
+  }
 }
 export function setTheme(theme: Theme): void {
-  window.localStorage.setItem(THEME_KEY, theme);
+  try {
+    window.localStorage.setItem(THEME_KEY, theme);
+  } catch {
+    /* storage full / disabled (e.g. private-browsing quota) — non-fatal */
+  }
 }

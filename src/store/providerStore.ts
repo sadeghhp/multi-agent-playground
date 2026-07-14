@@ -56,9 +56,13 @@ export const useProviderStore = create<ProviderState>((set, get) => {
     saveTimer = null;
     const ids = [...dirty];
     dirty.clear();
-    const byId = new Map(get().providers.map((p) => [p.id, p]));
     for (const id of ids) {
-      const p = byId.get(id);
+      // Re-read live state on every iteration rather than a snapshot taken
+      // once at the top: this loop awaits between saves, and if the provider
+      // was removed during that gap (removeProvider already dispatched its
+      // own dbDelete), a stale snapshot would still save it here — resurrecting
+      // a just-deleted record in IndexedDB.
+      const p = get().providers.find((pr) => pr.id === id);
       if (p) await saveProvider(p).catch((err) => console.error('Provider save failed', err));
     }
   }
@@ -68,8 +72,15 @@ export const useProviderStore = create<ProviderState>((set, get) => {
     hydrated: false,
 
     async hydrate() {
-      const providers = await loadAllProviders();
-      set({ providers, hydrated: true });
+      try {
+        const providers = await loadAllProviders();
+        set({ providers, hydrated: true });
+      } catch (err) {
+        // A transient IndexedDB failure at startup must not crash app
+        // initialization — degrade to an empty, usable registry instead.
+        console.error('Provider hydrate failed', err);
+        set({ providers: [], hydrated: true });
+      }
     },
 
     addProvider(provider) {

@@ -3,6 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      connect-src * is intentionally broad: this app talks to whatever
+      user-configured LLM provider base URL the user enters (spec §5),
+      which cannot be known ahead of time. style-src 'unsafe-inline' is
+      needed because several components set inline `style={{...}}` attrs
+      (dynamic colors, computed positions) rather than static classes.
+    -->
     <meta
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src *; font-src 'self' data:; object-src 'none'; base-uri 'self'"

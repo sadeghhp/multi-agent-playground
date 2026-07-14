@@ -37,6 +37,7 @@ export interface EventLogEntry {
 }
 
 export interface RunError {
+  id: string;
   level: 'agent' | 'run';
   agentId?: string | null;
   summary: string;
@@ -83,6 +84,26 @@ interface RuntimeStoreState {
   isRunning: () => boolean;
 }
 
+// Bounds on memory-only, append-only run state — without these, a long
+// conversation (many turns/messages) grows these collections without limit
+// for the entire life of the run, increasing memory use and the cost of every
+// re-render that reads them.
+const MAX_EVENTS = 500;
+const MAX_ERRORS = 500;
+const MAX_REQUEST_SNAPSHOTS = 500;
+
+function capArray<T>(arr: T[], max: number): T[] {
+  return arr.length > max ? arr.slice(arr.length - max) : arr;
+}
+
+function capRecord<T>(record: Record<string, T>, max: number): Record<string, T> {
+  const keys = Object.keys(record);
+  if (keys.length <= max) return record;
+  const next = { ...record };
+  for (const key of keys.slice(0, keys.length - max)) delete next[key];
+  return next;
+}
+
 const initial = {
   runId: null,
   status: 'idle' as RunStatus,
@@ -110,7 +131,12 @@ export const useRuntimeStore = create<RuntimeStoreState>((set, get) => ({
     }),
 
   recordSnapshot: (messageId, snapshot) =>
-    set((s) => ({ requestSnapshots: { ...s.requestSnapshots, [messageId]: snapshot } })),
+    set((s) => ({
+      requestSnapshots: capRecord(
+        { ...s.requestSnapshots, [messageId]: snapshot },
+        MAX_REQUEST_SNAPSHOTS,
+      ),
+    })),
   appendToken: (agentId, chunk) =>
     set((s) => ({
       streamingText: { ...s.streamingText, [agentId]: (s.streamingText[agentId] ?? '') + chunk },
@@ -134,8 +160,8 @@ export const useRuntimeStore = create<RuntimeStoreState>((set, get) => ({
         [agentId]: (s.responsesPerAgent[agentId] ?? 0) + 1,
       },
     })),
-  logEvent: (entry) => set((s) => ({ events: [...s.events, entry] })),
-  addError: (error) => set((s) => ({ errors: [...s.errors, error] })),
+  logEvent: (entry) => set((s) => ({ events: capArray([...s.events, entry], MAX_EVENTS) })),
+  addError: (error) => set((s) => ({ errors: capArray([...s.errors, error], MAX_ERRORS) })),
   reset: () => set({ ...initial }),
   isRunning: () => get().status === 'running',
 }));

@@ -133,11 +133,18 @@ export const useDomainStore = create<DomainState>((set, get) => {
     saveStatus: 'saved',
 
     async hydrate() {
-      const all = await loadAllPlaygrounds();
-      const index = all
-        .map((p) => ({ id: p.id, name: p.name, updatedAt: p.updatedAt }))
-        .sort((a, b) => b.updatedAt - a.updatedAt);
-      set({ index });
+      try {
+        const all = await loadAllPlaygrounds();
+        const index = all
+          .map((p) => ({ id: p.id, name: p.name, updatedAt: p.updatedAt }))
+          .sort((a, b) => b.updatedAt - a.updatedAt);
+        set({ index });
+      } catch (err) {
+        // A transient IndexedDB failure at startup must not crash app
+        // initialization — degrade to an empty, usable index instead.
+        console.error('Playground hydrate failed', err);
+        set({ index: [] });
+      }
     },
 
     newPlayground(name) {
@@ -148,6 +155,11 @@ export const useDomainStore = create<DomainState>((set, get) => {
     async loadPlayground(id) {
       flushPending();
       const all = await loadAllPlaygrounds();
+      // Re-flush: an edit to the outgoing playground (e.g. a field still being
+      // typed into) can land during the await above. Without this second
+      // flush, that edit is silently discarded the moment `playground` below
+      // is replaced — it was never persisted and is now gone from memory too.
+      flushPending();
       const pg = all.find((p) => p.id === id);
       if (pg) {
         set({ playground: pg, saveStatus: 'saved' });

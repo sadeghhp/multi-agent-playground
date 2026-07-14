@@ -2,6 +2,7 @@ import type { Provider } from '../domain/schema';
 import {
   ProviderError,
   classifyStatus,
+  safeReadErrorBody,
   summaryFor,
 } from './errors';
 import type {
@@ -76,6 +77,7 @@ export interface SendOptions {
 async function consumeStream(
   response: Response,
   onToken: (chunk: string) => void,
+  resetTimeout: () => void,
 ): Promise<{ text: string; finishReason: string | null; model?: string; usage: ReturnType<typeof extractUsage> }> {
   const reader = response.body?.getReader();
   if (!reader) {
@@ -97,6 +99,22 @@ async function consumeStream(
       json = JSON.parse(payload) as Record<string, unknown>;
     } catch {
       return; // ignore keep-alives / partial noise
+    }
+    // Some OpenAI-compatible servers commit to HTTP 200 + text/event-stream
+    // before they know the request will fail, then send the error in-band
+    // instead of via the status code. Surface it instead of silently
+    // returning a truncated/empty response as if it had succeeded.
+    if (json.error !== undefined) {
+      const err = json.error;
+      const message =
+        typeof err === 'string'
+          ? err
+          : typeof (err as { message?: unknown })?.message === 'string'
+            ? (err as { message: string }).message
+            : undefined;
+      throw new ProviderError('server-error', summaryFor('server-error'), {
+        detail: message ?? 'The provider returned an in-stream error.',
+      });
     }
     if (typeof json.model === 'string') model = json.model;
     const choice = (json.choices as Array<Record<string, unknown>> | undefined)?.[0];
@@ -122,6 +140,10 @@ async function consumeStream(
 
   for (;;) {
     const { done, value } = await reader.read();
+    // Each chunk received is activity — a connection that keeps sending data
+    // (even keep-alives) must not be killed by the idle timeout, but one that
+    // goes silent mid-stream still should be.
+    resetTimeout();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
     drainLines();
@@ -153,14 +175,19 @@ export async function sendChat(
   // some local OpenAI-compatible servers 400 on it — so we don't send it. Token
   // counts are simply absent for streamed turns, which the UI already tolerates.
   if (options.onToken) body.stream = true;
-  const { response, durationMs } = await providerRequest(provider, provider.path, {
-    method: 'POST',
-    body,
-    signal: options.signal,
-    timeoutMs: options.timeoutMs,
-  });
+  const { response, durationMs, resetTimeout, clearRequestTimeout, timeoutSignal } = await providerRequest(
+    provider,
+    provider.path,
+    {
+      method: 'POST',
+      body,
+      signal: options.signal,
+      timeoutMs: options.timeoutMs,
+    },
+  );
 
   if (!response.ok) {
+    clearRequestTimeout();
     const kind = classifyStatus(response.status);
     const detail = await safeReadErrorBody(response);
     throw new ProviderError(kind, summaryFor(kind), { status: response.status, detail });
@@ -171,7 +198,25 @@ export async function sendChat(
   const contentType = response.headers.get('content-type') ?? '';
   if (options.onToken && contentType.includes('text/event-stream')) {
     const streamStart = Date.now();
-    const streamed = await consumeStream(response, options.onToken);
+    let streamed: Awaited<ReturnType<typeof consumeStream>>;
+    try {
+      streamed = await consumeStream(response, options.onToken, resetTimeout);
+    } catch (err) {
+      // The idle timeout aborts the same signal that fed the original fetch —
+      // classify a mid-stream stall the same way providerRequest classifies a
+      // time-to-first-byte timeout, instead of surfacing an opaque abort error.
+      if (timeoutSignal.aborted) {
+        throw new ProviderError('timeout', summaryFor('timeout'), {
+          detail: 'The connection stalled mid-response (no data received before the timeout).',
+        });
+      }
+      if (options.signal?.aborted) {
+        throw new ProviderError('aborted', summaryFor('aborted'));
+      }
+      throw err;
+    } finally {
+      clearRequestTimeout();
+    }
     const model = streamed.model ?? params.model;
     return {
       text: streamed.text,
@@ -200,6 +245,10 @@ export async function sendChat(
     throw new ProviderError('malformed-response', summaryFor('malformed-response'), {
       status: response.status,
     });
+  } finally {
+    // Not streamed — the body is fully consumed by response.json() above (or
+    // the attempt already failed), so the idle timeout has no more work to do.
+    clearRequestTimeout();
   }
 
   const { text, finishReason } = extractText(data);
@@ -221,25 +270,6 @@ export async function sendChat(
     durationMs,
     status: response.status,
   };
-}
-
-async function safeReadErrorBody(response: Response): Promise<string | undefined> {
-  try {
-    const text = await response.text();
-    if (!text) return undefined;
-    try {
-      const json = JSON.parse(text) as { error?: { message?: string } | string };
-      if (json.error && typeof json.error === 'object' && json.error.message) {
-        return json.error.message;
-      }
-      if (typeof json.error === 'string') return json.error;
-    } catch {
-      /* not JSON */
-    }
-    return text.slice(0, 500);
-  } catch {
-    return undefined;
-  }
 }
 
 // Re-export for callers that build URLs for logging.

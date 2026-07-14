@@ -24,6 +24,11 @@ export default defineConfig({
     strictPort: true,
     headers: { 'X-Frame-Options': 'DENY' },
   },
+  // NOTE: these `headers` blocks only apply to `vite dev`/`vite preview`. A
+  // production deployment serves `dist/` through its own host (static file
+  // server, CDN, reverse proxy) which must independently set
+  // `X-Frame-Options: DENY` (or CSP `frame-ancestors 'none'`) — Vite has no
+  // hook into that serving layer.
   build: {
     rollupOptions: {
       output: {

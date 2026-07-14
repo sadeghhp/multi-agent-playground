@@ -229,4 +229,64 @@ describe('orchestrator cancellation', () => {
     const transcript = useDomainStore.getState().playground!.transcript;
     expect(transcript.filter((m) => m.status === 'completed').length).toBe(0);
   });
+
+  it('does not let a stopped run corrupt a newly started run (stop, then immediately start)', async () => {
+    // Run A: fetch that only settles (by rejecting) once its signal aborts.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            const signal = init.signal!;
+            signal.addEventListener('abort', () =>
+              reject(new DOMException('aborted', 'AbortError')),
+            );
+          }),
+      ),
+    );
+    const pgA = cyclePlayground(10, 5);
+    useDomainStore.setState({ playground: pgA });
+
+    const runPromiseA = startRun();
+    // Let run A's loop reach the awaiting fetch.
+    await new Promise((r) => setTimeout(r, 10));
+    stopRun();
+
+    // Immediately (before run A's aborted fetch promise has even settled) start
+    // a second run — this is the "click Stop then Start" race. Run B's own
+    // fetch is held pending (not resolved yet) so we can deterministically
+    // observe the store's state *while run B is still genuinely mid-turn*,
+    // which is the exact window run A's stale cleanup must not corrupt.
+    let resolveB!: (r: Response) => void;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() => new Promise<Response>((resolve) => (resolveB = resolve))),
+    );
+    const pgB = cyclePlayground(1, 5);
+    useDomainStore.setState({ playground: pgB });
+    const runPromiseB = startRun();
+    // Run B's own startRun() call synchronously registers its runId in the
+    // store before its first await, so this is safe to read immediately.
+    const runIdB = useRuntimeStore.getState().runId;
+    expect(runIdB).not.toBeNull();
+
+    // Flush the microtask queue (a macrotask boundary guarantees every pending
+    // microtask — including run A's multi-hop abort/catch chain — has run) so
+    // run A's stale tail has every chance to execute before we check state.
+    // Run B is still awaiting its own (held-pending) fetch at this point.
+    await new Promise((r) => setTimeout(r, 10));
+    expect(useRuntimeStore.getState().runId).toBe(runIdB);
+    expect(useRuntimeStore.getState().status).toBe('running');
+    expect(useRuntimeStore.getState().activeAgentId).toBe(pgB.agents[0].id);
+
+    // Now let run B's turn actually complete.
+    resolveB(okChat());
+    await runPromiseA;
+    await runPromiseB;
+
+    expect(useRuntimeStore.getState().runId).toBe(runIdB);
+    expect(useRuntimeStore.getState().status).toBe('completed');
+    const transcriptB = useDomainStore.getState().playground!.transcript;
+    expect(transcriptB.some((m) => m.status === 'completed')).toBe(true);
+  });
 });

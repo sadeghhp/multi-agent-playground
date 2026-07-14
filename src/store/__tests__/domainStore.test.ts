@@ -8,8 +8,8 @@ vi.mock('../../persistence/db', () => ({
   deletePlayground: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { createAgent } from '../../domain/factories';
-import { savePlayground } from '../../persistence/db';
+import { createAgent, createPlayground } from '../../domain/factories';
+import { loadAllPlaygrounds, savePlayground } from '../../persistence/db';
 import { useDomainStore } from '../domainStore';
 
 beforeEach(() => {
@@ -71,6 +71,46 @@ describe('flushPending on playground switch (H2)', () => {
     store.loadPlayground('nonexistent'); // a switch entry point
 
     expect(savePlayground).not.toHaveBeenCalled();
+  });
+
+  it('persists an edit made while loadPlayground is still awaiting the DB read (M-4 regression)', async () => {
+    const store = useDomainStore.getState();
+    store.newPlayground('A');
+    // Settle the initial "new playground" save so we start from a clean, saved state.
+    useDomainStore.setState({ saveStatus: 'saved' });
+    vi.mocked(savePlayground).mockClear();
+
+    const outgoingId = useDomainStore.getState().playground!.id;
+    const other = createPlayground('B');
+
+    // Hold loadAllPlaygrounds pending so we can land an edit on the outgoing
+    // playground while loadPlayground('B') is still awaiting it.
+    let resolveLoad: ((pgs: ReturnType<typeof createPlayground>[]) => void) | undefined;
+    vi.mocked(loadAllPlaygrounds).mockImplementation(
+      () => new Promise((resolve) => (resolveLoad = resolve)),
+    );
+
+    const switchPromise = store.loadPlayground(other.id);
+
+    // Edit the still-active outgoing playground during the await window.
+    const lateAgent = createAgent({ name: 'Late Edit' });
+    store.addAgent(lateAgent);
+    expect(useDomainStore.getState().saveStatus).toBe('unsaved');
+
+    resolveLoad!([other]);
+    await switchPromise;
+
+    // The late edit must have been persisted, not silently discarded.
+    expect(savePlayground).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: outgoingId,
+        agents: expect.arrayContaining([expect.objectContaining({ id: lateAgent.id })]),
+      }),
+    );
+    // The switch to B still completed.
+    expect(useDomainStore.getState().playground!.id).toBe(other.id);
+
+    vi.mocked(loadAllPlaygrounds).mockResolvedValue([]);
   });
 });
 
@@ -152,5 +192,18 @@ describe('skill library actions', () => {
     const lib = useDomainStore.getState().playground!.skillLibrary;
     expect(lib).toHaveLength(1);
     expect(lib[0].id).toBe('lib_x');
+  });
+});
+
+describe('hydrate resilience (L-10 regression)', () => {
+  it('does not throw and degrades to an empty index when loadAllPlaygrounds rejects', async () => {
+    vi.mocked(loadAllPlaygrounds).mockRejectedValueOnce(new Error('IDB unavailable'));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await expect(useDomainStore.getState().hydrate()).resolves.toBeUndefined();
+    expect(useDomainStore.getState().index).toEqual([]);
+
+    vi.mocked(loadAllPlaygrounds).mockResolvedValue([]);
+    vi.restoreAllMocks();
   });
 });

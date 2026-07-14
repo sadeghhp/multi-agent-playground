@@ -54,9 +54,11 @@ export function cleanEnhancedText(raw: string): string {
   const fence = text.match(/^```[^\n]*\n([\s\S]*?)\n?```$/);
   if (fence) text = fence[1].trim();
 
-  // Drop a leading "Sure! Here is the improved instruction:" style preamble that
-  // ends at the first blank line, but only when real content follows it.
-  const preamble = text.match(/^(?:sure[,!. ]|certainly[,!. ]|here(?:'s| is| are)\b|improved\b)[^\n]*\n\s*\n([\s\S]+)$/i);
+  // Drop a leading "Sure! Here is the improved instruction:" style preamble line,
+  // but only when real content follows it. Models commonly separate the preamble
+  // from the real content with either a blank line OR just a single newline —
+  // match either (`\n+`) rather than requiring a blank line specifically.
+  const preamble = text.match(/^(?:sure[,!. ]|certainly[,!. ]|here(?:'s| is| are)\b|improved\b)[^\n]*\n+([\s\S]+)$/i);
   if (preamble && preamble[1].trim()) text = preamble[1].trim();
 
   // Unwrap symmetric surrounding quotes.

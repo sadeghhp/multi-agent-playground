@@ -49,8 +49,14 @@ export function Message({ msg }: { msg: TranscriptMessage }) {
             aria-label="Copy response"
             title="Copy"
             onClick={() => {
-              void navigator.clipboard?.writeText(msg.content);
-              showToast('info', 'Copied response.');
+              if (!navigator.clipboard) {
+                showToast('error', 'Clipboard is not available in this context.');
+                return;
+              }
+              navigator.clipboard.writeText(msg.content).then(
+                () => showToast('info', 'Copied response.'),
+                () => showToast('error', 'Could not copy the response.'),
+              );
             }}
           >
             ⧉

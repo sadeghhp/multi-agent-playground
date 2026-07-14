@@ -70,6 +70,27 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toMatch(/review/i);
     expect(prompt).toContain('Focus only on factual weaknesses.');
   });
+
+  it('defaults to an English language directive', () => {
+    const agent = createAgent({ name: 'A' });
+    expect(agent.language).toBe('en');
+    const prompt = buildSystemPrompt({ agent, conversation: defaultConversationSettings(), history: [] });
+    expect(prompt).toContain('Write all of your responses in English.');
+  });
+
+  it('injects a Persian directive when the agent language is fa', () => {
+    const agent = createAgent({ name: 'A', language: 'fa' });
+    const prompt = buildSystemPrompt({ agent, conversation: defaultConversationSettings(), history: [] });
+    expect(prompt).toContain('Persian (Farsi)');
+    expect(prompt).toContain('به زبان فارسی');
+  });
+
+  it('injects a French directive when the agent language is fr', () => {
+    const agent = createAgent({ name: 'A', language: 'fr' });
+    const prompt = buildSystemPrompt({ agent, conversation: defaultConversationSettings(), history: [] });
+    expect(prompt).toContain('in French');
+    expect(prompt).toContain('en français');
+  });
 });
 
 describe('buildTaskPrompt', () => {

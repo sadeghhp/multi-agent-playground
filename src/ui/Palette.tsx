@@ -1,4 +1,5 @@
 import { useDomainStore } from '../store/domainStore';
+import { useProviderStore } from '../store/providerStore';
 import { useUiStore } from '../store/uiStore';
 import { useRuntimeStore } from '../store/runtimeStore';
 import { createAgent, createAgentFromTemplate, templateList, type TemplateKey } from '../domain/factories';
@@ -10,6 +11,7 @@ export function Palette() {
   const selectAgent = useUiStore((s) => s.selectAgent);
   const setPanel = useUiStore((s) => s.setPanel);
   const isRunning = useRuntimeStore((s) => s.status === 'running');
+  const hasEnabledProvider = useProviderStore((s) => s.providers.some((p) => p.enabled));
 
   // Stagger new nodes so they don't stack exactly on top of each other.
   function nextPosition() {
@@ -35,6 +37,15 @@ export function Palette() {
         <h3 className={styles.heading}>Agents</h3>
         <button type="button" className={`primary ${styles.block}`} onClick={handleAddBlank} disabled={isRunning}>
           + Add agent
+        </button>
+        <button
+          type="button"
+          className={styles.block}
+          onClick={() => setPanel('createAgentAi')}
+          disabled={isRunning || !hasEnabledProvider}
+          title={!hasEnabledProvider ? 'Add an enabled provider first' : undefined}
+        >
+          ✨ Create agent with AI
         </button>
       </section>
 

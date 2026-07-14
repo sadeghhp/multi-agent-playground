@@ -49,15 +49,22 @@ Two layers joined by node id keep the graph library swappable (spec §5):
 
 | Layer | Location | Responsibility |
 | --- | --- | --- |
-| Domain | `src/domain/`, `src/store/domainStore.ts` | Agents, connections, providers, transcript (zod-validated, versioned) |
+| Domain | `src/domain/`, `src/store/domainStore.ts` | Agents, connections, transcript per playground (zod-validated, versioned) |
+| Provider registry | `src/store/providerStore.ts` | Application-global providers (schema v2) reused by every playground; agents reference them by id |
 | Graph | `src/graph/` | React Flow projection via `graphAdapter.ts` — never sees an `Agent` |
 | Providers | `src/providers/` | OpenAI-compatible adapter, normalized response, CORS-aware error taxonomy |
 | Orchestrator | `src/orchestrator/` | Directed sequential traversal, cycle limits, cancellation |
-| Persistence | `src/persistence/` | IndexedDB, autosave, import/export, credential store |
+| Persistence | `src/persistence/` | IndexedDB (`playgrounds` + `providers` stores), autosave, import/export, credential store |
 | UI | `src/ui/` | Toolbar, palette, inspector, provider manager, run dialog, transcript |
 
-State is split into three Zustand stores (spec §16): persistent domain, transient
-UI, and **memory-only** runtime (an active run is never persisted across reload).
+Providers are **application-scoped**, not embedded in a playground (schema v2): a
+provider created once in the Provider manager is available to every playground,
+including ones created afterwards. Exports re-embed the providers an agent
+references so a shared file stays self-contained and portable.
+
+State is split into Zustand stores (spec §16): persistent domain (the active
+playground), the global provider registry, transient UI, and **memory-only**
+runtime (an active run is never persisted across reload).
 
 ## Security notes (spec §21)
 

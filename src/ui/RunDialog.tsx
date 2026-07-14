@@ -151,7 +151,7 @@ export function RunDialog() {
         <div className={styles.issues}>
           {issues.map((issue, i) => (
             <div
-              key={i}
+              key={`${issue.level}:${issue.agentId ?? ''}:${issue.message}:${i}`}
               className={issue.level === 'error' ? styles.error : styles.warning}
             >
               {issue.level === 'error' ? '⛔' : '⚠'} {issue.message}

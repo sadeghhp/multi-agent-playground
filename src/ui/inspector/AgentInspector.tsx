@@ -14,12 +14,17 @@ import { downloadJson } from '../fileDownload';
 import { validateForRun } from '../../orchestrator/validate';
 import { Section } from './Section';
 import { parseBoundedInt } from '../inputUtils';
+import { useDebouncedValue } from '../useDebouncedValue';
 import styles from './Inspector.module.css';
+
+/** agentIssues/preview recompute (graph-wide validation, full prompt assembly)
+ * only needs to track the user's edits, not their every keystroke. */
+const PREVIEW_DEBOUNCE_MS = 300;
 
 const COLORS: Agent['colorCategory'][] = ['slate', 'blue', 'green', 'amber', 'red', 'violet', 'teal'];
 
 export function AgentInspector({ agent }: { agent: Agent }) {
-  const playground = useDomainStore((s) => s.playground)!;
+  const playground = useDomainStore((s) => s.playground);
   const update = useDomainStore((s) => s.updateAgent);
   const duplicate = useDomainStore((s) => s.duplicateAgentById);
   const remove = useDomainStore((s) => s.removeAgent);
@@ -36,7 +41,7 @@ export function AgentInspector({ agent }: { agent: Agent }) {
   const [newType, setNewType] = useState<ConnectionType>('conversation');
   const skillFileInput = useRef<HTMLInputElement>(null);
 
-  const library = playground.skillLibrary;
+  const library = playground?.skillLibrary ?? [];
 
   // System-prompt enhancer state (in-flight flag, the proposed rewrite awaiting
   // Apply/Discard, and any sanitized provider error).
@@ -82,9 +87,9 @@ export function AgentInspector({ agent }: { agent: Agent }) {
   }
 
   // Outgoing connections + which agents are still available as new targets.
-  const outgoing = playground.connections.filter((c) => c.source === agent.id);
+  const outgoing = (playground?.connections ?? []).filter((c) => c.source === agent.id);
   const outgoingTargets = new Set(outgoing.map((c) => c.target));
-  const availableTargets = playground.agents.filter(
+  const availableTargets = (playground?.agents ?? []).filter(
     (a) => a.id !== agent.id && !outgoingTargets.has(a.id),
   );
 
@@ -101,9 +106,17 @@ export function AgentInspector({ agent }: { agent: Agent }) {
     setNewTarget('');
   }
 
+  // Debounced so graph-wide validation and prompt assembly (both non-trivial
+  // for larger playgrounds) run once the user pauses, not on every keystroke.
+  const debouncedPlayground = useDebouncedValue(playground, PREVIEW_DEBOUNCE_MS);
+  const debouncedAgent = useDebouncedValue(agent, PREVIEW_DEBOUNCE_MS);
+
   const agentIssues = useMemo(
-    () => validateForRun(playground, providers).filter((i) => i.agentId === agent.id),
-    [playground, providers, agent.id],
+    () =>
+      debouncedPlayground
+        ? validateForRun(debouncedPlayground, providers).filter((i) => i.agentId === agent.id)
+        : [],
+    [debouncedPlayground, providers, agent.id],
   );
 
   function patch(p: Partial<Agent>) {
@@ -211,8 +224,9 @@ export function AgentInspector({ agent }: { agent: Agent }) {
   }
 
   function handleDelete() {
-    const hasHistory = playground.transcript.some((m) => m.agentId === agent.id);
-    const hasConnections = playground.connections.some((c) => c.source === agent.id || c.target === agent.id);
+    const hasHistory = playground?.transcript.some((m) => m.agentId === agent.id) ?? false;
+    const hasConnections =
+      playground?.connections.some((c) => c.source === agent.id || c.target === agent.id) ?? false;
     if (hasHistory || hasConnections) {
       if (!window.confirm(`Delete "${agent.name}"? Its connections will be removed. Transcript history is preserved.`)) {
         return;
@@ -223,18 +237,37 @@ export function AgentInspector({ agent }: { agent: Agent }) {
   }
 
   const { preview, estTokens } = useMemo(() => {
+    if (!debouncedPlayground) return { preview: '', estTokens: 0 };
     // Preview against the actual bounded history so the estimate reflects a real
     // request, not an empty one (spec §11.6 — clearly an estimate).
-    const history = agent.runtime.includeHistory
-      ? boundHistory(playground.transcript, agent.runtime.historyWindow)
+    const history = debouncedAgent.runtime.includeHistory
+      ? boundHistory(debouncedPlayground.transcript, debouncedAgent.runtime.historyWindow)
       : [];
-    const ctx = { agent, conversation: playground.conversation, history, incoming: null, isFirstTurn: true };
+    const ctx = {
+      agent: debouncedAgent,
+      conversation: debouncedPlayground.conversation,
+      history,
+      incoming: null,
+      isFirstTurn: true,
+    };
     const text = `${buildSystemPrompt(ctx)}\n\n--- USER TURN ---\n${buildTaskPrompt(ctx)}`;
     const full = assembleMessages(ctx)
       .map((m) => m.content)
       .join('\n');
     return { preview: text, estTokens: estimateTokens(full) };
-  }, [agent, playground.conversation, playground.transcript]);
+    // Depend on the specific fields read (conversation, transcript), not the
+    // whole debouncedPlayground object — recomputing this preview on every
+    // unrelated playground change (other agents, UI layout, etc.) is exactly
+    // the wasted work the debounce in this hook exists to avoid.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedAgent, debouncedPlayground?.conversation, debouncedPlayground?.transcript]);
+
+  // Guarded defensively (after all hooks, to satisfy the Rules of Hooks) — the
+  // parent (Inspector.tsx) only ever mounts this component with an `agent`
+  // resolved from the active playground, so `playground` is structurally
+  // non-null whenever this renders in practice. This guard is a backstop
+  // against a future caller reaching this component some other way.
+  if (!playground) return null;
 
   return (
     <fieldset className={styles.body} disabled={isRunning}>

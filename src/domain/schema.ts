@@ -103,6 +103,9 @@ export const LlmConfig = z.object({
   providerId: z.string().nullable().default(null),
   model: z.string().default(''),
   temperature: z.number().min(0).max(2).default(0.7),
+  // No upper bound: providers' context/output limits vary too widely (and change
+  // over time) to encode a single safe cap here; the provider API itself rejects
+  // out-of-range values.
   maxOutputTokens: z.number().int().positive().default(1024),
   topP: z.number().min(0).max(1).optional(),
   seed: z.number().int().optional(),
@@ -113,6 +116,9 @@ export type LlmConfig = z.infer<typeof LlmConfig>;
 export const RuntimeConfig = z.object({
   enabled: z.boolean().default(true),
   maxResponsesPerRun: z.number().int().positive().default(3),
+  // No upper bound: left to the user's judgment, same as maxTotalTurns/
+  // maxResponsesPerAgent below — a long-running unattended session is a
+  // deliberate choice, not a misconfiguration to guard against.
   responseTimeoutMs: z.number().int().positive().default(60_000),
   includeHistory: z.boolean().default(true),
   historyWindow: z.number().int().positive().default(10),
@@ -188,7 +194,12 @@ export type Connection = z.infer<typeof Connection>;
 export const Provider = z.object({
   id: z.string(),
   displayName: z.string(),
-  baseUrl: z.string(),
+  // Empty is the not-yet-configured default (see factories.createProvider);
+  // anything else must be a well-formed http(s) URL.
+  baseUrl: z.string().refine(
+    (v) => v === '' || /^https?:\/\/.+/i.test(v),
+    { message: 'Base URL must be empty or start with http:// or https://' },
+  ),
   path: z.string().default('/v1/chat/completions'),
   authMethod: AuthMethod.default('bearer'),
   authHeaderName: z.string().default('Authorization'),
@@ -244,6 +255,10 @@ export const ConversationSettings = z.object({
   objective: z.string().default(''),
   initialContext: z.string().default(''),
   startingAgentId: z.string().nullable().default(null),
+  // No upper bound on maxTotalTurns/maxResponsesPerAgent/responseTimeoutMs:
+  // these gate how long/large a run can get, and a user deliberately running
+  // an extended session is legitimate — the runtime store's own bounded ring
+  // buffers (events/errors, see runtimeStore.ts) are what keep memory in check.
   maxTotalTurns: z.number().int().positive().default(12),
   maxResponsesPerAgent: z.number().int().positive().default(3),
   responseTimeoutMs: z.number().int().positive().default(60_000),

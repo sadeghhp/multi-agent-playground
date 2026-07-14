@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createAgent, createPlayground, createProvider } from '../../domain/factories';
-import { exportToJson, importFromJson, toExport } from '../serialization';
+import { MAX_IMPORT_BYTES, exportToJson, importFromJson, toExport } from '../serialization';
 
 function playgroundWithSecret() {
   const pg = createPlayground('Test');
@@ -45,6 +45,20 @@ describe('import', () => {
     const res = importFromJson(JSON.stringify({ schemaVersion: 999 }), false);
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/newer version/i);
+  });
+
+  it('measures the size limit in actual bytes, not UTF-16 code units (L-5 regression)', () => {
+    // Each 'é' is 1 UTF-16 code unit but 2 UTF-8 bytes — a string whose
+    // `.length` sits just under the limit can still be well over it in bytes.
+    const perChar = 2; // bytes per 'é' in UTF-8
+    const charCount = Math.floor(MAX_IMPORT_BYTES / perChar) + 1000;
+    const oversized = 'é'.repeat(charCount);
+    expect(oversized.length).toBeLessThan(MAX_IMPORT_BYTES); // would pass a naive .length check
+    expect(new TextEncoder().encode(oversized).length).toBeGreaterThan(MAX_IMPORT_BYTES);
+
+    const res = importFromJson(oversized, false);
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/too large/i);
   });
 
   it('rejects structurally invalid playgrounds', () => {

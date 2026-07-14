@@ -135,6 +135,114 @@ describe('provider registry', () => {
     expect((await db.loadAllProviders()).some((p) => p.id === provider.id)).toBe(false);
     expect(loadCredential(provider.id)).toBeUndefined();
   });
+
+  describe('credential/IDB atomicity (M-8 regression)', () => {
+    afterEach(() => {
+      vi.doUnmock('idb');
+    });
+
+    it('does not save a credential when the underlying IDB write fails', async () => {
+      installFreshIndexedDb();
+      vi.doMock('idb', async (importOriginal) => {
+        const actual = await importOriginal<typeof import('idb')>();
+        return {
+          ...actual,
+          openDB: async (...args: Parameters<typeof actual.openDB>) => {
+            const real = await actual.openDB(...args);
+            return new Proxy(real, {
+              get(target, prop, receiver) {
+                if (prop === 'put') {
+                  return (storeName: string, value: unknown) =>
+                    storeName === 'providers'
+                      ? Promise.reject(new Error('put failed'))
+                      : target.put(storeName, value);
+                }
+                // idb's own method wrappers rely on `this` being their own proxy
+                // (they internally unwrap it) — binding to `target` here keeps
+                // every other call working through this outer proxy.
+                const value = Reflect.get(target, prop, receiver);
+                return typeof value === 'function' ? value.bind(target) : value;
+              },
+            });
+          },
+        };
+      });
+
+      const db = await import('../db');
+      const provider = providerWithKey();
+
+      await expect(db.saveProvider(provider)).rejects.toThrow('put failed');
+      // The failed IDB write must leave no orphaned credential behind.
+      expect(loadCredential(provider.id)).toBeUndefined();
+    });
+
+    it('does not clear the credential when the underlying IDB delete fails', async () => {
+      installFreshIndexedDb();
+      vi.doMock('idb', async (importOriginal) => {
+        const actual = await importOriginal<typeof import('idb')>();
+        return {
+          ...actual,
+          openDB: async (...args: Parameters<typeof actual.openDB>) => {
+            const real = await actual.openDB(...args);
+            return new Proxy(real, {
+              get(target, prop, receiver) {
+                if (prop === 'delete') {
+                  return (storeName: string, key: string) =>
+                    storeName === 'providers'
+                      ? Promise.reject(new Error('delete failed'))
+                      : target.delete(storeName, key);
+                }
+                const value = Reflect.get(target, prop, receiver);
+                return typeof value === 'function' ? value.bind(target) : value;
+              },
+            });
+          },
+        };
+      });
+
+      const db = await import('../db');
+      const provider = providerWithKey();
+      await db.saveProvider(provider);
+      expect(loadCredential(provider.id)).toBe('secret-123');
+
+      await expect(db.deleteProvider(provider.id)).rejects.toThrow('delete failed');
+      // The failed IDB delete must leave the still-referenced credential intact.
+      expect(loadCredential(provider.id)).toBe('secret-123');
+    });
+  });
+});
+
+describe('getDb resilience', () => {
+  afterEach(() => {
+    vi.doUnmock('idb');
+  });
+
+  it('retries after a failed open instead of permanently caching the rejection (H-1 regression)', async () => {
+    installFreshIndexedDb();
+    let calls = 0;
+    vi.doMock('idb', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('idb')>();
+      return {
+        ...actual,
+        openDB: (...args: Parameters<typeof actual.openDB>) => {
+          calls += 1;
+          if (calls === 1) return Promise.reject(new Error('boom: simulated open failure'));
+          return actual.openDB(...args);
+        },
+      };
+    });
+
+    const db = await import('../db');
+    const pg = createPlayground('Retry Test');
+
+    await expect(db.savePlayground(pg)).rejects.toThrow('boom');
+    // A second call must retry openDB rather than reusing the dead promise —
+    // without the fix this would reject with the same cached error forever.
+    await db.savePlayground(pg);
+    const loaded = await db.loadPlayground(pg.id);
+    expect(loaded?.name).toBe('Retry Test');
+    expect(calls).toBe(2);
+  });
 });
 
 describe('v1 → v2 migration', () => {

@@ -74,6 +74,31 @@ describe('agent library round-trip', () => {
     expect(all.some((s) => s.id === 'lib_broken')).toBe(false);
   });
 
+  it('migrates a stale-but-valid schemaVersion instead of dropping it as corrupted (M-7 regression)', async () => {
+    const db = await freshDb();
+    const saved = createSavedAgent(createAgent({ name: 'Legacy' }));
+    // Force the lazy connection open (and its store-creating upgrade) before
+    // seeding a raw record directly, same as the "corrupted record" test above.
+    await db.loadAllLibraryAgents();
+
+    // Simulate a library agent saved under an older schemaVersion — otherwise
+    // fully valid, just stamped by a previous app version.
+    await new Promise<void>((resolve, reject) => {
+      const req = indexedDB.open('multi-agent-playground');
+      req.onsuccess = () => {
+        const idb = req.result;
+        const tx = idb.transaction('agentLibrary', 'readwrite');
+        tx.objectStore('agentLibrary').put({ ...saved, schemaVersion: 1 });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      };
+      req.onerror = () => reject(req.error);
+    });
+
+    const all = await db.loadAllLibraryAgents();
+    expect(all.some((s) => s.id === saved.id && s.name === 'Legacy')).toBe(true);
+  });
+
   it('does not disturb the playgrounds store sharing the same connection', async () => {
     const db = await freshDb();
     const pg = createPlayground('Coexist');

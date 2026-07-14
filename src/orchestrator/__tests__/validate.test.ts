@@ -88,6 +88,31 @@ describe('validateForRun', () => {
     provider.apiKey = undefined;
     expect(validateForRun(pg, providers).some((i) => i.level === 'error' && /api key/i.test(i.message))).toBe(true);
   });
+
+  it('errors on an enabled connection that references a missing agent', () => {
+    const { pg, providers } = readyPlayground();
+    pg.connections.push({
+      id: 'dangling', source: pg.agents[0].id, target: 'nonexistent-agent',
+      enabled: true, type: 'conversation', priority: 0,
+    });
+    expect(
+      validateForRun(pg, providers).some((i) => i.level === 'error' && /missing agent/i.test(i.message)),
+    ).toBe(true);
+  });
+
+  it('does not block on a DISABLED connection that references a missing agent (L-12 regression)', () => {
+    const { pg, providers } = readyPlayground();
+    // A leftover disabled+dangling edge (e.g. from a bad import) can never
+    // fire — outgoing() already filters disabled connections at run time —
+    // so it must not block runs as if it were a live error.
+    pg.connections.push({
+      id: 'dangling', source: pg.agents[0].id, target: 'nonexistent-agent',
+      enabled: false, type: 'conversation', priority: 0,
+    });
+    const issues = validateForRun(pg, providers);
+    expect(issues.some((i) => /missing agent/i.test(i.message))).toBe(false);
+    expect(hasBlockingErrors(issues)).toBe(false);
+  });
 });
 
 describe('reachableFrom', () => {

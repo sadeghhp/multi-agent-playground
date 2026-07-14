@@ -20,6 +20,7 @@ function msg(over: Partial<TranscriptMessage>): TranscriptMessage {
     id: 'm', turn: 1, agentId: null, agentName: 'Agent', agentDeleted: false,
     role: '', model: '', providerId: null, content: '', status: 'completed',
     sourceAgentId: null, connectionType: null, timestamp: 1_700_000_000_000,
+    language: 'en',
     ...over,
   };
 }

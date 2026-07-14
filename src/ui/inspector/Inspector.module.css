@@ -89,7 +89,13 @@
 }
 .skillHead { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
 .skillHead input[type='checkbox'] { width: auto; }
+.skillHead input[type='text'], .skillHead > input:not([type]) { flex: 1; min-width: 0; }
 .skillHead button { padding: 2px 8px; }
+.skill input { margin-bottom: 6px; }
+.skillLink { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.skillLink button { padding: 2px 8px; font-size: 12px; }
+.skillActions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.skillActions select { flex: 1; min-width: 140px; }
 
 .preview {
   font-family: var(--mono);

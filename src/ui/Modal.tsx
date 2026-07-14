@@ -31,6 +31,12 @@ export function Modal({ title, onClose, children, footer, width = 560 }: ModalPr
       );
 
     const onKey = (e: KeyboardEvent) => {
+      // With nested dialogs (e.g. a confirm opened from inside another modal),
+      // every Modal has a window keydown listener. Only the top-most one should
+      // react, otherwise Escape closes both and the lower trap steals focus.
+      const dialogs = document.querySelectorAll('[role="dialog"]');
+      if (dialogs.length && dialogs[dialogs.length - 1] !== ref.current) return;
+
       if (e.key === 'Escape') {
         onCloseRef.current();
         return;

@@ -30,6 +30,57 @@ function buildBody(params: ChatRequestParams): Record<string, unknown> {
   return body;
 }
 
+function joinContentParts(parts: unknown[]): string {
+  const texts: string[] = [];
+  for (const part of parts) {
+    if (typeof part === 'string') texts.push(part);
+    else if (part && typeof part === 'object') {
+      const p = part as Record<string, unknown>;
+      if (typeof p.text === 'string') texts.push(p.text);
+      else if (typeof p.content === 'string') texts.push(p.content);
+    }
+  }
+  return texts.join('');
+}
+
+/** Normalize assistant text from OpenAI-compatible message shapes. */
+function normalizeMessageContent(message: Record<string, unknown> | undefined): string | null {
+  if (!message) return null;
+
+  const content = message.content;
+
+  if (typeof content === 'string') {
+    if (content.length > 0) return content;
+  } else if (Array.isArray(content)) {
+    const joined = joinContentParts(content);
+    if (joined.length > 0) return joined;
+  } else if (content && typeof content === 'object') {
+    const text = (content as { text?: unknown }).text;
+    if (typeof text === 'string' && text.length > 0) return text;
+  }
+
+  // Reasoning models and some compat servers put the visible answer elsewhere.
+  for (const key of ['reasoning_content', 'reasoning', 'text']) {
+    const v = message[key];
+    if (typeof v === 'string' && v.length > 0) return v;
+  }
+
+  // Allow empty string content when it was explicitly provided.
+  if (typeof content === 'string') return content;
+
+  return null;
+}
+
+function normalizeDeltaContent(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) return joinContentParts(content);
+  if (content && typeof content === 'object') {
+    const text = (content as { text?: unknown }).text;
+    if (typeof text === 'string') return text;
+  }
+  return '';
+}
+
 function extractText(data: unknown): { text: string; finishReason: string | null } {
   const choices = (data as { choices?: unknown }).choices;
   if (!Array.isArray(choices) || choices.length === 0) {
@@ -37,15 +88,25 @@ function extractText(data: unknown): { text: string; finishReason: string | null
       detail: 'Response contained no choices array.',
     });
   }
-  const first = choices[0] as { message?: { content?: unknown }; finish_reason?: unknown };
-  const content = first.message?.content;
-  if (typeof content !== 'string') {
+  const first = choices[0] as {
+    message?: Record<string, unknown>;
+    finish_reason?: unknown;
+    text?: unknown;
+  };
+
+  let text = normalizeMessageContent(first.message);
+  if (text === null && typeof first.text === 'string') {
+    text = first.text;
+  }
+  if (text === null) {
     throw new ProviderError('unsupported-response', summaryFor('unsupported-response'), {
-      detail: 'choices[0].message.content was not a string.',
+      detail:
+        'Could not read assistant text from choices[0].message.content ' +
+        '(expected a string, content-part array, or a reasoning/text fallback).',
     });
   }
   return {
-    text: content,
+    text,
     finishReason: typeof first.finish_reason === 'string' ? first.finish_reason : null,
   };
 }
@@ -120,9 +181,10 @@ async function consumeStream(
     const choice = (json.choices as Array<Record<string, unknown>> | undefined)?.[0];
     if (choice) {
       const delta = (choice.delta as { content?: unknown } | undefined)?.content;
-      if (typeof delta === 'string' && delta.length > 0) {
-        text += delta;
-        onToken(delta);
+      const chunk = normalizeDeltaContent(delta);
+      if (chunk.length > 0) {
+        text += chunk;
+        onToken(chunk);
       }
       if (typeof choice.finish_reason === 'string') finishReason = choice.finish_reason;
     }

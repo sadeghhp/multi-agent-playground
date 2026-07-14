@@ -247,6 +247,63 @@ describe('sendChat', () => {
     ).rejects.toMatchObject({ kind: 'unsupported-response' });
   });
 
+  it('accepts content-part arrays (multimodal / compat servers)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        okResponse({
+          model: 'test-model',
+          choices: [{
+            message: {
+              role: 'assistant',
+              content: [{ type: 'text', text: 'hello world' }],
+            },
+            finish_reason: 'stop',
+          }],
+        }),
+      ),
+    );
+    const provider = createProvider({ baseUrl: 'https://api.example.com', apiKey: 'k' });
+    const res = await sendChat(provider, { model: 'm', messages: [{ role: 'user', content: 'hi' }] });
+    expect(res.text).toBe('hello world');
+  });
+
+  it('falls back to reasoning_content when content is null', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        okResponse({
+          model: 'test-model',
+          choices: [{
+            message: {
+              role: 'assistant',
+              content: null,
+              reasoning_content: 'ok',
+            },
+            finish_reason: 'stop',
+          }],
+        }),
+      ),
+    );
+    const provider = createProvider({ baseUrl: 'https://api.example.com', apiKey: 'k' });
+    const res = await sendChat(provider, { model: 'm', messages: [{ role: 'user', content: 'hi' }] });
+    expect(res.text).toBe('ok');
+  });
+
+  it('accepts legacy choices[0].text completion shape', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        okResponse({
+          choices: [{ text: 'legacy ok', finish_reason: 'stop' }],
+        }),
+      ),
+    );
+    const provider = createProvider({ baseUrl: 'https://api.example.com', apiKey: 'k' });
+    const res = await sendChat(provider, { model: 'm', messages: [{ role: 'user', content: 'hi' }] });
+    expect(res.text).toBe('legacy ok');
+  });
+
   it('surfaces an in-band SSE error instead of silently returning empty text', async () => {
     const sse = [
       'data: {"model":"test-model","choices":[{"delta":{"content":"partial"}}]}\n\n',

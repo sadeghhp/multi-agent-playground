@@ -69,8 +69,27 @@ export const Skill = z.object({
   description: z.string().default(''),
   instruction: z.string().default(''),
   enabled: z.boolean().default(true),
+  /**
+   * Provenance pointer to the skillLibrary entry this skill was copied from
+   * (spec §7.2). Optional and non-breaking. Enables the "re-sync from library"
+   * action; skills typed by hand or added from a preset carry no libraryId.
+   */
+  libraryId: z.string().optional(),
 });
 export type Skill = z.infer<typeof Skill>;
+
+/**
+ * Library skill (reusable catalog entry). A Skill template without per-agent
+ * state (no `enabled`): attaching one copies name/description/instruction onto
+ * an agent as a fresh Skill. Lives on the Playground so it persists and exports.
+ */
+export const LibrarySkill = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().default(''),
+  instruction: z.string().default(''),
+});
+export type LibrarySkill = z.infer<typeof LibrarySkill>;
 
 // ---------------------------------------------------------------------------
 // LLM + runtime config (spec §7.2)
@@ -230,6 +249,10 @@ export const Playground = z.object({
   agents: z.array(Agent).default([]),
   connections: z.array(Connection).default([]),
   providers: z.array(Provider).default([]),
+  // Reusable skill catalog (spec §7.2). Additive + defaulted so v1 files without
+  // it still parse — no SCHEMA_VERSION bump needed. Carries no secrets, so it
+  // exports as-is (PlaygroundExport inherits this field).
+  skillLibrary: z.array(LibrarySkill).default([]),
   conversation: ConversationSettings,
   transcript: z.array(TranscriptMessage).default([]),
   ui: UiLayoutState,

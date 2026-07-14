@@ -3,6 +3,7 @@ import {
   type Agent,
   type Connection,
   type ConversationSettings,
+  type LibrarySkill,
   type Playground,
   type Provider,
   type TranscriptMessage,
@@ -51,6 +52,13 @@ interface DomainState {
   addProvider: (provider: Provider) => void;
   updateProvider: (id: string, patch: Partial<Provider>) => void;
   removeProvider: (id: string) => void;
+
+  // skill library (reusable catalog)
+  addLibrarySkill: (skill: LibrarySkill) => void;
+  updateLibrarySkill: (id: string, patch: Partial<LibrarySkill>) => void;
+  removeLibrarySkill: (id: string) => void;
+  /** Replace the whole catalog (used by import/merge). */
+  setSkillLibrary: (skills: LibrarySkill[]) => void;
 
   // conversation + transcript + ui layout
   updateConversation: (patch: Partial<ConversationSettings>) => void;
@@ -242,6 +250,30 @@ export const useDomainStore = create<DomainState>((set, get) => {
           a.llm.providerId === id ? { ...a, llm: { ...a.llm, providerId: null } } : a,
         ),
       }));
+    },
+
+    addLibrarySkill(skill) {
+      mutate((pg) => ({ ...pg, skillLibrary: [...pg.skillLibrary, skill] }));
+    },
+
+    updateLibrarySkill(id, patch) {
+      mutate((pg) => ({
+        ...pg,
+        skillLibrary: pg.skillLibrary.map((s) => (s.id === id ? { ...s, ...patch } : s)),
+      }));
+    },
+
+    removeLibrarySkill(id) {
+      // Attached agent skills keep their now-dangling libraryId; the editor hides
+      // the link/re-sync affordance when it no longer resolves (spec §7.2).
+      mutate((pg) => ({
+        ...pg,
+        skillLibrary: pg.skillLibrary.filter((s) => s.id !== id),
+      }));
+    },
+
+    setSkillLibrary(skills) {
+      mutate((pg) => ({ ...pg, skillLibrary: skills }));
     },
 
     updateConversation(patch) {

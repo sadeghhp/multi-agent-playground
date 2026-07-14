@@ -103,6 +103,7 @@ export function Toolbar() {
         </button>
         <span className={styles.sep} />
         <button type="button" onClick={() => setPanel('providers')}>Providers</button>
+        <button type="button" onClick={() => setPanel('skills')} disabled={!playground}>Skills</button>
         <button type="button" onClick={() => clearTranscript()} disabled={isRunning}>
           Clear chat
         </button>

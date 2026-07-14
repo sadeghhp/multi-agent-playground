@@ -98,3 +98,33 @@ describe('removeAgent', () => {
     expect(pg.transcript[0].agentDeleted).toBe(true); // tagged
   });
 });
+
+describe('skill library actions', () => {
+  it('adds, updates, and removes library skills', () => {
+    const store = useDomainStore.getState();
+    store.newPlayground('P');
+    const seeded = useDomainStore.getState().playground!.skillLibrary.length;
+
+    store.addLibrarySkill({ id: 'lib_1', name: 'custom', description: '', instruction: '' });
+    expect(useDomainStore.getState().playground!.skillLibrary).toHaveLength(seeded + 1);
+
+    store.updateLibrarySkill('lib_1', { instruction: 'do the thing' });
+    expect(
+      useDomainStore.getState().playground!.skillLibrary.find((s) => s.id === 'lib_1')!.instruction,
+    ).toBe('do the thing');
+
+    store.removeLibrarySkill('lib_1');
+    expect(
+      useDomainStore.getState().playground!.skillLibrary.find((s) => s.id === 'lib_1'),
+    ).toBeUndefined();
+  });
+
+  it('setSkillLibrary replaces the whole catalog (import/merge)', () => {
+    const store = useDomainStore.getState();
+    store.newPlayground('P');
+    store.setSkillLibrary([{ id: 'lib_x', name: 'only', description: '', instruction: '' }]);
+    const lib = useDomainStore.getState().playground!.skillLibrary;
+    expect(lib).toHaveLength(1);
+    expect(lib[0].id).toBe('lib_x');
+  });
+});

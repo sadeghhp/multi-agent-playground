@@ -15,6 +15,7 @@ export function ConnectionInspector({ connection }: { connection: Connection }) 
   const update = useDomainStore((s) => s.updateConnection);
   const remove = useDomainStore((s) => s.removeConnection);
   const clearSelection = useUiStore((s) => s.clearSelection);
+  const requestConfirm = useUiStore((s) => s.requestConfirm);
   const isRunning = useRuntimeStore((s) => s.status === 'running');
 
   const source = playground.agents.find((a) => a.id === connection.source);
@@ -78,7 +79,14 @@ export function ConnectionInspector({ connection }: { connection: Connection }) 
         type="button"
         className="danger"
         disabled={isRunning}
-        onClick={() => {
+        onClick={async () => {
+          const ok = await requestConfirm({
+            title: 'Delete connection',
+            message: `Delete the connection ${source?.name ?? 'deleted'} → ${target?.name ?? 'deleted'}?`,
+            confirmLabel: 'Delete',
+            danger: true,
+          });
+          if (!ok) return;
           remove(connection.id);
           clearSelection();
         }}

@@ -12,3 +12,11 @@
 .info { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .meta { font-size: 11px; color: var(--text-subtle); }
+
+/* Secondary destructive action; reveals danger styling on hover/focus. */
+.disposeBtn:hover:not(:disabled),
+.disposeBtn:focus-visible {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: var(--danger-bg);
+}

@@ -326,6 +326,26 @@ function ProviderEditor({
         </div>
       </div>
 
+      {import.meta.env.DEV && (
+        <div className="field">
+          <label className={styles.inline}>
+            <input
+              type="checkbox"
+              checked={provider.bypassDevProxy}
+              onChange={(e) => onChange({ bypassDevProxy: e.target.checked })}
+            />
+            Send requests directly from the browser (bypass dev proxy)
+          </label>
+          <p className={styles.hint}>
+            Dev only. By default <code>vite dev</code> routes remote provider calls through the
+            local dev-server proxy (to sidestep browser CORS). Enable this for an endpoint only your
+            browser can reach — e.g. behind a VPN or browser-authenticated proxy the dev server
+            can't use — where proxying would hang and time out. The provider must then allow
+            browser-origin (CORS) requests. Production builds are always browser-direct regardless.
+          </p>
+        </div>
+      )}
+
       <div className={styles.testBox}>
         <div className={styles.testRow}>
           <input value={testModel} onChange={(e) => setTestModel(e.target.value)} placeholder="model to test (optional)" />

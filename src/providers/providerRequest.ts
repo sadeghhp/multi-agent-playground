@@ -89,7 +89,7 @@ export async function providerRequest(
   }
 
   const endpoint = buildEndpoint(provider.baseUrl, path);
-  const { url: fetchUrl, proxyTarget } = resolveFetchTarget(endpoint);
+  const { url: fetchUrl, proxyTarget } = resolveFetchTarget(endpoint, provider);
   const headers = buildProviderHeaders(provider, method === 'POST' && options.body !== undefined);
   if (proxyTarget) headers[DEV_PROXY_TARGET_HEADER] = proxyTarget;
 

@@ -173,6 +173,7 @@ export function createProvider(overrides: Partial<Provider> = {}): Provider {
     models: [],
     customHeaders: {},
     timeoutMs: 60_000,
+    bypassDevProxy: false,
     enabled: true,
     ...overrides,
   };

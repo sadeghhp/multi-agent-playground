@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useDomainStore } from '../store/domainStore';
 import { useRuntimeStore } from '../store/runtimeStore';
 import { agentColor } from '../graph/colors';
@@ -85,19 +85,45 @@ export function BottomPanel() {
 
   const showJumpToLatest = tab === 'transcript' && !collapsed && !atBottom && (transcript.length > 0 || !!liveAgent);
 
+  const TABS: { key: Tab; label: string; count: number }[] = [
+    { key: 'transcript', label: 'Transcript', count: transcript.length },
+    { key: 'log', label: 'Event log', count: events.length },
+    { key: 'errors', label: 'Errors', count: errors.length },
+  ];
+
+  // Arrow-key navigation across the tablist (WAI-ARIA tabs pattern).
+  function onTabKeyDown(e: ReactKeyboardEvent) {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft' && e.key !== 'Home' && e.key !== 'End') return;
+    e.preventDefault();
+    const i = TABS.findIndex((t) => t.key === tab);
+    const next =
+      e.key === 'Home' ? 0
+      : e.key === 'End' ? TABS.length - 1
+      : e.key === 'ArrowRight' ? (i + 1) % TABS.length
+      : (i - 1 + TABS.length) % TABS.length;
+    setTab(TABS[next].key);
+    document.getElementById(`bp-tab-${TABS[next].key}`)?.focus();
+  }
+
   return (
     <section className={styles.panel} data-collapsed={collapsed || undefined} aria-label="Execution panel">
       <header className={styles.header}>
-        <div className={styles.tabs} role="tablist">
-          <button role="tab" aria-selected={tab === 'transcript'} className={tab === 'transcript' ? styles.tabActive : ''} onClick={() => setTab('transcript')}>
-            Transcript ({transcript.length})
-          </button>
-          <button role="tab" aria-selected={tab === 'log'} className={tab === 'log' ? styles.tabActive : ''} onClick={() => setTab('log')}>
-            Event log ({events.length})
-          </button>
-          <button role="tab" aria-selected={tab === 'errors'} className={tab === 'errors' ? styles.tabActive : ''} onClick={() => setTab('errors')}>
-            Errors ({errors.length})
-          </button>
+        <div className={styles.tabs} role="tablist" aria-label="Execution views">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              role="tab"
+              id={`bp-tab-${t.key}`}
+              aria-controls={`bp-panel-${t.key}`}
+              aria-selected={tab === t.key}
+              tabIndex={tab === t.key ? 0 : -1}
+              className={tab === t.key ? styles.tabActive : ''}
+              onClick={() => setTab(t.key)}
+              onKeyDown={onTabKeyDown}
+            >
+              {t.label} ({t.count})
+            </button>
+          ))}
         </div>
         <div className={styles.headerRight}>
           {transcript.length > 0 && (
@@ -123,7 +149,14 @@ export function BottomPanel() {
       </header>
 
       {!collapsed && (
-        <div className={styles.content} ref={contentRef} onScroll={handleScroll}>
+        <div
+          className={styles.content}
+          ref={contentRef}
+          onScroll={handleScroll}
+          role="tabpanel"
+          id={`bp-panel-${tab}`}
+          aria-labelledby={`bp-tab-${tab}`}
+        >
           {tab === 'transcript' && (
             transcript.length === 0 && !liveAgent ? (
               <p className={styles.empty}>No conversation yet. Configure agents, connect them, and press Run.</p>

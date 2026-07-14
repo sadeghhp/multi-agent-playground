@@ -1,5 +1,6 @@
 import { useDomainStore } from '../store/domainStore';
 import { useUiStore } from '../store/uiStore';
+import { agentColor } from '../graph/colors';
 import { AgentInspector } from './inspector/AgentInspector';
 import { ConnectionInspector } from './inspector/ConnectionInspector';
 import styles from './inspector/Inspector.module.css';
@@ -18,9 +19,20 @@ export function Inspector() {
   return (
     <aside className={styles.inspector} aria-label="Inspector">
       <header className={styles.header}>
-        <h2 className={styles.title}>
-          {agent ? 'Agent' : connection ? 'Connection' : 'Inspector'}
-        </h2>
+        {agent ? (
+          <h2 className={styles.title}>
+            <span
+              className={styles.identityDot}
+              style={{ backgroundColor: agentColor(agent.colorCategory) }}
+              aria-hidden="true"
+            />
+            <span className={styles.identityName} title={agent.name}>
+              {agent.name || 'Unnamed agent'}
+            </span>
+          </h2>
+        ) : (
+          <h2 className={styles.title}>{connection ? 'Connection' : 'Inspector'}</h2>
+        )}
       </header>
       {agent ? (
         // key resets the inspector's local form state (e.g. the "Connect to…"

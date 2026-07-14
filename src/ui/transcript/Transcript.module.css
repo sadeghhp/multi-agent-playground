@@ -7,6 +7,43 @@
 }
 .failed { border-color: var(--danger); background: var(--danger-bg); }
 
+.live {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 26%, transparent);
+}
+.liveBadge {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.liveBadge::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: liveBlink 1s steps(2) infinite;
+}
+.liveBody { white-space: pre-wrap; word-break: break-word; }
+.caret {
+  display: inline-block;
+  width: 6px;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: var(--accent);
+  border-radius: 1px;
+  animation: liveBlink 1s steps(2) infinite;
+}
+@keyframes liveBlink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .liveBadge::before, .caret { animation: none; }
+}
+
 .msgHeader { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .msgAgent { font-weight: 600; }
 .msgMeta { font-size: 11px; color: var(--text-subtle); }

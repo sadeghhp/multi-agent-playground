@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDomainStore } from '../store/domainStore';
 import { useRuntimeStore } from '../store/runtimeStore';
 import { Message } from './transcript/Message';
+import { LiveMessage } from './transcript/LiveMessage';
 import styles from './BottomPanel.module.css';
 
 type Tab = 'transcript' | 'log' | 'errors';
@@ -25,9 +26,17 @@ export function BottomPanel() {
   const currentTurn = useRuntimeStore((s) => s.currentTurn);
   const events = useRuntimeStore((s) => s.events);
   const errors = useRuntimeStore((s) => s.errors);
+  const activeAgentId = useRuntimeStore((s) => s.activeAgentId);
+  const liveText = useRuntimeStore((s) => (s.activeAgentId ? s.streamingText[s.activeAgentId] : undefined));
 
   const [tab, setTab] = useState<Tab>('transcript');
   const transcript = playground?.transcript ?? [];
+
+  // The agent currently streaming an in-flight response (Prototype B), if any.
+  const liveAgent =
+    status === 'running' && activeAgentId && liveText
+      ? playground?.agents.find((a) => a.id === activeAgentId) ?? null
+      : null;
 
   // Aggregate run stats (spec §6 "token and latency estimates when available").
   const stats = useMemo(() => {
@@ -47,7 +56,7 @@ export function BottomPanel() {
     if (tab === 'transcript' && !collapsed && contentRef.current) {
       contentRef.current.scrollTop = contentRef.current.scrollHeight;
     }
-  }, [transcript.length, tab, collapsed]);
+  }, [transcript.length, tab, collapsed, liveText]);
 
   return (
     <section className={styles.panel} data-collapsed={collapsed || undefined} aria-label="Execution panel">
@@ -89,10 +98,15 @@ export function BottomPanel() {
       {!collapsed && (
         <div className={styles.content} ref={contentRef}>
           {tab === 'transcript' && (
-            transcript.length === 0 ? (
+            transcript.length === 0 && !liveAgent ? (
               <p className={styles.empty}>No conversation yet. Configure agents, connect them, and press Run.</p>
             ) : (
-              transcript.map((msg) => <Message key={msg.id} msg={msg} />)
+              <>
+                {transcript.map((msg) => <Message key={msg.id} msg={msg} />)}
+                {liveAgent && liveText && (
+                  <LiveMessage agentName={liveAgent.name} role={liveAgent.role} text={liveText} />
+                )}
+              </>
             )
           )}
 

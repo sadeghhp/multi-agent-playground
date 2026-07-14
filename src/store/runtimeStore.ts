@@ -60,11 +60,18 @@ interface RuntimeStoreState {
   errors: RunError[];
   /** Per-message sanitized request snapshots (spec §13.3), memory-only. */
   requestSnapshots: Record<string, RequestSnapshot>;
+  /**
+   * Per-agent live token buffer for the in-flight response, keyed by agent id.
+   * Memory-only; cleared when the agent's turn finalizes into the transcript.
+   */
+  streamingText: Record<string, string>;
   /** Non-serialized: aborts the in-flight provider request (spec §14). */
   abortController: AbortController | null;
 
   startRun: (runId: string, controller: AbortController) => void;
   recordSnapshot: (messageId: string, snapshot: RequestSnapshot) => void;
+  appendToken: (agentId: string, chunk: string) => void;
+  clearStreaming: (agentId: string) => void;
   setStatus: (status: RunStatus) => void;
   setActive: (agentId: string | null, connectionId: string | null) => void;
   setAgentState: (agentId: string, state: RuntimeState) => void;
@@ -87,6 +94,7 @@ const initial = {
   events: [],
   errors: [],
   requestSnapshots: {},
+  streamingText: {},
   abortController: null,
 };
 
@@ -103,6 +111,17 @@ export const useRuntimeStore = create<RuntimeStoreState>((set, get) => ({
 
   recordSnapshot: (messageId, snapshot) =>
     set((s) => ({ requestSnapshots: { ...s.requestSnapshots, [messageId]: snapshot } })),
+  appendToken: (agentId, chunk) =>
+    set((s) => ({
+      streamingText: { ...s.streamingText, [agentId]: (s.streamingText[agentId] ?? '') + chunk },
+    })),
+  clearStreaming: (agentId) =>
+    set((s) => {
+      if (!(agentId in s.streamingText)) return s;
+      const next = { ...s.streamingText };
+      delete next[agentId];
+      return { streamingText: next };
+    }),
   setStatus: (status) => set({ status }),
   setActive: (activeAgentId, activeConnectionId) => set({ activeAgentId, activeConnectionId }),
   setAgentState: (agentId, state) =>

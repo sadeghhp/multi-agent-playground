@@ -9,6 +9,20 @@ function okResponse(body: unknown, status = 200): Response {
   });
 }
 
+function sseResponse(chunks: string[]): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const c of chunks) controller.enqueue(encoder.encode(c));
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    status: 200,
+    headers: { 'Content-Type': 'text/event-stream' },
+  });
+}
+
 const sampleBody = {
   model: 'test-model',
   choices: [{ message: { role: 'assistant', content: 'hello world' }, finish_reason: 'stop' }],
@@ -137,6 +151,50 @@ describe('sendChat', () => {
         { signal: controller.signal },
       ),
     ).rejects.toMatchObject({ kind: 'aborted' });
+  });
+
+  it('streams SSE deltas via onToken and normalizes the assembled result', async () => {
+    const sse = [
+      'data: {"model":"test-model","choices":[{"delta":{"role":"assistant"}}]}\n\n',
+      'data: {"choices":[{"delta":{"content":"hello "}}]}\n\n',
+      'data: {"choices":[{"delta":{"content":"world"}}]}\n\n',
+      'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+      'data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}\n\n',
+      'data: [DONE]\n\n',
+    ];
+    const fetchMock = vi.fn().mockResolvedValue(sseResponse(sse));
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = createProvider({ baseUrl: 'https://api.example.com', apiKey: 'k' });
+
+    const tokens: string[] = [];
+    const res = await sendChat(
+      provider,
+      { model: 'test-model', messages: [{ role: 'user', content: 'hi' }] },
+      { onToken: (c) => tokens.push(c) },
+    );
+
+    expect(tokens).toEqual(['hello ', 'world']);
+    expect(res.text).toBe('hello world');
+    expect(res.finishReason).toBe('stop');
+    expect(res.totalTokens).toBe(7);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.stream).toBe(true);
+  });
+
+  it('emits the full text once when a streaming request returns plain JSON', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse(sampleBody));
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = createProvider({ baseUrl: 'https://api.example.com', apiKey: 'k' });
+
+    const tokens: string[] = [];
+    const res = await sendChat(
+      provider,
+      { model: 'test-model', messages: [{ role: 'user', content: 'hi' }] },
+      { onToken: (c) => tokens.push(c) },
+    );
+
+    expect(tokens).toEqual(['hello world']);
+    expect(res.text).toBe('hello world');
   });
 
   it('flags an unsupported response shape', async () => {

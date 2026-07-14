@@ -7,6 +7,9 @@ vi.mock('../persistence/db', () => ({
   loadPlayground: vi.fn().mockResolvedValue(undefined),
   loadAllPlaygrounds: vi.fn().mockResolvedValue([]),
   deletePlayground: vi.fn().mockResolvedValue(undefined),
+  saveProvider: vi.fn().mockResolvedValue(undefined),
+  loadAllProviders: vi.fn().mockResolvedValue([]),
+  deleteProvider: vi.fn().mockResolvedValue(undefined),
 }));
 
 // React Flow measures real DOM layout that jsdom can't provide; stub the canvas.

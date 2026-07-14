@@ -1,7 +1,9 @@
-import type { Playground } from '../domain/schema';
+import type { Playground, Provider } from '../domain/schema';
 
 /**
  * Graph + run validation (spec §19). Warnings don't block a run; errors do.
+ * Providers are application-global (store/providerStore.ts) and passed in so an
+ * agent's `llm.providerId` can be resolved against the current registry.
  */
 
 export interface ValidationIssue {
@@ -10,7 +12,7 @@ export interface ValidationIssue {
   agentId?: string;
 }
 
-export function validateForRun(pg: Playground): ValidationIssue[] {
+export function validateForRun(pg: Playground, providers: Provider[]): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const agentsById = new Map(pg.agents.map((a) => [a.id, a]));
   const enabledAgents = pg.agents.filter((a) => a.runtime.enabled);
@@ -22,6 +24,11 @@ export function validateForRun(pg: Playground): ValidationIssue[] {
     issues.push({ level: 'error', message: 'No starting agent selected.' });
   } else if (!start.runtime.enabled) {
     issues.push({ level: 'error', message: 'The starting agent is disabled.', agentId: start.id });
+  }
+
+  // Subject is the one required conversation field (spec §11.1).
+  if (!pg.conversation.subject.trim()) {
+    issues.push({ level: 'error', message: 'A conversation subject is required.' });
   }
 
   // Max turns
@@ -54,11 +61,21 @@ export function validateForRun(pg: Playground): ValidationIssue[] {
     if (!agent.systemInstruction.trim()) {
       issues.push({ level: 'error', message: `Agent "${agent.name}" has no system instruction.`, agentId: agent.id });
     }
-    const provider = pg.providers.find((p) => p.id === agent.llm.providerId);
+    const provider = providers.find((p) => p.id === agent.llm.providerId);
     if (!agent.llm.providerId || !provider) {
       issues.push({ level: 'error', message: `Agent "${agent.name}" has no provider assigned.`, agentId: agent.id });
     } else if (!provider.enabled) {
       issues.push({ level: 'error', message: `Agent "${agent.name}" uses a disabled provider.`, agentId: agent.id });
+    } else if (
+      (provider.authMethod === 'bearer' || provider.authMethod === 'custom-header') &&
+      !provider.apiKey?.trim()
+    ) {
+      // Spec §19: a run cannot begin when required provider credentials are unavailable.
+      issues.push({
+        level: 'error',
+        message: `Agent "${agent.name}" has no API key for its provider "${provider.displayName}".`,
+        agentId: agent.id,
+      });
     }
     if (!agent.llm.model.trim()) {
       issues.push({ level: 'error', message: `Agent "${agent.name}" has no model set.`, agentId: agent.id });

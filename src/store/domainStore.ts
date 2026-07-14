@@ -4,7 +4,6 @@ import {
   type Connection,
   type ConversationSettings,
   type Playground,
-  type Provider,
   type TranscriptMessage,
   type UiLayoutState,
 } from '../domain/schema';
@@ -47,10 +46,9 @@ interface DomainState {
   updateConnection: (id: string, patch: Partial<Connection>) => void;
   removeConnection: (id: string) => void;
 
-  // providers
-  addProvider: (provider: Provider) => void;
-  updateProvider: (id: string, patch: Partial<Provider>) => void;
-  removeProvider: (id: string) => void;
+  // providers are application-global (see store/providerStore.ts); the domain
+  // store only needs to drop a deleted provider's id from this playground's agents.
+  unassignProvider: (providerId: string) => void;
 
   // conversation + transcript + ui layout
   updateConversation: (patch: Partial<ConversationSettings>) => void;
@@ -78,6 +76,25 @@ export const useDomainStore = create<DomainState>((set, get) => {
   function scheduleSave() {
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => void doSave(), SAVE_DEBOUNCE_MS);
+  }
+
+  /**
+   * Persist any pending debounced edits to the CURRENT playground before it is
+   * replaced. Without this, switching playgrounds inside the ~600ms debounce
+   * window silently discards the outgoing playground's edits (they live only in
+   * memory until doSave runs). Kept synchronous so callers can swap `playground`
+   * immediately after; the IndexedDB write is captured against the outgoing
+   * playground and fired off (not awaited) so it still lands.
+   */
+  function flushPending() {
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    const pg = get().playground;
+    if (pg && get().saveStatus !== 'saved') {
+      void savePlayground(pg).catch((err) => console.error('Flush save failed', err));
+    }
   }
 
   async function doSave() {
@@ -116,10 +133,12 @@ export const useDomainStore = create<DomainState>((set, get) => {
     },
 
     newPlayground(name) {
+      flushPending();
       activate(createPlayground(name));
     },
 
     async loadPlayground(id) {
+      flushPending();
       const all = await loadAllPlaygrounds();
       const pg = all.find((p) => p.id === id);
       if (pg) {
@@ -135,9 +154,10 @@ export const useDomainStore = create<DomainState>((set, get) => {
     duplicatePlayground() {
       const pg = get().playground;
       if (!pg) return;
-      // Regenerate every id (playground/agents/providers/connections) and remap
-      // references. Sharing provider ids across playgrounds would let deleting one
-      // clear the other's credentials (they're keyed globally by provider id).
+      flushPending();
+      // Regenerate playground/agent/connection ids and remap references. Providers
+      // are application-global now, so agents keep their providerId — the copy
+      // shares the same providers, which is exactly the point.
       const copy = regenerateIds(pg);
       activate({ ...copy, name: `${pg.name} (copy)` });
     },
@@ -153,6 +173,7 @@ export const useDomainStore = create<DomainState>((set, get) => {
     },
 
     replacePlayground(pg) {
+      flushPending();
       activate(pg);
     },
 
@@ -222,24 +243,15 @@ export const useDomainStore = create<DomainState>((set, get) => {
       mutate((pg) => ({ ...pg, connections: pg.connections.filter((c) => c.id !== id) }));
     },
 
-    addProvider(provider) {
-      mutate((pg) => ({ ...pg, providers: [...pg.providers, provider] }));
-    },
-
-    updateProvider(id, patch) {
-      mutate((pg) => ({
-        ...pg,
-        providers: pg.providers.map((p) => (p.id === id ? { ...p, ...patch } : p)),
-      }));
-    },
-
-    removeProvider(id) {
-      mutate((pg) => ({
-        ...pg,
-        providers: pg.providers.filter((p) => p.id !== id),
-        // Unassign this provider from any agents that used it.
-        agents: pg.agents.map((a) =>
-          a.llm.providerId === id ? { ...a, llm: { ...a.llm, providerId: null } } : a,
+    unassignProvider(providerId) {
+      // Called when a global provider is deleted: clear the dangling reference on
+      // any agent in the active playground. A no-op if none used it.
+      const pg = get().playground;
+      if (!pg || !pg.agents.some((a) => a.llm.providerId === providerId)) return;
+      mutate((p) => ({
+        ...p,
+        agents: p.agents.map((a) =>
+          a.llm.providerId === providerId ? { ...a, llm: { ...a.llm, providerId: null } } : a,
         ),
       }));
     },

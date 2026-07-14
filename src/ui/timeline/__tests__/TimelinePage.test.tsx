@@ -77,7 +77,11 @@ describe('TimelinePage', () => {
     useDomainStore.setState({ playground });
 
     render(<TimelinePage />);
-    expect(screen.getByText('سلام دنیا').closest('[dir="rtl"]')).not.toBeNull();
+    const card = screen.getByText('سلام دنیا').closest('[dir="rtl"]');
+    expect(card).not.toBeNull();
+    // Regression guard: no descendant (e.g. the body) may re-declare its own
+    // dir (such as dir="auto"), which would silently override this forced rtl.
+    expect(card!.querySelectorAll('[dir]')).toHaveLength(0);
   });
 
   it('shows the empty state when there is no transcript', () => {

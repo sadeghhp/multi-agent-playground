@@ -19,4 +19,14 @@ describe('LiveMessage direction', () => {
     const fr = render(<LiveMessage agentName="Analyste" role={null} text="en train" language="fr" />);
     expect(fr.container.querySelector('div[dir]')?.getAttribute('dir')).toBe('ltr');
   });
+
+  it('stays right-to-left from the very first streamed characters', () => {
+    // The bug this guards against: dir="auto" on the body has no strong
+    // directional character to key off yet when streaming has barely
+    // started, so it silently falls back to LTR until enough RTL script
+    // accumulates — even though the agent's language is known up front.
+    const { container } = render(<LiveMessage agentName="تحلیل‌گر" role={null} text="" language="fa" />);
+    const dirEls = Array.from(container.querySelectorAll('[dir]'));
+    expect(dirEls.map((el) => el.getAttribute('dir'))).toEqual(['rtl']);
+  });
 });

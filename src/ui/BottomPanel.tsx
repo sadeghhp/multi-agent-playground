@@ -1,15 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useDomainStore } from '../store/domainStore';
 import { useRuntimeStore } from '../store/runtimeStore';
+import { agentColor } from '../graph/colors';
 import { Message } from './transcript/Message';
 import { LiveMessage } from './transcript/LiveMessage';
 import styles from './BottomPanel.module.css';
 
 type Tab = 'transcript' | 'log' | 'errors';
-
-const TABS: Tab[] = ['transcript', 'log', 'errors'];
-const tabId = (t: Tab) => `bottom-panel-tab-${t}`;
-const panelId = (t: Tab) => `bottom-panel-panel-${t}`;
 
 const RUN_STATUS_LABEL: Record<string, string> = {
   idle: 'Idle',
@@ -36,11 +33,19 @@ export function BottomPanel() {
   const [tab, setTab] = useState<Tab>('transcript');
   const transcript = playground?.transcript ?? [];
 
-  // The agent currently streaming an in-flight response (Prototype B), if any.
+  // The agent currently active during a run — shown as a live bubble that reads
+  // "thinking…" until the first token arrives, then streams.
   const liveAgent =
-    status === 'running' && activeAgentId && liveText
+    status === 'running' && activeAgentId
       ? playground?.agents.find((a) => a.id === activeAgentId) ?? null
       : null;
+
+  // Resolve each message's identity color from its agent (deleted → slate), so
+  // the transcript shares the canvas/timeline color language.
+  const colorFor = useMemo(() => {
+    const byId = new Map((playground?.agents ?? []).map((a) => [a.id, a.colorCategory]));
+    return (agentId: string | null) => agentColor(agentId ? byId.get(agentId) : null);
+  }, [playground?.agents]);
 
   // Aggregate run stats (spec §6 "token and latency estimates when available").
   const stats = useMemo(() => {
@@ -54,75 +59,75 @@ export function BottomPanel() {
     return { tokens, duration, hasTokens };
   }, [transcript]);
 
-  // Auto-scroll the transcript to the newest message as it arrives, but only
-  // while the user is already at (or near) the bottom — otherwise someone
-  // scrolling up to reread earlier messages mid-stream gets yanked back down
-  // on every token.
+  // Auto-scroll to the newest message ONLY when the reader is already near the
+  // bottom, so scrolling up to read history isn't yanked back on every token.
   const contentRef = useRef<HTMLDivElement>(null);
-  const stickToBottomRef = useRef(true);
-  const SCROLL_BOTTOM_THRESHOLD_PX = 48;
+  const [atBottom, setAtBottom] = useState(true);
+
+  function scrollToBottom(behavior: ScrollBehavior = 'auto') {
+    const el = contentRef.current;
+    if (!el) return;
+    // Smooth scrolling uses scrollTo when available; the default 'auto' path sets
+    // scrollTop directly so it works in jsdom (which lacks a functional scrollTo).
+    if (behavior === 'smooth' && typeof el.scrollTo === 'function') {
+      el.scrollTo({ top: el.scrollHeight, behavior });
+    } else {
+      el.scrollTop = el.scrollHeight;
+    }
+  }
 
   function handleScroll() {
     const el = contentRef.current;
     if (!el) return;
-    stickToBottomRef.current =
-      el.scrollTop + el.clientHeight >= el.scrollHeight - SCROLL_BOTTOM_THRESHOLD_PX;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setAtBottom(distanceFromBottom < 40);
   }
 
   useEffect(() => {
-    if (tab === 'transcript' && !collapsed && contentRef.current && stickToBottomRef.current) {
-      contentRef.current.scrollTop = contentRef.current.scrollHeight;
-    }
-  }, [transcript.length, tab, collapsed, liveText]);
+    if (tab === 'transcript' && !collapsed && atBottom) scrollToBottom();
+  }, [transcript.length, tab, collapsed, liveText, atBottom]);
+
+  const showJumpToLatest = tab === 'transcript' && !collapsed && !atBottom && (transcript.length > 0 || !!liveAgent);
+
+  const TABS: { key: Tab; label: string; count: number }[] = [
+    { key: 'transcript', label: 'Transcript', count: transcript.length },
+    { key: 'log', label: 'Event log', count: events.length },
+    { key: 'errors', label: 'Errors', count: errors.length },
+  ];
+
+  // Arrow-key navigation across the tablist (WAI-ARIA tabs pattern).
+  function onTabKeyDown(e: ReactKeyboardEvent) {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft' && e.key !== 'Home' && e.key !== 'End') return;
+    e.preventDefault();
+    const i = TABS.findIndex((t) => t.key === tab);
+    const next =
+      e.key === 'Home' ? 0
+      : e.key === 'End' ? TABS.length - 1
+      : e.key === 'ArrowRight' ? (i + 1) % TABS.length
+      : (i - 1 + TABS.length) % TABS.length;
+    setTab(TABS[next].key);
+    document.getElementById(`bp-tab-${TABS[next].key}`)?.focus();
+  }
 
   return (
     <section className={styles.panel} data-collapsed={collapsed || undefined} aria-label="Execution panel">
       <header className={styles.header}>
-        <div
-          className={styles.tabs}
-          role="tablist"
-          onKeyDown={(e) => {
-            if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-            e.preventDefault();
-            const i = TABS.indexOf(tab);
-            const next = TABS[(i + (e.key === 'ArrowRight' ? 1 : TABS.length - 1)) % TABS.length];
-            setTab(next);
-            document.getElementById(tabId(next))?.focus();
-          }}
-        >
-          <button
-            id={tabId('transcript')}
-            role="tab"
-            aria-selected={tab === 'transcript'}
-            aria-controls={panelId('transcript')}
-            tabIndex={tab === 'transcript' ? 0 : -1}
-            className={tab === 'transcript' ? styles.tabActive : ''}
-            onClick={() => setTab('transcript')}
-          >
-            Transcript ({transcript.length})
-          </button>
-          <button
-            id={tabId('log')}
-            role="tab"
-            aria-selected={tab === 'log'}
-            aria-controls={panelId('log')}
-            tabIndex={tab === 'log' ? 0 : -1}
-            className={tab === 'log' ? styles.tabActive : ''}
-            onClick={() => setTab('log')}
-          >
-            Event log ({events.length})
-          </button>
-          <button
-            id={tabId('errors')}
-            role="tab"
-            aria-selected={tab === 'errors'}
-            aria-controls={panelId('errors')}
-            tabIndex={tab === 'errors' ? 0 : -1}
-            className={tab === 'errors' ? styles.tabActive : ''}
-            onClick={() => setTab('errors')}
-          >
-            Errors ({errors.length})
-          </button>
+        <div className={styles.tabs} role="tablist" aria-label="Execution views">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              role="tab"
+              id={`bp-tab-${t.key}`}
+              aria-controls={`bp-panel-${t.key}`}
+              aria-selected={tab === t.key}
+              tabIndex={tab === t.key ? 0 : -1}
+              className={tab === t.key ? styles.tabActive : ''}
+              onClick={() => setTab(t.key)}
+              onKeyDown={onTabKeyDown}
+            >
+              {t.label} ({t.count})
+            </button>
+          ))}
         </div>
         <div className={styles.headerRight}>
           {transcript.length > 0 && (
@@ -150,21 +155,27 @@ export function BottomPanel() {
       {!collapsed && (
         <div
           className={styles.content}
+          data-testid="bottom-panel-content"
           ref={contentRef}
           onScroll={handleScroll}
-          data-testid="bottom-panel-content"
           role="tabpanel"
-          id={panelId(tab)}
-          aria-labelledby={tabId(tab)}
+          id={`bp-panel-${tab}`}
+          aria-labelledby={`bp-tab-${tab}`}
         >
           {tab === 'transcript' && (
             transcript.length === 0 && !liveAgent ? (
               <p className={styles.empty}>No conversation yet. Configure agents, connect them, and press Run.</p>
             ) : (
               <>
-                {transcript.map((msg) => <Message key={msg.id} msg={msg} />)}
-                {liveAgent && liveText && (
-                  <LiveMessage agentName={liveAgent.name} role={liveAgent.role} text={liveText} />
+                {transcript.map((msg) => <Message key={msg.id} msg={msg} color={colorFor(msg.agentId)} />)}
+                {liveAgent && (
+                  <LiveMessage
+                    agentName={liveAgent.name}
+                    role={liveAgent.role}
+                    text={liveText ?? ''}
+                    color={agentColor(liveAgent.colorCategory)}
+                    language={liveAgent.language}
+                  />
                 )}
               </>
             )
@@ -201,6 +212,16 @@ export function BottomPanel() {
             )
           )}
         </div>
+      )}
+
+      {showJumpToLatest && (
+        <button
+          type="button"
+          className={`${styles.jumpBtn} primary`}
+          onClick={() => { scrollToBottom('smooth'); setAtBottom(true); }}
+        >
+          ↓ Jump to latest
+        </button>
       )}
     </section>
   );

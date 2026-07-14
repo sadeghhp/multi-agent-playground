@@ -20,6 +20,29 @@
   background: var(--surface) !important;
 }
 
+/* Onboarding overlay when the playground has no agents yet. Pointer-events pass
+ * through except on the card, so the canvas underneath stays usable. */
+.emptyGraph {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  z-index: 6;
+}
+.emptyCard {
+  pointer-events: auto;
+  max-width: 340px;
+  text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  padding: var(--space-6);
+}
+.emptyTitle { margin: 0 0 var(--space-2); font-size: var(--fs-lg); }
+.emptyText { margin: 0 0 var(--space-4); color: var(--text-muted); line-height: 1.5; }
+
 .lockBadge {
   position: absolute;
   top: 12px;

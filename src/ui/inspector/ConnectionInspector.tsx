@@ -30,6 +30,7 @@ export function ConnectionInspector({ connection }: { connection: Connection }) 
   const update = useDomainStore((s) => s.updateConnection);
   const remove = useDomainStore((s) => s.removeConnection);
   const clearSelection = useUiStore((s) => s.clearSelection);
+  const requestConfirm = useUiStore((s) => s.requestConfirm);
   const isRunning = useRuntimeStore((s) => s.status === 'running');
 
   const source = playground.agents.find((a) => a.id === connection.source);
@@ -70,7 +71,7 @@ export function ConnectionInspector({ connection }: { connection: Connection }) 
 
       <div className="field">
         <label htmlFor="cn-label">Label (optional)</label>
-        <input id="cn-label" value={connection.label ?? ''} onChange={(e) => update(connection.id, { label: e.target.value })} />
+        <input id="cn-label" value={connection.label ?? ''} onChange={(e) => update(connection.id, { label: e.target.value })} disabled={isRunning} />
       </div>
 
       <div className="field">
@@ -83,6 +84,7 @@ export function ConnectionInspector({ connection }: { connection: Connection }) 
             const n = parsePriority(e.target.value);
             if (n !== null) update(connection.id, { priority: n });
           }}
+          disabled={isRunning}
         />
       </div>
 
@@ -101,7 +103,14 @@ export function ConnectionInspector({ connection }: { connection: Connection }) 
         type="button"
         className="danger"
         disabled={isRunning}
-        onClick={() => {
+        onClick={async () => {
+          const ok = await requestConfirm({
+            title: 'Delete connection',
+            message: `Delete the connection ${source?.name ?? 'deleted'} → ${target?.name ?? 'deleted'}?`,
+            confirmLabel: 'Delete',
+            danger: true,
+          });
+          if (!ok) return;
           remove(connection.id);
           clearSelection();
         }}

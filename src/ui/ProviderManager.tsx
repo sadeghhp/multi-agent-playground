@@ -16,6 +16,7 @@ export function ProviderManager() {
   const updateProvider = useProviderStore((s) => s.updateProvider);
   const removeProvider = useProviderStore((s) => s.removeProvider);
   const setPanel = useUiStore((s) => s.setPanel);
+  const requestConfirm = useUiStore((s) => s.requestConfirm);
 
   const providers = useProviderStore((s) => s.providers);
   const [selectedId, setSelectedId] = useState<string | null>(providers[0]?.id ?? null);
@@ -44,8 +45,14 @@ export function ProviderManager() {
     setSelectedId(copy.id);
   }
 
-  function handleDelete(p: Provider) {
-    if (!window.confirm(`Delete provider "${p.displayName}"? Agents using it will be unassigned.`)) return;
+  async function handleDelete(p: Provider) {
+    const ok = await requestConfirm({
+      title: 'Delete provider',
+      message: `Delete provider "${p.displayName}"? Agents using it will be unassigned.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
     clearCredential(p.id);
     removeProvider(p.id);
     setSelectedId(providers.find((x) => x.id !== p.id)?.id ?? null);

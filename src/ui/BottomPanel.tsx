@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDomainStore } from '../store/domainStore';
 import { useRuntimeStore } from '../store/runtimeStore';
+import { agentColor } from '../graph/colors';
 import { Message } from './transcript/Message';
 import { LiveMessage } from './transcript/LiveMessage';
 import styles from './BottomPanel.module.css';
@@ -32,11 +33,19 @@ export function BottomPanel() {
   const [tab, setTab] = useState<Tab>('transcript');
   const transcript = playground?.transcript ?? [];
 
-  // The agent currently streaming an in-flight response (Prototype B), if any.
+  // The agent currently active during a run — shown as a live bubble that reads
+  // "thinking…" until the first token arrives, then streams.
   const liveAgent =
-    status === 'running' && activeAgentId && liveText
+    status === 'running' && activeAgentId
       ? playground?.agents.find((a) => a.id === activeAgentId) ?? null
       : null;
+
+  // Resolve each message's identity color from its agent (deleted → slate), so
+  // the transcript shares the canvas/timeline color language.
+  const colorFor = useMemo(() => {
+    const byId = new Map((playground?.agents ?? []).map((a) => [a.id, a.colorCategory]));
+    return (agentId: string | null) => agentColor(agentId ? byId.get(agentId) : null);
+  }, [playground?.agents]);
 
   // Aggregate run stats (spec §6 "token and latency estimates when available").
   const stats = useMemo(() => {
@@ -120,9 +129,14 @@ export function BottomPanel() {
               <p className={styles.empty}>No conversation yet. Configure agents, connect them, and press Run.</p>
             ) : (
               <>
-                {transcript.map((msg) => <Message key={msg.id} msg={msg} />)}
-                {liveAgent && liveText && (
-                  <LiveMessage agentName={liveAgent.name} role={liveAgent.role} text={liveText} />
+                {transcript.map((msg) => <Message key={msg.id} msg={msg} color={colorFor(msg.agentId)} />)}
+                {liveAgent && (
+                  <LiveMessage
+                    agentName={liveAgent.name}
+                    role={liveAgent.role}
+                    text={liveText ?? ''}
+                    color={agentColor(liveAgent.colorCategory)}
+                  />
                 )}
               </>
             )

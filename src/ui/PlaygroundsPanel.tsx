@@ -15,6 +15,7 @@ export function PlaygroundsPanel() {
   const replacePlayground = useDomainStore((s) => s.replacePlayground);
   const ensureProvider = useProviderStore((s) => s.ensureProvider);
   const setPanel = useUiStore((s) => s.setPanel);
+  const requestConfirm = useUiStore((s) => s.requestConfirm);
 
   // Register the example's provider globally (reusing an equivalent one if it
   // already exists), then load the playground wired to whatever id came back.
@@ -60,12 +61,16 @@ export function PlaygroundsPanel() {
               </button>
               <button
                 type="button"
-                className="danger"
+                className={`${styles.deleteBtn} danger`}
                 aria-label={`Delete ${p.name}`}
-                onClick={() => {
-                  if (window.confirm(`Delete playground "${p.name}"? This cannot be undone.`)) {
-                    void deletePlayground(p.id);
-                  }
+                onClick={async () => {
+                  const ok = await requestConfirm({
+                    title: 'Delete playground',
+                    message: `Delete playground "${p.name}"? This cannot be undone.`,
+                    confirmLabel: 'Delete',
+                    danger: true,
+                  });
+                  if (ok) void deletePlayground(p.id);
                 }}
               >
                 Delete

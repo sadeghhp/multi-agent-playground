@@ -1,15 +1,26 @@
 .message {
   border: 1px solid var(--border);
+  border-inline-start: 3px solid var(--agent-color, var(--border));
   border-radius: 8px;
   padding: 8px 12px;
   margin-bottom: 8px;
   background: var(--surface);
+  box-shadow: var(--shadow-sm);
 }
 .failed { border-color: var(--danger); background: var(--danger-bg); }
 
+/* Persistent per-agent identity dot (matches the canvas node + timeline). */
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--agent-color, var(--edge));
+  flex-shrink: 0;
+}
+
 .live {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 26%, transparent);
+  border-color: var(--agent-color, var(--accent));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--agent-color, var(--accent)) 30%, transparent);
 }
 .liveBadge {
   font-size: 10px;
@@ -52,17 +63,7 @@
 
 .msgSource { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 
-.msgBody { margin-top: 6px; font-size: 13px; line-height: 1.5; }
-.msgBody :global(p) { margin: 0 0 8px; }
-.msgBody :global(p:last-child) { margin-bottom: 0; }
-.msgBody :global(pre) {
-  background: var(--surface-2);
-  padding: 8px;
-  border-radius: 6px;
-  overflow-x: auto;
-  font-size: 12px;
-}
-.msgBody :global(code) { font-family: var(--mono); font-size: 12px; }
+.msgBody { margin-top: 6px; font-size: 13px; }
 
 .errText { color: var(--danger); font-size: 13px; }
 

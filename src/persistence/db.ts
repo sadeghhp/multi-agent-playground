@@ -2,40 +2,53 @@ import { type IDBPDatabase, type IDBPTransaction, openDB } from 'idb';
 import {
   type Playground,
   type Provider,
+  type SavedAgent,
   Playground as PlaygroundSchema,
   Provider as ProviderSchema,
+  SavedAgent as SavedAgentSchema,
 } from '../domain/schema';
 import { migrateToCurrent } from './migrate';
 import { clearCredential, loadCredential, saveCredential } from './credentialStore';
 
 /**
- * IndexedDB persistence (spec §15.1). Two object stores:
+ * IndexedDB persistence (spec §15.1). Three object stores:
  *   - `playgrounds`: full playground records (no providers as of schema v2).
  *   - `providers`: the application-global provider registry (schema v2). Any
  *     playground can reference these by id, so providers created once are reused
  *     everywhere.
+ *   - `agentLibrary`: the cross-playground agent library ("pool").
  *
- * API keys are never written to either store: they're stripped and kept in the
+ * API keys are never written to any store: they're stripped and kept in the
  * credential store instead (spec §8.4), keyed by provider id, so the DB blob
  * never contains secrets and session-only keys vanish with the tab.
+ *
+ * All stores are created by the single upgrade callback below — never open a
+ * second connection to this DB from another module, or two upgrade callbacks
+ * would race over which stores exist.
  */
 
 const DB_NAME = 'multi-agent-playground';
 const DB_VERSION = 2;
 const STORE = 'playgrounds';
 const PROVIDER_STORE = 'providers';
+const LIBRARY_STORE = 'agentLibrary';
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
 function getDb(): Promise<IDBPDatabase> {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
+      // Guarded creates so this runs correctly whether the DB is brand new or a
+      // v1 database gaining the provider/library stores on upgrade to v2.
       async upgrade(db, oldVersion, _newVersion, tx) {
         if (!db.objectStoreNames.contains(STORE)) {
           db.createObjectStore(STORE, { keyPath: 'id' });
         }
         if (!db.objectStoreNames.contains(PROVIDER_STORE)) {
           db.createObjectStore(PROVIDER_STORE, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(LIBRARY_STORE)) {
+          db.createObjectStore(LIBRARY_STORE, { keyPath: 'id' });
         }
         // v1 → v2: hoist providers that were embedded in each playground into the
         // global registry, then strip them from the playground record. Runs once.
@@ -111,6 +124,36 @@ export async function deletePlayground(id: string): Promise<void> {
   // Providers are global as of v2, so deleting a playground must NOT touch
   // provider records or their credentials — other playgrounds may still use them.
   await db.delete(STORE, id);
+}
+
+// ---------------------------------------------------------------------------
+// Agent library ("pool") — cross-playground saved agents (FR: save/dispose).
+// Records are self-contained agent snapshots with no credentials, so unlike
+// playgrounds they need no credential stripping/rehydration.
+// ---------------------------------------------------------------------------
+
+export async function saveLibraryAgent(saved: SavedAgent): Promise<void> {
+  const db = await getDb();
+  await db.put(LIBRARY_STORE, saved);
+}
+
+export async function loadAllLibraryAgents(): Promise<SavedAgent[]> {
+  const db = await getDb();
+  const all = await db.getAll(LIBRARY_STORE);
+  const result: SavedAgent[] = [];
+  for (const raw of all) {
+    // Tolerate corruption exactly like parseStored: skip a bad record, never
+    // let it crash hydration of the whole library.
+    const parsed = SavedAgentSchema.safeParse(raw);
+    if (parsed.success) result.push(parsed.data);
+    else console.warn('Skipping corrupted library agent record:', parsed.error.issues[0]?.message);
+  }
+  return result;
+}
+
+export async function deleteLibraryAgent(id: string): Promise<void> {
+  const db = await getDb();
+  await db.delete(LIBRARY_STORE, id);
 }
 
 /**

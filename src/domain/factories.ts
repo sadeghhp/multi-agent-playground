@@ -7,11 +7,13 @@ import {
   type Playground,
   type Provider,
   type RuntimeConfig,
+  type SavedAgent,
   type UiLayoutState,
   SCHEMA_VERSION,
 } from './schema';
 import {
   newAgentId,
+  newLibraryAgentId,
   newPlaygroundId,
   newProviderId,
   newSkillId,
@@ -96,6 +98,40 @@ export function duplicateAgent(agent: Agent): Agent {
     name: `${agent.name} (copy)`,
     position: { x: agent.position.x + 48, y: agent.position.y + 48 },
     skills: agent.skills.map((s) => ({ ...s, id: newSkillId() })),
+  };
+}
+
+/**
+ * Snapshot an agent into a library ("pool") record. Copies the agent config
+ * verbatim — including its current llm.providerId, which may dangle when the
+ * agent is later re-added to a different playground (validateForRun surfaces
+ * that, no crash). Carries only the agent, never a provider or API key.
+ */
+export function createSavedAgent(agent: Agent): SavedAgent {
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    id: newLibraryAgentId(),
+    name: agent.name,
+    savedAt: now(),
+    agent,
+  };
+}
+
+/**
+ * Instantiate a fresh playground agent from a library record (spec §9.1/§9.3).
+ * Unlike duplicateAgent this keeps the name unchanged (no "(copy)" suffix) and
+ * takes a caller-supplied position. Fresh agent + skill ids so edits to the new
+ * node never alias the stored template or another instance.
+ */
+export function instantiateFromLibrary(
+  saved: SavedAgent,
+  position: Agent['position'] = { x: 0, y: 0 },
+): Agent {
+  return {
+    ...saved.agent,
+    id: newAgentId(),
+    position,
+    skills: saved.agent.skills.map((s) => ({ ...s, id: newSkillId() })),
   };
 }
 

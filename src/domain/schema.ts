@@ -148,6 +148,23 @@ export const Agent = z.object({
 export type Agent = z.infer<typeof Agent>;
 
 // ---------------------------------------------------------------------------
+// SavedAgent — an agent stashed in the cross-playground agent library ("pool").
+// The user can save any created agent, then re-add it to any playground or
+// dispose of it. Stored in its own IndexedDB object store, not inside a
+// playground. Carries only the agent config (never a provider / API key).
+// ---------------------------------------------------------------------------
+
+export const SavedAgent = z.object({
+  schemaVersion: z.literal(SCHEMA_VERSION),
+  id: z.string(),
+  /** Snapshot of the agent name at save time; shown in the library list. */
+  name: z.string(),
+  savedAt: z.number().int(),
+  agent: Agent,
+});
+export type SavedAgent = z.infer<typeof SavedAgent>;
+
+// ---------------------------------------------------------------------------
 // Connection (spec §7.3) — directed edge between two agents.
 // ---------------------------------------------------------------------------
 

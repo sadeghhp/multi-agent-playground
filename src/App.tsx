@@ -13,6 +13,8 @@ import { SkillLibraryManager } from './ui/SkillLibraryManager';
 import { RunDialog } from './ui/RunDialog';
 import { PlaygroundsPanel } from './ui/PlaygroundsPanel';
 import { TimelinePage } from './ui/timeline/TimelinePage';
+import { AgentLibraryPanel } from './ui/AgentLibraryPanel';
+import { useAgentLibraryStore } from './store/agentLibraryStore';
 import { Toast } from './ui/Toast';
 import styles from './App.module.css';
 
@@ -24,6 +26,7 @@ export default function App() {
   const hydrateProviders = useProviderStore((s) => s.hydrate);
   const loadPlayground = useDomainStore((s) => s.loadPlayground);
   const newPlayground = useDomainStore((s) => s.newPlayground);
+  const hydrateLibrary = useAgentLibraryStore((s) => s.hydrate);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -36,6 +39,8 @@ export default function App() {
       // Providers are application-global; load the registry before any playground
       // so agent/provider references resolve on first paint.
       await Promise.all([hydrate(), hydrateProviders()]);
+      // Load the cross-playground agent library alongside playgrounds.
+      void hydrateLibrary();
       if (cancelled) return;
       const selected = getSelectedPlaygroundId();
       if (selected) {
@@ -69,6 +74,7 @@ export default function App() {
       {openPanel === 'run' && <RunDialog />}
       {openPanel === 'playgrounds' && <PlaygroundsPanel />}
       {openPanel === 'timeline' && <TimelinePage />}
+      {openPanel === 'library' && <AgentLibraryPanel />}
       <Toast />
     </div>
   );

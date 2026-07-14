@@ -44,7 +44,8 @@ export function Message({ msg, color }: { msg: TranscriptMessage; color?: string
         {msg.role && <span className="chip">{msg.role}</span>}
         <span className={styles.msgMeta}>
           turn {msg.turn} · {msg.model || '—'} · {time}
-          {msg.durationMs != null && ` · ${msg.durationMs}ms`}
+          {msg.durationMs != null &&
+            ` · ${msg.durationMs < 1000 ? `${msg.durationMs}ms` : `${(msg.durationMs / 1000).toFixed(1)}s`}`}
           {msg.totalTokens != null && ` · ${msg.totalTokens} tok`}
         </span>
         <span className={styles.msgActions}>

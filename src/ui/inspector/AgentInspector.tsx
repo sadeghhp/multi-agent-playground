@@ -5,6 +5,7 @@ import { useUiStore } from '../../store/uiStore';
 import { useRuntimeStore } from '../../store/runtimeStore';
 import { newConnectionId, newSkillId } from '../../domain/ids';
 import { assembleMessages, boundHistory, buildSystemPrompt, buildTaskPrompt, estimateTokens } from '../../agents/promptAssembly';
+import { enhanceSystemInstruction, type EnhancePromptResult } from '../../agents/enhancePrompt';
 import { validateForRun } from '../../orchestrator/validate';
 import { Section } from './Section';
 import { parseBoundedInt } from '../inputUtils';
@@ -27,8 +28,48 @@ export function AgentInspector({ agent }: { agent: Agent }) {
   const [newTarget, setNewTarget] = useState('');
   const [newType, setNewType] = useState<ConnectionType>('conversation');
 
+  // System-prompt enhancer state (in-flight flag, the proposed rewrite awaiting
+  // Apply/Discard, and any sanitized provider error).
+  const [enhancing, setEnhancing] = useState(false);
+  const [enhanceProposal, setEnhanceProposal] = useState<string | null>(null);
+  const [enhanceError, setEnhanceError] = useState<EnhancePromptResult | null>(null);
+
   const providers = playground.providers;
   const selectedProvider = providers.find((p) => p.id === agent.llm.providerId);
+
+  // Why the enhancer is unavailable, if it is — surfaced as a hint next to the button.
+  const enhanceBlockedReason = !selectedProvider
+    ? 'Assign a provider to enable AI enhancement.'
+    : !selectedProvider.enabled
+      ? 'The assigned provider is disabled.'
+      : !agent.llm.model.trim()
+        ? 'Select a model to enable AI enhancement.'
+        : null;
+  const canEnhance = !enhanceBlockedReason && !enhancing;
+
+  async function handleEnhance() {
+    if (!selectedProvider || !canEnhance) return;
+    setEnhancing(true);
+    setEnhanceProposal(null);
+    setEnhanceError(null);
+    try {
+      const result = await enhanceSystemInstruction(agent, selectedProvider, {
+        timeoutMs: agent.runtime.responseTimeoutMs,
+      });
+      if (result.ok && result.text) {
+        setEnhanceProposal(result.text);
+      } else {
+        setEnhanceError(result);
+      }
+    } finally {
+      setEnhancing(false);
+    }
+  }
+
+  function applyEnhancement() {
+    if (enhanceProposal !== null) patch({ systemInstruction: enhanceProposal });
+    setEnhanceProposal(null);
+  }
 
   // Outgoing connections + which agents are still available as new targets.
   const outgoing = playground.connections.filter((c) => c.source === agent.id);
@@ -166,6 +207,37 @@ export function AgentInspector({ agent }: { agent: Agent }) {
             value={agent.systemInstruction}
             onChange={(e) => patch({ systemInstruction: e.target.value })}
           />
+          <div className={styles.enhanceBar}>
+            <button
+              type="button"
+              onClick={handleEnhance}
+              disabled={!canEnhance}
+              title={enhanceBlockedReason ?? 'Rewrite this instruction using the assigned provider'}
+            >
+              {enhancing ? 'Enhancing…' : '✨ Enhance with AI'}
+            </button>
+            {enhanceBlockedReason && !enhancing && (
+              <span className={styles.enhanceStatus}>{enhanceBlockedReason}</span>
+            )}
+          </div>
+
+          {enhanceError && (
+            <div className={styles.enhanceErr}>
+              <strong>{enhanceError.errorKind ?? 'error'}</strong> — {enhanceError.errorSummary}
+              {enhanceError.errorDetail && <div>{enhanceError.errorDetail}</div>}
+            </div>
+          )}
+
+          {enhanceProposal !== null && (
+            <div className={styles.enhanceResult}>
+              <p className={styles.enhanceResultHead}>Suggested instruction — review before applying</p>
+              <pre className={styles.preview}>{enhanceProposal}</pre>
+              <div className={styles.enhanceActions}>
+                <button type="button" className="primary" onClick={applyEnhancement}>Apply</button>
+                <button type="button" onClick={() => setEnhanceProposal(null)}>Discard</button>
+              </div>
+            </div>
+          )}
         </div>
       </Section>
 

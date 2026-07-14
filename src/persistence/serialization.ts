@@ -69,7 +69,10 @@ export interface ImportResult {
  * the registry and agents' `providerId` references keep resolving.
  */
 export function importFromJson(text: string, asCopy = true): ImportResult {
-  if (text.length > MAX_IMPORT_BYTES) {
+  // `text.length` counts UTF-16 code units, not bytes — for multi-byte content
+  // (e.g. non-Latin agent text) that undercounts the real on-disk size by up
+  // to ~3x, weakening this guard. Measure actual bytes instead.
+  if (new TextEncoder().encode(text).length > MAX_IMPORT_BYTES) {
     return { ok: false, warnings: [], error: 'File is too large to import.' };
   }
 

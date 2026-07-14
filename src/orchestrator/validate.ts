@@ -82,9 +82,11 @@ export function validateForRun(pg: Playground, providers: Provider[]): Validatio
     }
   }
 
-  // Dangling edges (spec §19)
+  // Dangling edges (spec §19). A disabled connection can never fire (outgoing()
+  // in orchestrator.ts already filters these out at run time), so a leftover
+  // disabled-and-dangling edge from a bad import is inert, not a real blocker.
   for (const conn of pg.connections) {
-    if (!agentsById.has(conn.source) || !agentsById.has(conn.target)) {
+    if (conn.enabled && (!agentsById.has(conn.source) || !agentsById.has(conn.target))) {
       issues.push({ level: 'error', message: `A connection references a missing agent.` });
     }
   }

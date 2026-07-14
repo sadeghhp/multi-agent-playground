@@ -124,3 +124,23 @@ export function classifyThrown(err: unknown): ProviderError {
 export function retryEligible(kind: ProviderErrorKind): boolean {
   return kind === 'rate-limit' || kind === 'timeout' || kind === 'server-error' || kind === 'network';
 }
+
+/** Best-effort extraction of a human-readable message from an error response body. */
+export async function safeReadErrorBody(response: Response): Promise<string | undefined> {
+  try {
+    const text = await response.text();
+    if (!text) return undefined;
+    try {
+      const json = JSON.parse(text) as { error?: { message?: string } | string };
+      if (json.error && typeof json.error === 'object' && json.error.message) {
+        return json.error.message;
+      }
+      if (typeof json.error === 'string') return json.error;
+    } catch {
+      /* not JSON */
+    }
+    return text.slice(0, 500);
+  } catch {
+    return undefined;
+  }
+}

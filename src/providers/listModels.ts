@@ -1,5 +1,5 @@
 import type { Provider } from '../domain/schema';
-import { ProviderError, classifyStatus, retryEligible, summaryFor } from './errors';
+import { ProviderError, classifyStatus, retryEligible, safeReadErrorBody, summaryFor } from './errors';
 import { providerRequest } from './providerRequest';
 import { MODELS_PATH } from './url';
 
@@ -63,11 +63,14 @@ export async function listModels(
   const modelsTimeoutMs = Math.min(provider.timeoutMs ?? 60_000, 30_000);
 
   try {
-    const { response, durationMs } = await providerRequest(provider, MODELS_PATH, {
+    const { response, durationMs, clearRequestTimeout } = await providerRequest(provider, MODELS_PATH, {
       method: 'GET',
       signal,
       timeoutMs: modelsTimeoutMs,
     });
+    // This call never streams — the body is read in full immediately below, so
+    // the idle timeout has no more work to do once we have the response.
+    clearRequestTimeout();
 
     if (!response.ok) {
       const kind = classifyStatus(response.status);
@@ -117,24 +120,5 @@ export async function listModels(
       errorDetail: pe?.detail,
       retryEligible: pe ? retryEligible(pe.kind) : false,
     };
-  }
-}
-
-async function safeReadErrorBody(response: Response): Promise<string | undefined> {
-  try {
-    const text = await response.text();
-    if (!text) return undefined;
-    try {
-      const json = JSON.parse(text) as { error?: { message?: string } | string };
-      if (json.error && typeof json.error === 'object' && json.error.message) {
-        return json.error.message;
-      }
-      if (typeof json.error === 'string') return json.error;
-    } catch {
-      /* not JSON */
-    }
-    return text.slice(0, 500);
-  } catch {
-    return undefined;
   }
 }

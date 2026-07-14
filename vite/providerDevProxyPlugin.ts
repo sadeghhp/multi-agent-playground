@@ -5,12 +5,21 @@ import type { Plugin } from 'vite';
 
 const PROXY_PATH = '/__provider_proxy';
 const LOCALHOST_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+// Cloud metadata services (AWS/GCP/Azure/OpenStack) all listen here — it sits
+// inside the 169.254.0.0/16 link-local range we otherwise allow for local LAN
+// tooling, so it must be carved out explicitly rather than relying on the
+// broader range check below.
+const METADATA_SERVICE_HOST = '169.254.169.254';
 
-/** Dev proxy: accept self-signed / internal TLS certs. */
+/** Dev proxy: accept self-signed / internal TLS certs, but ONLY for local/LAN
+ * targets — this must never relax certificate validation for public internet
+ * targets (e.g. the real provider APIs proxied here), or a network attacker
+ * could transparently MITM those requests and steal forwarded API keys. */
 const httpsAgent = new https.Agent({
   rejectUnauthorized: false,
   timeout: 60_000,
 });
+const verifyingHttpsAgent = new https.Agent({ timeout: 60_000 });
 
 /**
  * True for hostnames that resolve to the local machine or a private LAN — the
@@ -21,6 +30,7 @@ const httpsAgent = new https.Agent({
  */
 function isPrivateOrLocalHost(hostname: string): boolean {
   const host = hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (host === METADATA_SERVICE_HOST) return false;
   if (LOCALHOST_HOSTS.has(hostname) || host === 'localhost') return true;
   if (host.endsWith('.localhost') || host.endsWith('.local')) return true;
 
@@ -52,6 +62,9 @@ export function isAllowedTarget(target: string): boolean {
     return false;
   }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return false;
+  // The cloud metadata service is never a legitimate LLM provider endpoint —
+  // block it regardless of scheme, even though https is otherwise unrestricted.
+  if (url.hostname.replace(/^\[|\]$/g, '').toLowerCase() === METADATA_SERVICE_HOST) return false;
   // https is allowed to any host; http is restricted to local/LAN targets only.
   if (url.protocol === 'http:') {
     return isPrivateOrLocalHost(url.hostname);
@@ -95,6 +108,15 @@ function forwardRequest(
   delete headers.connection;
   delete headers['x-proxy-target'];
 
+  // Only relax certificate validation for local/LAN targets (self-signed dev
+  // certs); a real provider API on the public internet always gets a normal,
+  // verifying agent so its TLS connection can't be silently intercepted.
+  const agent = isHttps
+    ? isPrivateOrLocalHost(targetUrl.hostname)
+      ? httpsAgent
+      : verifyingHttpsAgent
+    : undefined;
+
   const proxyReq = client.request(
     {
       protocol: targetUrl.protocol,
@@ -103,7 +125,7 @@ function forwardRequest(
       path: `${targetUrl.pathname}${targetUrl.search}`,
       method: req.method,
       headers,
-      agent: isHttps ? httpsAgent : undefined,
+      agent,
     },
     (proxyRes) => {
       res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
@@ -120,6 +142,28 @@ function forwardRequest(
 
   if (body && body.length > 0) proxyReq.end(body);
   else proxyReq.end();
+}
+
+/**
+ * True unless the request explicitly declares a cross-origin `Origin`. The
+ * client only ever calls this proxy via a relative same-origin fetch (see
+ * `src/providers/devProxy.ts`), so a mismatching Origin means the request
+ * came from some other page/origin trying to use this dev server as an SSRF
+ * relay (spec: this proxy must only ever be reachable from its own app page).
+ * A missing Origin (common for simple same-origin requests, and for direct
+ * non-browser callers) is allowed — this check stops browser-based
+ * cross-origin/CSRF abuse, not a directly-network-reachable dev server.
+ */
+export function isSameOriginRequest(req: Pick<IncomingMessage, 'headers'>): boolean {
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  try {
+    const originHost = new URL(origin).host.toLowerCase();
+    const requestHost = (req.headers.host ?? '').toLowerCase();
+    return originHost === requestHost;
+  } catch {
+    return false;
+  }
 }
 
 async function forward(req: IncomingMessage, res: ServerResponse, target: string): Promise<void> {
@@ -161,6 +205,12 @@ export function providerDevProxyPlugin(): Plugin {
         if (req.method !== 'GET' && req.method !== 'POST') {
           res.statusCode = 405;
           res.end('Method not allowed');
+          return;
+        }
+
+        if (!isSameOriginRequest(req)) {
+          res.statusCode = 403;
+          res.end('Cross-origin requests are not allowed');
           return;
         }
 

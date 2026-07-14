@@ -29,6 +29,11 @@ describe('cleanEnhancedText', () => {
     expect(cleanEnhancedText(raw)).toBe('Analyze methodically and cite evidence.');
   });
 
+  it('drops the preamble when it is separated by a single newline, not a blank line (L-14 regression)', () => {
+    const raw = "Sure! Here's the improved instruction:\nAnalyze methodically and cite evidence.";
+    expect(cleanEnhancedText(raw)).toBe('Analyze methodically and cite evidence.');
+  });
+
   it('strips wrapping quotes', () => {
     expect(cleanEnhancedText('"Be concise."')).toBe('Be concise.');
     expect(cleanEnhancedText('“Be concise.”')).toBe('Be concise.');

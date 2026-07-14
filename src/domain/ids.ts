@@ -24,3 +24,4 @@ export const newSkillId = () => `sk_${uuid()}`;
 export const newMessageId = () => `msg_${uuid()}`;
 export const newRunId = () => `run_${uuid()}`;
 export const newLogId = () => `log_${uuid()}`;
+export const newErrorId = () => `err_${uuid()}`;

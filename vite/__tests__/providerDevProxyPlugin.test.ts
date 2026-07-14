@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isAllowedTarget } from '../providerDevProxyPlugin';
+import { isAllowedTarget, isSameOriginRequest } from '../providerDevProxyPlugin';
 
 describe('isAllowedTarget', () => {
   it('allows http to private / LAN / loopback / link-local hosts', () => {
@@ -28,8 +28,46 @@ describe('isAllowedTarget', () => {
     expect(isAllowedTarget('https://evil.example.com/v1')).toBe(true);
   });
 
+  it('blocks the cloud metadata service on any scheme (SSRF guard)', () => {
+    // 169.254.169.254 is otherwise inside the allowed link-local range, but it
+    // must never be reachable — it's the AWS/GCP/Azure/OpenStack metadata IP.
+    expect(isAllowedTarget('http://169.254.169.254/latest/meta-data/')).toBe(false);
+    expect(isAllowedTarget('https://169.254.169.254/latest/meta-data/')).toBe(false);
+    expect(isAllowedTarget('http://[169.254.169.254]/latest/meta-data/')).toBe(false);
+    // Other link-local addresses (real LAN tooling) remain allowed.
+    expect(isAllowedTarget('http://169.254.1.1/v1')).toBe(true);
+  });
+
   it('rejects non-http(s) protocols and malformed input', () => {
     expect(isAllowedTarget('ftp://192.168.1.1/x')).toBe(false);
     expect(isAllowedTarget('not a url')).toBe(false);
+  });
+});
+
+describe('isSameOriginRequest', () => {
+  it('allows requests with no Origin header (same-origin GET, non-browser callers)', () => {
+    expect(isSameOriginRequest({ headers: { host: 'localhost:5173' } })).toBe(true);
+  });
+
+  it('allows a same-origin Origin header', () => {
+    expect(
+      isSameOriginRequest({
+        headers: { host: 'localhost:5173', origin: 'http://localhost:5173' },
+      }),
+    ).toBe(true);
+  });
+
+  it('rejects a cross-origin Origin header (CSRF/SSRF-via-open-tab guard)', () => {
+    expect(
+      isSameOriginRequest({
+        headers: { host: 'localhost:5173', origin: 'https://evil.example.com' },
+      }),
+    ).toBe(false);
+  });
+
+  it('rejects a malformed Origin header', () => {
+    expect(
+      isSameOriginRequest({ headers: { host: 'localhost:5173', origin: 'not a url' } }),
+    ).toBe(false);
   });
 });

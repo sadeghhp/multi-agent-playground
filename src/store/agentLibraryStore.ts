@@ -27,16 +27,25 @@ export const useAgentLibraryStore = create<AgentLibraryState>((set, get) => ({
   library: [],
 
   async hydrate() {
-    const all = await loadAllLibraryAgents();
-    all.sort((a, b) => b.savedAt - a.savedAt);
-    set({ library: all });
+    try {
+      const all = await loadAllLibraryAgents();
+      all.sort((a, b) => b.savedAt - a.savedAt);
+      set({ library: all });
+    } catch (err) {
+      // A transient IndexedDB failure at startup must not crash app
+      // initialization — degrade to an empty, usable library instead.
+      console.error('Agent library hydrate failed', err);
+      set({ library: [] });
+    }
   },
 
   async saveAgent(agent) {
     const saved = createSavedAgent(agent);
-    await saveLibraryAgent(saved);
-    // Newest first, matching hydrate's ordering.
+    // Update in-memory state immediately (before the persist settles) so call
+    // order — not whichever concurrent save's IndexedDB write happens to
+    // finish first — determines list order, matching hydrate's ordering.
     set({ library: [saved, ...get().library] });
+    await saveLibraryAgent(saved);
     return saved;
   },
 

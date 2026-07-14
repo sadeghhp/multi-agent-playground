@@ -4,6 +4,21 @@ import { useUiStore } from '../../store/uiStore';
 import { useRuntimeStore } from '../../store/runtimeStore';
 import styles from './Inspector.module.css';
 
+/**
+ * Priority may legitimately be any integer, including 0 or negative — unlike
+ * the fields `parseBoundedInt` (inputUtils.ts) covers, there's no positive
+ * lower bound to reject a cleared field with. Ignore a cleared/non-numeric
+ * field explicitly instead, rather than letting `Number('')` silently
+ * coerce it to a valid-looking 0.
+ */
+function parsePriority(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (trimmed === '') return null;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n)) return null;
+  return Math.trunc(n);
+}
+
 const TYPE_DESCRIPTIONS: Record<ConnectionType, string> = {
   conversation: 'The target may respond after the source.',
   review: "The target reviews the source's most recent answer.",
@@ -61,7 +76,16 @@ export function ConnectionInspector({ connection }: { connection: Connection }) 
 
       <div className="field">
         <label htmlFor="cn-priority">Priority (higher runs first)</label>
-        <input id="cn-priority" type="number" value={connection.priority} onChange={(e) => update(connection.id, { priority: Number(e.target.value) })} disabled={isRunning} />
+        <input
+          id="cn-priority"
+          type="number"
+          value={connection.priority}
+          onChange={(e) => {
+            const n = parsePriority(e.target.value);
+            if (n !== null) update(connection.id, { priority: n });
+          }}
+          disabled={isRunning}
+        />
       </div>
 
       <div className="field">

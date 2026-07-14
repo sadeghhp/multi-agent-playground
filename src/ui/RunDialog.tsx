@@ -159,7 +159,7 @@ export function RunDialog() {
           {blocking && <p className={styles.issuesHead}>Resolve these before starting:</p>}
           {issues.map((issue, i) => (
             <div
-              key={i}
+              key={`${issue.level}:${issue.agentId ?? ''}:${issue.message}:${i}`}
               className={issue.level === 'error' ? styles.error : styles.warning}
             >
               <span aria-hidden="true">{issue.level === 'error' ? '⛔' : '⚠'}</span> {issue.message}

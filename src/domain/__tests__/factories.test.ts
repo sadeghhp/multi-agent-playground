@@ -23,6 +23,27 @@ describe('duplicateAgent', () => {
     expect(copy.position).not.toEqual(original.position);
     expect(copy.name).toContain('copy');
   });
+
+  it('increments the copy suffix instead of cascading (L-9 regression)', () => {
+    const original = createAgent({ name: 'Analyst' });
+    const copy1 = duplicateAgent(original);
+    expect(copy1.name).toBe('Analyst (copy)');
+    const copy2 = duplicateAgent(copy1);
+    expect(copy2.name).toBe('Analyst (copy 2)');
+    const copy3 = duplicateAgent(copy2);
+    expect(copy3.name).toBe('Analyst (copy 3)');
+  });
+
+  it('does not alias nested config objects with the original (L-8 regression)', () => {
+    const original = createAgent({ name: 'A' });
+    const copy = duplicateAgent(original);
+    expect(copy.characteristics).not.toBe(original.characteristics);
+    expect(copy.llm).not.toBe(original.llm);
+    expect(copy.runtime).not.toBe(original.runtime);
+    // Mutating the copy's nested config must not leak back into the original.
+    copy.llm.model = 'mutated';
+    expect(original.llm.model).not.toBe('mutated');
+  });
 });
 
 describe('skill library', () => {

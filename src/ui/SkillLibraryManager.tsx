@@ -15,7 +15,7 @@ import styles from './ProviderManager.module.css';
  * whole catalog. Master/detail layout mirrors the provider manager.
  */
 export function SkillLibraryManager() {
-  const playground = useDomainStore((s) => s.playground)!;
+  const playground = useDomainStore((s) => s.playground);
   const addLibrarySkill = useDomainStore((s) => s.addLibrarySkill);
   const updateLibrarySkill = useDomainStore((s) => s.updateLibrarySkill);
   const removeLibrarySkill = useDomainStore((s) => s.removeLibrarySkill);
@@ -24,10 +24,16 @@ export function SkillLibraryManager() {
   const showToast = useUiStore((s) => s.showToast);
   const requestConfirm = useUiStore((s) => s.requestConfirm);
 
-  const skills = playground.skillLibrary;
+  const skills = playground?.skillLibrary ?? [];
   const [selectedId, setSelectedId] = useState<string | null>(skills[0]?.id ?? null);
   const selected = skills.find((s) => s.id === selectedId) ?? null;
   const fileInput = useRef<HTMLInputElement>(null);
+
+  // Guarded defensively (after all hooks, to satisfy the Rules of Hooks) — the
+  // toolbar disables the trigger for this panel while no playground is
+  // active, but this must not crash if it's ever reached some other way (e.g.
+  // a future UI path, restored panel state).
+  if (!playground) return null;
 
   function handleAdd() {
     const skill = createLibrarySkill();
@@ -62,7 +68,7 @@ export function SkillLibraryManager() {
       showToast('warn', 'The library is empty — nothing to export.');
       return;
     }
-    downloadJson(`${playground.name || 'playground'}-skill-library`, exportSkillSet(skills));
+    downloadJson(`${playground?.name || 'playground'}-skill-library`, exportSkillSet(skills));
   }
 
   async function handleImport(file: File) {

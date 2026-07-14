@@ -15,6 +15,7 @@ import { PlaygroundsPanel } from './ui/PlaygroundsPanel';
 import { TimelinePage } from './ui/timeline/TimelinePage';
 import { AgentLibraryPanel } from './ui/AgentLibraryPanel';
 import { useAgentLibraryStore } from './store/agentLibraryStore';
+import { CreateAgentWithAiModal } from './ui/CreateAgentWithAiModal';
 import { Toast } from './ui/Toast';
 import styles from './App.module.css';
 
@@ -75,6 +76,7 @@ export default function App() {
       {openPanel === 'playgrounds' && <PlaygroundsPanel />}
       {openPanel === 'timeline' && <TimelinePage />}
       {openPanel === 'library' && <AgentLibraryPanel />}
+      {openPanel === 'createAgentAi' && <CreateAgentWithAiModal />}
       <Toast />
     </div>
   );

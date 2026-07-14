@@ -109,6 +109,14 @@ export function Toolbar() {
         </button>
         <span className={styles.sep} />
         <button type="button" onClick={() => setPanel('providers')}>Providers</button>
+        <button
+          type="button"
+          onClick={() => setPanel('timeline')}
+          disabled={!playground}
+          title="View the conversation as a timeline"
+        >
+          Timeline
+        </button>
         <button type="button" onClick={() => clearTranscript()} disabled={isRunning}>
           Clear chat
         </button>

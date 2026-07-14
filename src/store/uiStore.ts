@@ -13,7 +13,8 @@ export type OpenPanel =
   | 'playgrounds'
   | 'library'
   | 'settings'
-  | 'timeline';
+  | 'timeline'
+  | 'createAgentAi';
 
 export type Selection =
   | { kind: 'none' }

@@ -82,3 +82,18 @@ don't send permissive CORS headers, or that forbid client-side credentials, will
 fail with a **CORS** error (distinguished from auth/network errors in diagnostics).
 This is a provider compatibility limitation, not an app defect (spec §28). The
 long-term fix is a server-side proxy, which is out of MVP scope.
+
+### Dev proxy (and when to turn it off)
+
+To make CORS-less internal gateways usable during local development, `npm run dev`
+routes remote provider calls through a **dev-server proxy** (`vite/providerDevProxyPlugin.ts`)
+instead of calling them from the browser. This means the Vite/Node process — not the
+browser — makes the request in dev. If a provider is reachable **only** from the browser
+(e.g. behind a VPN or browser-authenticated corporate proxy the dev server can't use),
+proxying it hangs and surfaces as `Failed (timeout): The request timed out.`
+
+For that case, each provider has a **"Send requests directly from the browser (bypass
+dev proxy)"** toggle in the Provider editor (shown in dev only). Enable it to send that
+provider's requests straight from the browser even under `vite dev`. The provider must
+then allow browser-origin (CORS) requests. Production builds are always browser-direct
+regardless of this setting — the proxy exists only under `vite dev`.

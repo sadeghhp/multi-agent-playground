@@ -215,6 +215,13 @@ export const Provider = z.object({
   models: z.array(z.string()).default([]),
   customHeaders: z.record(z.string(), z.string()).default({}),
   timeoutMs: z.number().int().positive().default(60_000),
+  // Dev-only: when true, `vite dev` sends this provider's requests straight from
+  // the browser instead of routing them through the local dev proxy. Set this
+  // for endpoints only the browser can reach (e.g. behind a browser-authenticated
+  // corporate proxy / VPN) that the dev server process cannot. Has no effect in a
+  // production build, which is always browser-direct. Providers reachable only
+  // via a CORS-less internal gateway should leave this OFF so the proxy is used.
+  bypassDevProxy: z.boolean().default(false),
   enabled: z.boolean().default(true),
 });
 export type Provider = z.infer<typeof Provider>;

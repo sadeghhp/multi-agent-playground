@@ -1,5 +1,7 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+import type { CSSProperties } from 'react';
 import type { AgentFlowNode } from './graphAdapter';
+import { agentColor } from './colors';
 import styles from './AgentNode.module.css';
 
 /**
@@ -21,7 +23,6 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const status = data.runtimeState;
   const classNames = [
     styles.node,
-    styles[`color_${data.colorCategory}`],
     selected ? styles.selected : '',
     !data.enabled ? styles.disabled : '',
     styles[`state_${status}`] ?? '',
@@ -30,10 +31,19 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
     .filter(Boolean)
     .join(' ');
 
+  // Identity color is driven by the single source of truth in colors.ts and
+  // applied as an inline CSS variable, so the palette lives in exactly one place.
+  const style = { '--agent-color': agentColor(data.colorCategory) } as CSSProperties;
+
   return (
-    <div className={classNames} data-testid={`agent-node-${data.agentId}`}>
+    <div className={classNames} style={style} data-testid={`agent-node-${data.agentId}`}>
       <Handle type="target" position={Position.Left} className={styles.handle} />
       <div className={styles.header}>
+        <span
+          className={styles.dot}
+          aria-hidden="true"
+          title={`Category: ${data.colorCategory}`}
+        />
         <span className={styles.name} title={data.name}>
           {data.name || 'Unnamed agent'}
         </span>

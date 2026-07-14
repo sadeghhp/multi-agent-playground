@@ -52,8 +52,14 @@ export function RunDialog() {
       width={620}
       footer={
         <>
-          <button type="button" onClick={() => setPanel('none')}>Cancel</button>
-          <button type="button" className="primary" onClick={handleRun} disabled={blocking}>
+          <button type="button" className="secondary" onClick={() => setPanel('none')}>Cancel</button>
+          <button
+            type="button"
+            className="primary"
+            onClick={handleRun}
+            disabled={blocking}
+            title={blocking ? 'Resolve the errors listed above before starting' : undefined}
+          >
             Start conversation
           </button>
         </>
@@ -63,6 +69,7 @@ export function RunDialog() {
         <label htmlFor="run-subject">Subject (required)</label>
         <textarea
           id="run-subject"
+          aria-required="true"
           value={conversation.subject}
           onChange={(e) => updateConversation({ subject: e.target.value })}
           placeholder="Evaluate whether the company should open-source its internal agent framework."
@@ -148,13 +155,14 @@ export function RunDialog() {
       )}
 
       {issues.length > 0 && (
-        <div className={styles.issues}>
+        <div className={styles.issues} role="group" aria-label="Configuration issues">
+          {blocking && <p className={styles.issuesHead}>Resolve these before starting:</p>}
           {issues.map((issue, i) => (
             <div
               key={i}
               className={issue.level === 'error' ? styles.error : styles.warning}
             >
-              {issue.level === 'error' ? '⛔' : '⚠'} {issue.message}
+              <span aria-hidden="true">{issue.level === 'error' ? '⛔' : '⚠'}</span> {issue.message}
             </div>
           ))}
         </div>

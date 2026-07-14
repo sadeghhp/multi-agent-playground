@@ -1,10 +1,9 @@
-import { useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import rehypeSanitize from 'rehype-sanitize';
+import { type CSSProperties, useState } from 'react';
 import type { TranscriptMessage } from '../../domain/schema';
 import { dirForLanguage } from '../../domain/language';
 import { useUiStore } from '../../store/uiStore';
 import { useRuntimeStore } from '../../store/runtimeStore';
+import { MessageMarkdown } from './MessageMarkdown';
 import styles from './Transcript.module.css';
 
 /**
@@ -12,7 +11,7 @@ import styles from './Transcript.module.css';
  * Markdown — rehype-sanitize strips any HTML/script so provider output can never
  * inject markup (spec §21).
  */
-export function Message({ msg }: { msg: TranscriptMessage }) {
+export function Message({ msg, color }: { msg: TranscriptMessage; color?: string }) {
   const [expanded, setExpanded] = useState(true);
   const [showRequest, setShowRequest] = useState(false);
   const showToast = useUiStore((s) => s.showToast);
@@ -22,10 +21,16 @@ export function Message({ msg }: { msg: TranscriptMessage }) {
   // Mirror the whole message (header, alignment, body) for RTL languages so
   // Persian output reads naturally right-to-left.
   const dir = dirForLanguage(msg.language);
+  const style = color ? ({ '--agent-color': color } as CSSProperties) : undefined;
 
   return (
-    <div className={`${styles.message} ${msg.status === 'failed' ? styles.failed : ''}`} dir={dir}>
+    <div
+      className={`${styles.message} ${msg.status === 'failed' ? styles.failed : ''}`}
+      dir={dir}
+      style={style}
+    >
       <div className={styles.msgHeader}>
+        <span className={styles.dot} style={{ backgroundColor: color }} aria-hidden="true" />
         <span className={styles.msgAgent}>
           {msg.agentName}
           {msg.agentDeleted && <span className="chip"> deleted</span>}
@@ -33,7 +38,8 @@ export function Message({ msg }: { msg: TranscriptMessage }) {
         {msg.role && <span className="chip">{msg.role}</span>}
         <span className={styles.msgMeta}>
           turn {msg.turn} · {msg.model || '—'} · {time}
-          {msg.durationMs != null && ` · ${msg.durationMs}ms`}
+          {msg.durationMs != null &&
+            ` · ${msg.durationMs < 1000 ? `${msg.durationMs}ms` : `${(msg.durationMs / 1000).toFixed(1)}s`}`}
           {msg.totalTokens != null && ` · ${msg.totalTokens} tok`}
         </span>
         <span className={styles.msgActions}>
@@ -70,15 +76,11 @@ export function Message({ msg }: { msg: TranscriptMessage }) {
         </div>
       )}
       {expanded && (
-        // No explicit dir here: inherits the deterministic direction from the
-        // message container above, driven by the agent's configured language.
-        // dir="auto" would instead guess from content, which stays LTR until
-        // enough RTL script accumulates — wrong for streaming/short replies.
-        <div className={styles.msgBody}>
+        <div className={styles.msgBody} dir="auto">
           {msg.status === 'failed' ? (
             <span className={styles.errText}>Failed: {msg.error}</span>
           ) : (
-            <ReactMarkdown rehypePlugins={[rehypeSanitize]}>{msg.content}</ReactMarkdown>
+            <MessageMarkdown content={msg.content} />
           )}
         </div>
       )}

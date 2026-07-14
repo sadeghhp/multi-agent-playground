@@ -26,6 +26,10 @@ export type RuntimeState = z.infer<typeof RuntimeState>;
 export const ConnectionType = z.enum(['conversation', 'review', 'handoff']);
 export type ConnectionType = z.infer<typeof ConnectionType>;
 
+/** Language an agent asks and answers in (spec: per-agent conversation language). */
+export const AgentLanguage = z.enum(['en', 'fa', 'fr']);
+export type AgentLanguage = z.infer<typeof AgentLanguage>;
+
 export const AuthMethod = z.enum(['none', 'bearer', 'custom-header']);
 export type AuthMethod = z.infer<typeof AuthMethod>;
 
@@ -110,6 +114,9 @@ export const Agent = z.object({
   icon: z.string().optional(),
   role: z.string().default(''),
   systemInstruction: z.string().default(''),
+  // Per-agent conversation language. Defaults to English so existing v1
+  // playgrounds without the field parse cleanly (no migration needed).
+  language: AgentLanguage.default('en'),
   characteristics: Characteristics,
   skills: z.array(Skill).default([]),
   llm: LlmConfig,

@@ -66,7 +66,7 @@ export function Message({ msg }: { msg: TranscriptMessage }) {
         </div>
       )}
       {expanded && (
-        <div className={styles.msgBody}>
+        <div className={styles.msgBody} dir="auto">
           {msg.status === 'failed' ? (
             <span className={styles.errText}>Failed: {msg.error}</span>
           ) : (

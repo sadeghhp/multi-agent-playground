@@ -73,6 +73,7 @@ export function createAgent(overrides: Partial<Agent> = {}): Agent {
     description: '',
     role: '',
     systemInstruction: '',
+    language: 'en',
     characteristics: defaultCharacteristics(),
     skills: [],
     llm: defaultLlmConfig(),

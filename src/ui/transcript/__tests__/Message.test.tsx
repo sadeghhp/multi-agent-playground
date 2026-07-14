@@ -38,4 +38,14 @@ describe('Message direction', () => {
     const fr = render(<Message msg={makeMsg({ language: 'fr', content: 'Bonjour' })} />);
     expect(fr.container.querySelector('div[dir]')?.getAttribute('dir')).toBe('ltr');
   });
+
+  it("does not let the body's direction diverge from the forced container direction", () => {
+    // Regression guard: an inner dir="auto" would override the parent's
+    // forced dir and guess LTR from short/neutral content, which is exactly
+    // the bug this test protects against. Only the outer container (and the
+    // always-LTR request-inspector panel, when open) may declare a dir.
+    const { container } = render(<Message msg={makeMsg({ language: 'fa', content: 'سلام' })} />);
+    const dirEls = Array.from(container.querySelectorAll('[dir]'));
+    expect(dirEls.map((el) => el.getAttribute('dir'))).toEqual(['rtl']);
+  });
 });

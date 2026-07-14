@@ -30,7 +30,11 @@ export function LiveMessage({
         {role && <span className="chip">{role}</span>}
         <span className={styles.liveBadge}>streaming…</span>
       </div>
-      <div className={`${styles.msgBody} ${styles.liveBody}`} dir="auto">
+      {/* No explicit dir: inherits the forced direction above. dir="auto"
+          would guess from the streamed text so far, which stays LTR until
+          enough RTL script has arrived — the opposite of what we want while
+          a Persian agent is still typing its first few characters. */}
+      <div className={`${styles.msgBody} ${styles.liveBody}`}>
         {text}
         <span className={styles.caret} aria-hidden="true" />
       </div>

@@ -162,7 +162,9 @@ function TimelineItem({ msg, color }: { msg: TranscriptMessage; color: string })
         {msg.sourceAgentId && msg.connectionType && (
           <div className={styles.source}>via {msg.connectionType} connection</div>
         )}
-        <div className={styles.body} dir="auto">
+        {/* No explicit dir: inherits the forced direction from the card
+            above (driven by the agent's language), not a content guess. */}
+        <div className={styles.body}>
           {failed ? (
             <span className={styles.errText}>Failed: {msg.error}</span>
           ) : (

@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useRef } from 'react';
-import ReactMarkdown from 'react-markdown';
-import rehypeSanitize from 'rehype-sanitize';
 import type { TranscriptMessage } from '../../domain/schema';
 import { dirForLanguage } from '../../domain/language';
 import { useDomainStore } from '../../store/domainStore';
 import { useUiStore } from '../../store/uiStore';
 import { agentColor } from '../../graph/colors';
+import { MessageMarkdown } from '../transcript/MessageMarkdown';
 import styles from './Timeline.module.css';
 
 /** Consecutive messages sharing a turn number, in chronological order. */
@@ -168,7 +167,7 @@ function TimelineItem({ msg, color }: { msg: TranscriptMessage; color: string })
           {failed ? (
             <span className={styles.errText}>Failed: {msg.error}</span>
           ) : (
-            <ReactMarkdown rehypePlugins={[rehypeSanitize]}>{msg.content}</ReactMarkdown>
+            <MessageMarkdown content={msg.content} />
           )}
         </div>
       </div>

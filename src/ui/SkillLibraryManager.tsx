@@ -22,6 +22,7 @@ export function SkillLibraryManager() {
   const setSkillLibrary = useDomainStore((s) => s.setSkillLibrary);
   const setPanel = useUiStore((s) => s.setPanel);
   const showToast = useUiStore((s) => s.showToast);
+  const requestConfirm = useUiStore((s) => s.requestConfirm);
 
   const skills = playground.skillLibrary;
   const [selectedId, setSelectedId] = useState<string | null>(skills[0]?.id ?? null);
@@ -44,8 +45,14 @@ export function SkillLibraryManager() {
     setSelectedId(copy.id);
   }
 
-  function handleDelete(skill: LibrarySkill) {
-    if (!window.confirm(`Delete skill "${skill.name}"? Agents that copied it keep their own copy.`)) return;
+  async function handleDelete(skill: LibrarySkill) {
+    const ok = await requestConfirm({
+      title: 'Delete skill',
+      message: `Delete skill "${skill.name}"? Agents that copied it keep their own copy.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
     removeLibrarySkill(skill.id);
     setSelectedId(skills.find((s) => s.id !== skill.id)?.id ?? null);
   }

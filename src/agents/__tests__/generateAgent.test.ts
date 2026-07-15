@@ -2,7 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createProvider } from '../../domain/factories';
 import { ProviderError } from '../../providers/errors';
 import type { NormalizedResponse } from '../../providers/types';
-import { cleanJsonText, draftToAgentOverrides, generateAgentDraft } from '../generateAgent';
+import {
+  cleanJsonText,
+  draftToAgentOverrides,
+  generateAgentDraft,
+  parseJsonObject,
+  stripReasoningArtifacts,
+} from '../generateAgent';
 
 vi.mock('../../providers/openaiAdapter', () => ({
   sendChat: vi.fn(),
@@ -10,8 +16,8 @@ vi.mock('../../providers/openaiAdapter', () => ({
 import { sendChat } from '../../providers/openaiAdapter';
 const sendChatMock = vi.mocked(sendChat);
 
-function reply(text: string): NormalizedResponse {
-  return { text, model: 'm1', finishReason: 'stop', raw: {}, durationMs: 5, status: 200 };
+function reply(text: string, extras: Partial<NormalizedResponse> = {}): NormalizedResponse {
+  return { text, model: 'm1', finishReason: 'stop', raw: {}, durationMs: 5, status: 200, ...extras };
 }
 
 const VALID_DRAFT = {
@@ -36,6 +42,16 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+describe('stripReasoningArtifacts', () => {
+  it('removes Qwen-style think blocks', () => {
+    expect(stripReasoningArtifacts('<think>ponder {schema}</think>\n{"a":1}')).toBe('{"a":1}');
+  });
+
+  it('removes thinking and reasoning tags', () => {
+    expect(stripReasoningArtifacts('<thinking>x</thinking><reasoning>y</reasoning>{"a":1}')).toBe('{"a":1}');
+  });
+});
+
 describe('cleanJsonText', () => {
   it('unwraps a whole-reply code fence', () => {
     expect(cleanJsonText('```json\n{"a":1}\n```')).toBe('{"a":1}');
@@ -53,6 +69,30 @@ describe('cleanJsonText', () => {
   it('does not unwrap quotes inside string values', () => {
     const raw = '{"name":"\\"Quoted\\" Name"}';
     expect(cleanJsonText(raw)).toBe(raw);
+  });
+
+  it('does not end the object early on braces inside string values', () => {
+    const raw = '{"name":"use {Actor} model","note":"close } early?"}';
+    expect(cleanJsonText(`preamble ${raw} trailing`)).toBe(raw);
+  });
+
+  it('strips think tags before extracting JSON', () => {
+    const raw = '<think>I will emit {"bad":true} first</think>\n{"a":1,"b":2}';
+    expect(cleanJsonText(raw)).toBe('{"a":1,"b":2}');
+  });
+});
+
+describe('parseJsonObject', () => {
+  it('parses JSON after a think block that contains brace examples', () => {
+    const draft = JSON.stringify(VALID_DRAFT);
+    const raw = `<think>Consider shape {"name":"...","skills":[]} carefully</think>\n${draft}`;
+    expect(parseJsonObject(raw)).toEqual(VALID_DRAFT);
+  });
+
+  it('finds the real object when an earlier brace span is not valid JSON', () => {
+    const draft = JSON.stringify(VALID_DRAFT);
+    const raw = 'Notes: {not valid json}\n\n' + draft;
+    expect(parseJsonObject(raw)).toEqual(VALID_DRAFT);
   });
 });
 
@@ -74,13 +114,21 @@ describe('generateAgentDraft', () => {
     expect(result.draft?.role).toBe('Skeptical reviewer');
   });
 
+  it('parses a reasoning-model reply with embedded think tags', async () => {
+    const wrapped = `<think>Designing a critic agent with {"tone":"direct"}...</think>\n${JSON.stringify(VALID_DRAFT)}`;
+    sendChatMock.mockResolvedValue(reply(wrapped));
+    const result = await generateAgentDraft('a skeptical reviewer', provider, 'm1');
+    expect(result.ok).toBe(true);
+    expect(result.draft?.name).toBe('Critic');
+  });
+
   it('sends the expected request params', async () => {
     sendChatMock.mockResolvedValue(reply(JSON.stringify(VALID_DRAFT)));
     await generateAgentDraft('desc', provider, 'm1');
     const params = sendChatMock.mock.calls[0][1];
     expect(params.model).toBe('m1');
     expect(params.temperature).toBe(0.4);
-    expect(params.maxOutputTokens).toBe(2048);
+    expect(params.maxOutputTokens).toBe(8192);
   });
 
   it('fails cleanly on non-JSON output and surfaces the raw text', async () => {
@@ -89,6 +137,15 @@ describe('generateAgentDraft', () => {
     expect(result.ok).toBe(false);
     expect(result.errorKind).toBe('invalid-json');
     expect(result.rawText).toBe('I cannot help with that.');
+  });
+
+  it('reports truncation when finishReason is length', async () => {
+    sendChatMock.mockResolvedValue(reply('{"name":"Critic","role":', { finishReason: 'length' }));
+    const result = await generateAgentDraft('desc', provider, 'm1');
+    expect(result.ok).toBe(false);
+    expect(result.errorKind).toBe('invalid-json');
+    expect(result.errorSummary).toMatch(/tokens/i);
+    expect(result.retryEligible).toBe(true);
   });
 
   it('fails cleanly on JSON that does not match the draft schema', async () => {

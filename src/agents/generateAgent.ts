@@ -49,7 +49,8 @@ const GENERATE_SYSTEM_PROMPT = [
   'a single AI agent configuration for a multi-agent conversation tool.',
   '',
   'Return ONLY a single JSON object with exactly these fields — no markdown',
-  'fences, no commentary before or after, no trailing text:',
+  'fences, no commentary before or after, no trailing text. Keep string values',
+  'concise (especially systemInstruction) so the whole object fits in one reply:',
   '{',
   '  "name": string,                // short display name, e.g. "Skeptical Analyst"',
   '  "description": string,         // one sentence summary of the agent, may be empty',
@@ -78,36 +79,97 @@ function buildUserMessage(description: string): string {
   return `Generate an agent for the following description:\n\n${description.trim()}`;
 }
 
+/** Headroom for a full agent draft; reasoning models often spend many tokens thinking first. */
+const GENERATE_MAX_OUTPUT_TOKENS = 8192;
+
 /**
- * Strip a whole-reply markdown fence, then extract the outermost balanced
+ * Reasoning models (Qwen, DeepSeek, etc.) often embed thinking in the visible
+ * content as XML-ish tags. Those blocks frequently contain `{...}` examples that
+ * would otherwise steal the first brace match from the real draft.
+ */
+export function stripReasoningArtifacts(raw: string): string {
+  return raw
+    .replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '')
+    .replace(/<thinking\b[^>]*>[\s\S]*?<\/thinking>/gi, '')
+    .replace(/<reasoning\b[^>]*>[\s\S]*?<\/reasoning>/gi, '')
+    .replace(/<\/(?:think|thinking|reasoning)\s*>/gi, '')
+    .trim();
+}
+
+/**
+ * Extract a balanced `{...}` starting at `start`, respecting JSON string escapes
+ * so braces inside string values do not end the object early.
+ */
+function extractBalancedObject(text: string, start: number): string | null {
+  if (text[start] !== '{') return null;
+
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escape) escape = false;
+      else if (ch === '\\') escape = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+/**
+ * Strip reasoning tags and markdown fences, then extract the outermost balanced
  * {...} object — models often wrap JSON in a preamble/trailing note even when
  * told not to. Unlike cleanEnhancedText, this never unwraps quotes: that would
  * corrupt JSON string values.
  */
 export function cleanJsonText(raw: string): string {
-  let text = raw.trim();
+  let text = stripReasoningArtifacts(raw);
 
-  const fence = text.match(/^```[^\n]*\n([\s\S]*?)\n?```$/);
+  const fence = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/i);
   if (fence) text = fence[1].trim();
 
   const start = text.indexOf('{');
   if (start === -1) return text;
 
-  let depth = 0;
-  let end = -1;
-  for (let i = start; i < text.length; i++) {
-    const ch = text[i];
-    if (ch === '{') depth++;
-    else if (ch === '}') {
-      depth--;
-      if (depth === 0) {
-        end = i;
-        break;
-      }
+  return extractBalancedObject(text, start) ?? text;
+}
+
+/**
+ * Parse the first JSON object that validates as parseable. Tries cleanJsonText
+ * first, then every `{` start — so a thinking preamble that discusses `{schema}`
+ * examples does not permanently poison extraction.
+ */
+export function parseJsonObject(raw: string): unknown {
+  const primary = cleanJsonText(raw);
+  try {
+    return JSON.parse(primary);
+  } catch {
+    // fall through
+  }
+
+  const text = stripReasoningArtifacts(raw);
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== '{') continue;
+    const candidate = extractBalancedObject(text, i);
+    if (!candidate) continue;
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      // try the next `{`
     }
   }
-  if (end === -1) return text;
-  return text.slice(start, end + 1);
+  throw new SyntaxError('No valid JSON object found in model response');
 }
 
 export interface GenerateAgentOptions {
@@ -170,7 +232,7 @@ export async function generateAgentDraft(
   try {
     const res = await sendChat(
       provider,
-      { model, messages, temperature: 0.4, maxOutputTokens: 2048 },
+      { model, messages, temperature: 0.4, maxOutputTokens: GENERATE_MAX_OUTPUT_TOKENS },
       {
         signal: options.signal,
         timeoutMs: options.timeoutMs,
@@ -193,14 +255,18 @@ export async function generateAgentDraft(
 
     let parsed: unknown;
     try {
-      parsed = JSON.parse(cleanJsonText(res.text));
+      parsed = parseJsonObject(res.text);
     } catch {
+      const truncated = res.finishReason === 'length';
       return {
         ok: false,
         durationMs: Date.now() - start,
         errorKind: 'invalid-json',
-        errorSummary: 'The model did not return valid JSON.',
+        errorSummary: truncated
+          ? 'The model ran out of output tokens before finishing valid JSON. Try again, or use a shorter description.'
+          : 'The model did not return valid JSON.',
         rawText: res.text,
+        retryEligible: truncated,
       };
     }
 

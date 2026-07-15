@@ -264,26 +264,73 @@ export type TranscriptMessage = z.infer<typeof TranscriptMessage>;
 export const ResponseLength = z.enum(['agent-default', 'short', 'medium', 'long']);
 export type ResponseLength = z.infer<typeof ResponseLength>;
 
+/**
+ * Run-level chit-chat/flattery control (spec extension): 'agent-default'
+ * leaves each agent's own characteristics untouched; 'concise-factual'
+ * instructs every agent to drop pleasantries/flattery/small talk for the run.
+ */
+export const ChitchatPolicy = z.enum(['agent-default', 'concise-factual']);
+export type ChitchatPolicy = z.infer<typeof ChitchatPolicy>;
+
+/**
+ * Run-level language override (spec extension): 'agent-default' leaves each
+ * agent answering in its own configured language; any other value forces
+ * every agent to answer in that language for the run, replacing (not adding
+ * to) the per-agent language directive.
+ */
+export const LanguageOverride = z.enum(['agent-default', ...AgentLanguage.options]);
+export type LanguageOverride = z.infer<typeof LanguageOverride>;
+
 export const ConversationSettings = z.object({
   subject: z.string().default(''),
   objective: z.string().default(''),
   initialContext: z.string().default(''),
   startingAgentId: z.string().nullable().default(null),
-  // No upper bound on maxTotalTurns/maxResponsesPerAgent/responseTimeoutMs:
-  // these gate how long/large a run can get, and a user deliberately running
-  // an extended session is legitimate — the runtime store's own bounded ring
-  // buffers (events/errors, see runtimeStore.ts) are what keep memory in check.
+  // No upper bound on maxTotalTurns/maxResponsesPerAgent: these gate how
+  // long/large a run can get, and a user deliberately running an extended
+  // session is legitimate — the runtime store's own bounded ring buffers
+  // (events/errors, see runtimeStore.ts) are what keep memory in check.
   maxTotalTurns: z.number().int().positive().default(12),
   maxResponsesPerAgent: z.number().int().positive().default(3),
-  responseTimeoutMs: z.number().int().positive().default(60_000),
   stopOnError: z.boolean().default(true),
   // Run-level overrides (additive, defaulted so old playgrounds parse
   // unchanged): applied on top of each agent's own characteristics for this
-  // run only. Empty tone / 'agent-default' length means "no override".
+  // run only. Empty/null/'agent-default' means "no override".
   toneOverride: z.string().default(''),
   responseLength: ResponseLength.default('agent-default'),
+  chitchatPolicy: ChitchatPolicy.default('agent-default'),
+  languageOverride: LanguageOverride.default('agent-default'),
+  temperatureOverride: z.number().min(0).max(2).nullable().default(null),
+  // Caps (does not raise) each agent's own runtime.responseTimeoutMs for
+  // this run only.
+  responseTimeoutOverrideMs: z.number().int().positive().nullable().default(null),
 });
 export type ConversationSettings = z.infer<typeof ConversationSettings>;
+
+// ---------------------------------------------------------------------------
+// Run presets — named, reusable bundles of the run-level *options* (tone,
+// length, chit-chat policy, language, temperature/timeout overrides, turn
+// caps, stop-on-error). Excludes per-run content (subject/objective/initial
+// context/starting agent), which is specific to a single conversation, not a
+// reusable "how should this run behave" preference.
+// ---------------------------------------------------------------------------
+
+export const RunPresetSettings = ConversationSettings.omit({
+  subject: true,
+  objective: true,
+  initialContext: true,
+  startingAgentId: true,
+});
+export type RunPresetSettings = z.infer<typeof RunPresetSettings>;
+
+export const RunPreset = z.object({
+  schemaVersion: z.literal(SCHEMA_VERSION),
+  id: z.string(),
+  name: z.string(),
+  savedAt: z.number().int(),
+  settings: RunPresetSettings,
+});
+export type RunPreset = z.infer<typeof RunPreset>;
 
 // ---------------------------------------------------------------------------
 // UI layout state persisted with the playground (spec §7.1)

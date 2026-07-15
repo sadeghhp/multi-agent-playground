@@ -6,6 +6,7 @@ import {
   type LlmConfig,
   type Playground,
   type Provider,
+  type RunPreset,
   type RuntimeConfig,
   type SavedAgent,
   type UiLayoutState,
@@ -16,6 +17,7 @@ import {
   newLibraryAgentId,
   newPlaygroundId,
   newProviderId,
+  newRunPresetId,
   newSkillId,
 } from './ids';
 import { evidenceRoleInstruction } from './conduct';
@@ -60,11 +62,31 @@ export function defaultConversationSettings(): ConversationSettings {
     startingAgentId: null,
     maxTotalTurns: 12,
     maxResponsesPerAgent: 3,
-    responseTimeoutMs: 60_000,
     stopOnError: true,
     toneOverride: '',
     responseLength: 'agent-default',
+    chitchatPolicy: 'agent-default',
+    languageOverride: 'agent-default',
+    temperatureOverride: null,
+    responseTimeoutOverrideMs: null,
   };
+}
+
+/** Snapshot the reusable run *options* portion of a conversation (excludes subject/objective/initialContext/startingAgentId) into a named preset. */
+export function createRunPreset(name: string, conversation: ConversationSettings): RunPreset {
+  const { subject: _subject, objective: _objective, initialContext: _initialContext, startingAgentId: _startingAgentId, ...settings } = conversation;
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    id: newRunPresetId(),
+    name,
+    savedAt: now(),
+    settings,
+  };
+}
+
+/** Apply a preset's options on top of a conversation, keeping its subject/objective/initialContext/startingAgentId untouched. */
+export function applyRunPreset(conversation: ConversationSettings, preset: RunPreset): ConversationSettings {
+  return { ...conversation, ...preset.settings };
 }
 
 export function defaultUiLayout(): UiLayoutState {

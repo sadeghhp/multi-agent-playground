@@ -25,7 +25,7 @@ const VALID_DRAFT = {
   description: 'Skeptically reviews claims.',
   role: 'Skeptical reviewer',
   systemInstruction: 'Challenge unsupported claims and identify weaknesses.',
-  language: 'en',
+  language: 'en' as const,
   characteristics: {
     tone: 'direct',
     verbosity: 50,
@@ -34,7 +34,7 @@ const VALID_DRAFT = {
     skepticism: 85,
     cooperation: 35,
   },
-  colorCategory: 'red',
+  colorCategory: 'red' as const,
   skills: [{ name: 'critique', description: 'Critical review', instruction: 'Focus on factual weaknesses.' }],
 };
 

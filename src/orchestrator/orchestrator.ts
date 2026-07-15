@@ -389,7 +389,8 @@ export async function startRun(): Promise<void> {
         if (!res) {
           // Failure already recorded inside the call; escalate + apply policy.
           if (controller.signal.aborted) break;
-          const detail = useRuntimeStore.getState().errors.at(-1)?.detail ?? 'Request failed.';
+          const errors = useRuntimeStore.getState().errors;
+          const detail = errors[errors.length - 1]?.detail ?? 'Request failed.';
           const fo = await applyFailure(item, agent, detail);
           if (fo === 'abort') break;
           if (fo === 'stop') return finish(runId, 'error');
@@ -571,6 +572,7 @@ async function handleFailedTurn(
 
   const autoDisable = () => {
     runtime.disableAgentForRun(agent.id);
+    runtime.setAgentState(agent.id, 'disabled'); // grey the node in the graph
     log(
       'agent-auto-disabled',
       `Removed "${agent.name}" from the circuit after ${streak} consecutive failures.`,

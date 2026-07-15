@@ -190,7 +190,7 @@ describe('orchestrator cycle controls', () => {
 
   it('caps the effective response timeout at the run-level override', async () => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(okChat())));
-    const setTimeoutSpy = vi.spyOn(global, 'setTimeout');
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
     const pg = cyclePlayground(1, 5);
     pg.agents[0].runtime.responseTimeoutMs = 60_000;
     pg.conversation.responseTimeoutOverrideMs = 5_000;

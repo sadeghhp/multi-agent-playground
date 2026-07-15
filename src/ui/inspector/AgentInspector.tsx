@@ -9,6 +9,8 @@ import { newConnectionId, newSkillId } from '../../domain/ids';
 import { SKILL_PRESETS } from '../../domain/factories';
 import { assembleMessages, boundHistory, buildSystemPrompt, buildTaskPrompt, estimateTokens } from '../../agents/promptAssembly';
 import { enhanceSystemInstruction, type EnhancePromptResult } from '../../agents/enhancePrompt';
+import { enrichAgentDraft, enrichedDraftToAgentOverrides, type EnrichAgentResult } from '../../agents/enrichAgent';
+import type { GeneratedAgentDraft } from '../../agents/generateAgent';
 import { exportSkillSet, importSkillSet } from '../../persistence/skillSets';
 import { downloadJson } from '../fileDownload';
 import { validateForRun } from '../../orchestrator/validate';
@@ -85,6 +87,52 @@ export function AgentInspector({ agent }: { agent: Agent }) {
   function applyEnhancement() {
     if (enhanceProposal !== null) patch({ systemInstruction: enhanceProposal });
     setEnhanceProposal(null);
+  }
+
+  // Whole-agent enricher state: free-text "new information" the user has
+  // learned about this agent, sent to the model to mature the full spec
+  // (role, instruction, characteristics, skills) around it.
+  const [enriching, setEnriching] = useState(false);
+  const [enrichInfo, setEnrichInfo] = useState('');
+  const [enrichProposal, setEnrichProposal] = useState<GeneratedAgentDraft | null>(null);
+  const [enrichError, setEnrichError] = useState<EnrichAgentResult | null>(null);
+
+  async function handleEnrich() {
+    if (!selectedProvider || !canEnhance || !enrichInfo.trim()) return;
+    setEnriching(true);
+    setEnrichProposal(null);
+    setEnrichError(null);
+    try {
+      const result = await enrichAgentDraft(agent, enrichInfo, selectedProvider, {
+        timeoutMs: agent.runtime.responseTimeoutMs,
+      });
+      if (result.ok && result.draft) {
+        setEnrichProposal(result.draft);
+      } else {
+        setEnrichError(result);
+      }
+    } finally {
+      setEnriching(false);
+    }
+  }
+
+  function applyEnrichment() {
+    if (enrichProposal) patch(enrichedDraftToAgentOverrides(agent, enrichProposal));
+    setEnrichProposal(null);
+    setEnrichInfo('');
+  }
+
+  function formatEnrichPreview(draft: GeneratedAgentDraft): string {
+    const lines: string[] = [
+      `Name: ${draft.name}`,
+      `Role: ${draft.role}`,
+    ];
+    if (draft.description) lines.push(`Description: ${draft.description}`);
+    lines.push('', 'System instruction:', draft.systemInstruction);
+    lines.push('', `Skills (${draft.skills.length}):`);
+    if (draft.skills.length === 0) lines.push('(none)');
+    for (const s of draft.skills) lines.push(`- ${s.name}${s.description ? `: ${s.description}` : ''}`);
+    return lines.join('\n');
   }
 
   // Outgoing connections + which agents are still available as new targets.
@@ -310,6 +358,51 @@ export function AgentInspector({ agent }: { agent: Agent }) {
           ))}
         </div>
       )}
+
+      <Section title="Enrich with AI">
+        <p className={styles.hint}>
+          Tell the AI something new about this agent — a decision it should follow, a
+          capability it turned out to need, a correction — and it will mature the role,
+          instruction, characteristics, and skills to match. Review before applying.
+        </p>
+        <textarea
+          rows={3}
+          placeholder="e.g. This agent should now double-check any numeric claims against the source before repeating them."
+          value={enrichInfo}
+          onChange={(e) => setEnrichInfo(e.target.value)}
+        />
+        <div className={styles.enhanceBar}>
+          <button
+            type="button"
+            onClick={() => void handleEnrich()}
+            disabled={!canEnhance || !enrichInfo.trim() || enriching}
+            title={enhanceBlockedReason ?? 'Mature this agent using the assigned provider'}
+          >
+            {enriching ? 'Enriching…' : '🌱 Enrich with AI'}
+          </button>
+          {enhanceBlockedReason && !enriching && (
+            <span className={styles.enhanceStatus}>{enhanceBlockedReason}</span>
+          )}
+        </div>
+
+        {enrichError && (
+          <div className={styles.enhanceErr}>
+            <strong>{enrichError.errorKind ?? 'error'}</strong> — {enrichError.errorSummary}
+            {enrichError.errorDetail && <div>{enrichError.errorDetail}</div>}
+          </div>
+        )}
+
+        {enrichProposal && (
+          <div className={styles.enhanceResult}>
+            <p className={styles.enhanceResultHead}>Suggested update — review before applying</p>
+            <pre className={styles.preview}>{formatEnrichPreview(enrichProposal)}</pre>
+            <div className={styles.enhanceActions}>
+              <button type="button" className="primary" onClick={applyEnrichment}>Apply</button>
+              <button type="button" onClick={() => setEnrichProposal(null)}>Discard</button>
+            </div>
+          </div>
+        )}
+      </Section>
 
       <Section title="Identity" defaultOpen>
         <div className="field">

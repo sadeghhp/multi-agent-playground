@@ -8,7 +8,7 @@ import { createLocalOllamaProvider, LOCAL_LLM } from './shared';
  * Educational simulation only — not medical advice.
  */
 export function createTreatmentBriefPlayground(): { playground: Playground; provider: Provider } {
-  const pg = createPlayground('Sample: Treatment options brief');
+  const pg = createPlayground('Treatment options brief');
   pg.description =
     'Clinician, Researcher, Patient advocate, and Moderator outline options for a common condition. Educational simulation — not medical advice. Confirm Local (Ollama), then Run.';
 

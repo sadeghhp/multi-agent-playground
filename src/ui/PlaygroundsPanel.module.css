@@ -49,7 +49,7 @@
 .sampleCard:hover:not(:disabled),
 .sampleCard:focus-visible {
   border-color: var(--accent);
-  background: var(--accent-bg, var(--surface));
+  color: var(--accent);
 }
 
 .sampleName { font-weight: 600; font-size: var(--fs-sm, 13px); }

@@ -7,7 +7,7 @@ import { createLocalOllamaProvider, LOCAL_LLM } from './shared';
  * Science & Nature sample: Researcher → Critic → Summarizer on a climate claim.
  */
 export function createClimateClaimPlayground(): { playground: Playground; provider: Provider } {
-  const pg = createPlayground('Sample: Climate claim check');
+  const pg = createPlayground('Climate claim check');
   pg.description =
     'Researcher, Critic, and Summarizer assess a climate science claim. Practice evidence vs. uncertainty. Confirm Local (Ollama), then Run.';
 

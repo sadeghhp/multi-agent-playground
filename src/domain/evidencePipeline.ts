@@ -22,7 +22,7 @@ import { createLocalOllamaProvider, LOCAL_LLM } from './samples/shared';
  * caller to register into the global registry. No API key is baked in.
  */
 export function createEvidencePipelinePlayground(): { playground: Playground; provider: Provider } {
-  const pg = createPlayground('Preset: Evidence pipeline');
+  const pg = createPlayground('Evidence pipeline');
   pg.description =
     'Propose → Critic/Verifier → Finalizer. Shows how review stays separate from generation. Confirm Local (Ollama) in Providers, then press Run.';
 

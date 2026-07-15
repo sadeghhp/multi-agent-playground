@@ -4,6 +4,7 @@ import { useUiStore } from '../store/uiStore';
 import {
   PLAYGROUND_SAMPLES,
   SAMPLE_DOMAIN_ORDER,
+  getPlaygroundSample,
   type SampleDomain,
 } from '../domain/samples';
 import { Modal } from './Modal';
@@ -32,12 +33,26 @@ export function PlaygroundsPanel() {
     }));
   }, []);
 
-  function loadSample(id: string) {
+  async function loadSample(id: string) {
+    const sample = getPlaygroundSample(id);
+    if (!sample) return;
+
+    const hasWork =
+      (current?.agents.length ?? 0) > 0 || (current?.transcript.length ?? 0) > 0;
+    if (hasWork) {
+      const ok = await requestConfirm({
+        title: 'Load sample playground',
+        message: `Load "${sample.name}"? Your current playground will be replaced.`,
+        confirmLabel: 'Load sample',
+      });
+      if (!ok) return;
+    }
+
     if (loadPlaygroundSample(id)) setPanel('none');
   }
 
   return (
-    <Modal title="Saved playgrounds" onClose={() => setPanel('none')} width={560}>
+    <Modal title="Playgrounds" onClose={() => setPanel('none')} width={560}>
       <section className={styles.section} aria-labelledby="sample-playgrounds-heading">
         <h3 id="sample-playgrounds-heading" className={styles.sectionTitle}>
           Sample playgrounds

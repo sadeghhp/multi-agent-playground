@@ -14,7 +14,7 @@ import { createLocalOllamaProvider, LOCAL_LLM } from './samples/shared';
  * registry (reusing an equivalent one if it already exists).
  */
 export function createExamplePlayground(): { playground: Playground; provider: Provider } {
-  const pg = createPlayground('Example: Open-source decision');
+  const pg = createPlayground('Open-source decision');
   pg.description =
     'Basic critique loop: Strategist proposes, Critic challenges, Moderator concludes. Confirm Local (Ollama) in Providers, then press Run.';
 

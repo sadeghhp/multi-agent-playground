@@ -8,7 +8,7 @@ import { createLocalOllamaProvider, LOCAL_LLM } from './shared';
  * Educational simulation only — not legal advice.
  */
 export function createContractReviewPlayground(): { playground: Playground; provider: Provider } {
-  const pg = createPlayground('Sample: Contract risk review');
+  const pg = createPlayground('Contract risk review');
   pg.description =
     'Analyst, Critic, and Moderator review B2B SaaS liability clauses. Educational simulation — not legal advice. Confirm Local (Ollama), then Run.';
 

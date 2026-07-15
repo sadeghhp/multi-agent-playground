@@ -73,7 +73,7 @@ export default function App() {
       <Toolbar />
       <div className={styles.body}>
         <Palette />
-        <main id="main" className={styles.center} aria-label="Graph canvas">
+        <main id="main" tabIndex={-1} className={styles.center} aria-label="Graph canvas">
           {playground ? <GraphCanvas /> : <div className={styles.loading}>Loading…</div>}
         </main>
         <Inspector />

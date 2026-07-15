@@ -7,7 +7,7 @@ import { createLocalOllamaProvider, LOCAL_LLM } from './shared';
  * Product sample: ship a mobile feature via PM → Engineer → QA → Ship Lead.
  */
 export function createMobileFeaturePlayground(): { playground: Playground; provider: Provider } {
-  const pg = createPlayground('Sample: Ship a mobile feature');
+  const pg = createPlayground('Ship a mobile feature');
   pg.description =
     'Product Manager, Engineer, QA, and Ship Lead plan an offline workout-tracking feature. Role handoffs for a product decision. Confirm Local (Ollama), then Run.';
 

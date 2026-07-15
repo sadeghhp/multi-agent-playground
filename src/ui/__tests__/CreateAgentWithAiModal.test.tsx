@@ -128,6 +128,48 @@ describe('CreateAgentWithAiModal', () => {
     expect(screen.getByText(/i cannot help with that/i)).toBeInTheDocument();
   });
 
+  it('auto-normalizes stanceNotes arrays and shows the draft without an error', async () => {
+    seed();
+    sendChatMock.mockResolvedValue(
+      reply(
+        JSON.stringify({
+          ...VALID_DRAFT,
+          name: 'Thomas Nagel',
+          personaMode: 'digital-shadow',
+          persona: {
+            realName: 'Thomas Nagel',
+            knownFor: 'Philosophy of mind',
+            stanceNotes: ['Qualia are real'],
+            citationStyle: 'in-character',
+          },
+        }),
+      ),
+    );
+
+    render(<CreateAgentWithAiModal />);
+    fireEvent.change(screen.getByLabelText(/describe the agent/i), { target: { value: 'nagel' } });
+    fireEvent.click(screen.getByRole('button', { name: /^generate$/i }));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /^apply$/i })).toBeInTheDocument());
+    expect(screen.queryByText(/invalid-json/i)).not.toBeInTheDocument();
+    expect(screen.getByText('Thomas Nagel')).toBeInTheDocument();
+  });
+
+  it('offers Recover draft for unrecoverable shape errors', async () => {
+    seed();
+    sendChatMock.mockResolvedValue(reply(JSON.stringify({ foo: 'bar' })));
+
+    render(<CreateAgentWithAiModal />);
+    fireEvent.change(screen.getByLabelText(/describe the agent/i), { target: { value: 'a critic' } });
+    fireEvent.click(screen.getByRole('button', { name: /^generate$/i }));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /recover draft/i })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /recover draft/i }));
+
+    await waitFor(() => expect(screen.getByText(/recovery failed/i)).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: /^apply$/i })).not.toBeInTheDocument();
+  });
+
   it('aborts the in-flight request when the modal is closed mid-generation', async () => {
     seed();
     sendChatMock.mockImplementation(() => new Promise<NormalizedResponse>(() => {}));

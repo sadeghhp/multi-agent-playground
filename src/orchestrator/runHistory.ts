@@ -5,7 +5,8 @@ import { useRuntimeStore, type RunStatus } from '../store/runtimeStore';
 import { nextRunMeta, persistRunDraft, persistRunFinal } from '../store/runHistoryStore';
 
 function toRunStatus(status: RunStatus): ConversationRunStatus {
-  if (status === 'idle') return 'interrupted';
+  // Transient runtime-only states — never persisted as-is (spec §16).
+  if (status === 'idle' || status === 'paused') return 'interrupted';
   return status;
 }
 

@@ -4,18 +4,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 // Stub persistence so seeding the store doesn't try to hit IndexedDB.
 vi.mock('../../../persistence/db', () => import('../../../test/persistenceDbMock'));
 
-// The enhancer calls sendChat under the hood; return a reply wrapped in a code
-// fence to prove the UI lands the *cleaned* text in the field.
 vi.mock('../../../providers/openaiAdapter', () => ({
-  sendChat: vi.fn().mockResolvedValue({
-    text: '```\nCritically evaluate every claim and cite evidence.\n```',
-    model: 'm1',
-    finishReason: 'stop',
-    raw: {},
-    durationMs: 5,
-    status: 200,
-  }),
+  sendChat: vi.fn(),
 }));
+import { sendChat } from '../../../providers/openaiAdapter';
+const sendChatMock = vi.mocked(sendChat);
 
 import { createAgent, createPlayground, createProvider } from '../../../domain/factories';
 import { useDomainStore } from '../../../store/domainStore';
@@ -50,6 +43,14 @@ describe('AgentInspector — enhance system prompt', () => {
   }
 
   it('proposes an enhanced prompt and applies the cleaned text to the field', async () => {
+    sendChatMock.mockResolvedValue({
+      text: '```\nCritically evaluate every claim and cite evidence.\n```',
+      model: 'm1',
+      finishReason: 'stop',
+      raw: {},
+      durationMs: 5,
+      status: 200,
+    });
     const agent = seed();
     render(<ConnectedInspector agentId={agent.id} />);
 
@@ -86,5 +87,47 @@ describe('AgentInspector — enhance system prompt', () => {
     const btn = screen.getByRole('button', { name: /enhance with ai/i });
     expect(btn).toBeDisabled();
     expect(screen.getByText(/select a model to enable ai enhancement/i)).toBeInTheDocument();
+  });
+});
+
+describe('AgentInspector — enrich with AI recovery', () => {
+  function seed() {
+    const provider = createProvider({ displayName: 'P', baseUrl: 'https://x.test', apiKey: 'k', enabled: true });
+    const agent = createAgent({
+      name: 'Critic',
+      systemInstruction: 'be critical',
+      llm: { providerId: provider.id, model: 'm1', temperature: 0.7, maxOutputTokens: 1024 },
+    });
+    const pg = createPlayground();
+    pg.agents = [agent];
+    useProviderStore.setState({ providers: [provider], hydrated: true });
+    useDomainStore.setState({ playground: pg, saveStatus: 'saved' });
+    return agent;
+  }
+
+  it('shows raw response and Recover draft on enrich shape errors', async () => {
+    sendChatMock.mockResolvedValue({
+      text: JSON.stringify({ foo: 'bar' }),
+      model: 'm1',
+      finishReason: 'stop',
+      raw: {},
+      durationMs: 5,
+      status: 200,
+    });
+    const agent = seed();
+    render(<ConnectedInspector agentId={agent.id} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /enrich with ai/i }));
+    fireEvent.change(screen.getByPlaceholderText(/double-check any numeric claims/i), {
+      target: { value: 'Also fact-check figures.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /🌱 enrich with ai/i }));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /recover draft/i })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /show raw response/i }));
+    expect(screen.getByText(/"foo":"bar"/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /recover draft/i }));
+    await waitFor(() => expect(screen.getByText(/recovery failed/i)).toBeInTheDocument());
   });
 });

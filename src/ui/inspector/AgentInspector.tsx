@@ -12,6 +12,7 @@ import { assembleMessages, boundHistory, buildSystemPrompt, buildTaskPrompt, est
 import { enhanceSystemInstruction, type EnhancePromptResult } from '../../agents/enhancePrompt';
 import { enrichAgentDraft, enrichedDraftToAgentOverrides, type EnrichAgentResult } from '../../agents/enrichAgent';
 import type { GeneratedAgentDraft } from '../../agents/generateAgent';
+import { parseGeneratedAgentDraftFromText } from '../../agents/parseGeneratedAgentDraft';
 import { exportSkillSet, importSkillSet } from '../../persistence/skillSets';
 import { downloadJson } from '../fileDownload';
 import { validateForRun } from '../../orchestrator/validate';
@@ -97,12 +98,16 @@ export function AgentInspector({ agent }: { agent: Agent }) {
   const [enrichInfo, setEnrichInfo] = useState('');
   const [enrichProposal, setEnrichProposal] = useState<GeneratedAgentDraft | null>(null);
   const [enrichError, setEnrichError] = useState<EnrichAgentResult | null>(null);
+  const [enrichShowRaw, setEnrichShowRaw] = useState(false);
+  const [enrichRecoveryError, setEnrichRecoveryError] = useState<string | null>(null);
 
   async function handleEnrich() {
     if (!selectedProvider || !canEnhance || !enrichInfo.trim()) return;
     setEnriching(true);
     setEnrichProposal(null);
     setEnrichError(null);
+    setEnrichShowRaw(false);
+    setEnrichRecoveryError(null);
     try {
       const result = await enrichAgentDraft(agent, enrichInfo, selectedProvider, {
         timeoutMs: agent.runtime.responseTimeoutMs,
@@ -115,6 +120,23 @@ export function AgentInspector({ agent }: { agent: Agent }) {
     } finally {
       setEnriching(false);
     }
+  }
+
+  function handleRecoverEnrichDraft() {
+    if (!enrichError?.rawText) return;
+    setEnrichRecoveryError(null);
+    const recovered = parseGeneratedAgentDraftFromText(enrichError.rawText);
+    if (recovered.ok) {
+      setEnrichProposal(recovered.draft);
+      setEnrichError(null);
+      setEnrichShowRaw(false);
+      return;
+    }
+    setEnrichRecoveryError(
+      recovered.errorDetail
+        ? `Recovery failed: ${recovered.errorDetail}`
+        : `Recovery failed: ${recovered.errorSummary}`,
+    );
   }
 
   function applyEnrichment() {
@@ -425,6 +447,20 @@ export function AgentInspector({ agent }: { agent: Agent }) {
           <div className={styles.enhanceErr}>
             <strong>{enrichError.errorKind ?? 'error'}</strong> — {enrichError.errorSummary}
             {enrichError.errorDetail && <div>{enrichError.errorDetail}</div>}
+            {enrichError.rawText && (
+              <div className={styles.rawWrap}>
+                <button type="button" onClick={() => setEnrichShowRaw((v) => !v)}>
+                  {enrichShowRaw ? 'Hide' : 'Show'} raw response
+                </button>
+                {enrichError.errorKind === 'invalid-json' && (
+                  <button type="button" onClick={handleRecoverEnrichDraft}>
+                    Recover draft
+                  </button>
+                )}
+                {enrichShowRaw && <pre className={styles.preview}>{enrichError.rawText}</pre>}
+                {enrichRecoveryError && <div className={styles.recoveryErr}>{enrichRecoveryError}</div>}
+              </div>
+            )}
           </div>
         )}
 

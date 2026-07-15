@@ -4,11 +4,11 @@ import { ProviderError, retryEligible } from '../providers/errors';
 import { sendChat } from '../providers/openaiAdapter';
 import type { ChatMessage } from '../providers/types';
 import {
-  GeneratedAgentDraft,
-  parseJsonObject,
   personaFromDraft,
   resolvePersonaMode,
+  type GeneratedAgentDraft,
 } from './generateAgent';
+import { parseGeneratedAgentDraftFromText } from './parseGeneratedAgentDraft';
 
 /**
  * Agent enricher. Takes an existing agent plus free-text "here's new
@@ -167,36 +167,32 @@ export async function enrichAgentDraft(
       };
     }
 
-    let parsed: unknown;
-    try {
-      parsed = parseJsonObject(res.text);
-    } catch {
-      const truncated = res.finishReason === 'length';
+    const parsed = parseGeneratedAgentDraftFromText(res.text);
+    if (!parsed.ok) {
+      if (parsed.failure === 'syntax') {
+        const truncated = res.finishReason === 'length';
+        return {
+          ok: false,
+          durationMs: Date.now() - start,
+          errorKind: 'invalid-json',
+          errorSummary: truncated
+            ? 'The model ran out of output tokens before finishing valid JSON. Try again, or shorten the new information.'
+            : parsed.errorSummary,
+          rawText: res.text,
+          retryEligible: truncated,
+        };
+      }
       return {
         ok: false,
         durationMs: Date.now() - start,
         errorKind: 'invalid-json',
-        errorSummary: truncated
-          ? 'The model ran out of output tokens before finishing valid JSON. Try again, or shorten the new information.'
-          : 'The model did not return valid JSON.',
-        rawText: res.text,
-        retryEligible: truncated,
-      };
-    }
-
-    const result = GeneratedAgentDraft.safeParse(parsed);
-    if (!result.success) {
-      return {
-        ok: false,
-        durationMs: Date.now() - start,
-        errorKind: 'invalid-json',
-        errorSummary: "The model's JSON did not match the expected agent shape.",
-        errorDetail: result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
+        errorSummary: parsed.errorSummary,
+        errorDetail: parsed.errorDetail,
         rawText: res.text,
       };
     }
 
-    return { ok: true, draft: result.data, model: res.model, durationMs: Date.now() - start };
+    return { ok: true, draft: parsed.draft, model: res.model, durationMs: Date.now() - start };
   } catch (err) {
     const pe = err instanceof ProviderError ? err : null;
     return {

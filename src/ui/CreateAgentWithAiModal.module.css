@@ -58,7 +58,8 @@
 }
 .err strong { text-transform: capitalize; }
 .rawWrap { margin-top: 8px; }
-.rawWrap button { font-size: 11px; padding: 2px 8px; margin-bottom: 6px; }
+.rawWrap button { font-size: 11px; padding: 2px 8px; margin-bottom: 6px; margin-right: 6px; }
+.recoveryErr { margin-top: 6px; font-size: 11px; }
 
 .draftPreview { display: flex; flex-direction: column; }
 .draftHead { font-size: 12px; font-weight: 600; margin: 0 0 10px; color: var(--text); }

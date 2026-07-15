@@ -157,6 +157,27 @@ describe('generateAgentDraft', () => {
     expect(result.rawText).toBeTruthy();
   });
 
+  it('coerces stanceNotes arrays into a string and succeeds', async () => {
+    sendChatMock.mockResolvedValue(
+      reply(
+        JSON.stringify({
+          ...VALID_DRAFT,
+          name: 'Thomas Nagel',
+          personaMode: 'digital-shadow',
+          persona: {
+            realName: 'Thomas Nagel',
+            knownFor: 'Philosophy of mind',
+            stanceNotes: ['Qualia are real', 'Bats have experiences'],
+            citationStyle: 'in-character',
+          },
+        }),
+      ),
+    );
+    const result = await generateAgentDraft('digital shadow of Nagel', provider, 'm1');
+    expect(result.ok).toBe(true);
+    expect(result.draft?.persona?.stanceNotes).toBe('- Qualia are real\n- Bats have experiences');
+  });
+
   it('fails cleanly when the model returns only whitespace', async () => {
     sendChatMock.mockResolvedValue(reply('   \n  '));
     const result = await generateAgentDraft('desc', provider, 'm1');

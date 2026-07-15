@@ -6,6 +6,7 @@ import {
   type GenerateAgentResult,
   type GeneratedAgentDraft,
 } from '../agents/generateAgent';
+import { parseGeneratedAgentDraftFromText } from '../agents/parseGeneratedAgentDraft';
 import { useDomainStore } from '../store/domainStore';
 import { useProviderStore } from '../store/providerStore';
 import { useUiStore } from '../store/uiStore';
@@ -44,6 +45,7 @@ export function CreateAgentWithAiModal() {
   const [draft, setDraft] = useState<GeneratedAgentDraft | null>(null);
   const [result, setResult] = useState<GenerateAgentResult | null>(null);
   const [showRaw, setShowRaw] = useState(false);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   // Abort any in-flight generation when the modal unmounts (Escape / backdrop
@@ -75,6 +77,7 @@ export function CreateAgentWithAiModal() {
     setStreamBuffer('');
     setReasoningBuffer('');
     setShowRaw(false);
+    setRecoveryError(null);
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -111,6 +114,24 @@ export function CreateAgentWithAiModal() {
   function handleDiscard() {
     setDraft(null);
     setResult(null);
+    setRecoveryError(null);
+  }
+
+  function handleRecoverDraft() {
+    if (!result?.rawText) return;
+    setRecoveryError(null);
+    const recovered = parseGeneratedAgentDraftFromText(result.rawText);
+    if (recovered.ok) {
+      setDraft(recovered.draft);
+      setResult(null);
+      setShowRaw(false);
+      return;
+    }
+    setRecoveryError(
+      recovered.errorDetail
+        ? `Recovery failed: ${recovered.errorDetail}`
+        : `Recovery failed: ${recovered.errorSummary}`,
+    );
   }
 
   function handleClose() {
@@ -232,7 +253,13 @@ export function CreateAgentWithAiModal() {
                   <button type="button" onClick={() => setShowRaw((v) => !v)}>
                     {showRaw ? 'Hide' : 'Show'} raw response
                   </button>
+                  {result.errorKind === 'invalid-json' && (
+                    <button type="button" onClick={handleRecoverDraft}>
+                      Recover draft
+                    </button>
+                  )}
                   {showRaw && <pre className={styles.streamPreview}>{result.rawText}</pre>}
+                  {recoveryError && <div className={styles.recoveryErr}>{recoveryError}</div>}
                 </div>
               )}
             </div>

@@ -91,6 +91,27 @@ describe('enrichAgentDraft', () => {
     expect(result.rawText).toBe('I cannot help with that.');
   });
 
+  it('coerces stanceNotes arrays into a string and succeeds', async () => {
+    sendChatMock.mockResolvedValue(
+      reply(
+        JSON.stringify({
+          ...VALID_DRAFT,
+          name: 'Thomas Nagel',
+          personaMode: 'digital-shadow',
+          persona: {
+            realName: 'Thomas Nagel',
+            knownFor: 'Philosophy of mind',
+            stanceNotes: ['Qualia are real'],
+            citationStyle: 'in-character',
+          },
+        }),
+      ),
+    );
+    const result = await enrichAgentDraft(agent, 'Make this a Nagel shadow', provider);
+    expect(result.ok).toBe(true);
+    expect(result.draft?.persona?.stanceNotes).toBe('- Qualia are real');
+  });
+
   it('reports a sanitized error when the provider throws', async () => {
     sendChatMock.mockRejectedValue(new ProviderError('rate-limit', 'Rate limited', { status: 429 }));
     const result = await enrichAgentDraft(agent, 'new info', provider);

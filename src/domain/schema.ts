@@ -284,6 +284,25 @@ export type ChitchatPolicy = z.infer<typeof ChitchatPolicy>;
 export const LanguageOverride = z.enum(['agent-default', ...AgentLanguage.options]);
 export type LanguageOverride = z.infer<typeof LanguageOverride>;
 
+/**
+ * Run-level conversation environment (spec extension): the facilitation frame
+ * every agent operates in for the run — e.g. brainstorming vs. critique vs.
+ * blameless postmortem. 'open' applies no framing (each agent just follows its
+ * own role). Each mode maps to a behavioural directive in promptAssembly.
+ */
+export const ConversationMode = z.enum([
+  'open',
+  'brainstorm',
+  'critique',
+  'debate',
+  'planning',
+  'decision',
+  'retrospective',
+  'postmortem',
+  'socratic',
+]);
+export type ConversationMode = z.infer<typeof ConversationMode>;
+
 export const ConversationSettings = z.object({
   subject: z.string().default(''),
   objective: z.string().default(''),
@@ -299,6 +318,7 @@ export const ConversationSettings = z.object({
   // Run-level overrides (additive, defaulted so old playgrounds parse
   // unchanged): applied on top of each agent's own characteristics for this
   // run only. Empty/null/'agent-default' means "no override".
+  conversationMode: ConversationMode.default('open'),
   toneOverride: z.string().default(''),
   responseLength: ResponseLength.default('agent-default'),
   chitchatPolicy: ChitchatPolicy.default('agent-default'),

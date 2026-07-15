@@ -526,6 +526,7 @@ export function AgentInspector({ agent }: { agent: Agent }) {
                 />
                 <input
                   value={skill.name}
+                  aria-label="Skill name"
                   placeholder="skill name"
                   onChange={(e) => patchSkillAt(idx, { name: e.target.value })}
                 />
@@ -542,11 +543,13 @@ export function AgentInspector({ agent }: { agent: Agent }) {
               )}
               <input
                 value={skill.description}
+                aria-label="Skill description"
                 placeholder="Short description"
                 onChange={(e) => patchSkillAt(idx, { description: e.target.value })}
               />
               <textarea
                 rows={2}
+                aria-label="Skill instruction"
                 placeholder="Optional instruction text"
                 value={skill.instruction}
                 onChange={(e) => patchSkillAt(idx, { instruction: e.target.value })}
@@ -639,7 +642,7 @@ export function AgentInspector({ agent }: { agent: Agent }) {
           </div>
           <div className="field">
             <label htmlFor="ag-topp">Top-p (optional)</label>
-            <input id="ag-topp" type="number" min={0} max={1} step={0.05} value={agent.llm.topP ?? ''} onChange={(e) => patchLlm({ topP: e.target.value === '' ? undefined : Number(e.target.value) })} />
+            <input id="ag-topp" type="number" min={0} max={1} step={0.05} value={agent.llm.topP ?? ''} onChange={(e) => { if (e.target.value === '') { patchLlm({ topP: undefined }); return; } const n = Number(e.target.value); if (Number.isFinite(n) && n >= 0 && n <= 1) patchLlm({ topP: n }); }} />
           </div>
         </div>
       </Section>

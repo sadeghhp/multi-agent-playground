@@ -1,9 +1,11 @@
+import { useMemo } from 'react';
 import { useDomainStore } from '../store/domainStore';
-import { useProviderStore } from '../store/providerStore';
 import { useUiStore } from '../store/uiStore';
-import { createExamplePlayground } from '../domain/example';
-import { createEvidencePipelinePlayground } from '../domain/evidencePipeline';
-import type { Playground, Provider } from '../domain/schema';
+import {
+  PLAYGROUND_SAMPLES,
+  SAMPLE_DOMAIN_ORDER,
+  type SampleDomain,
+} from '../domain/samples';
 import { Modal } from './Modal';
 import styles from './PlaygroundsPanel.module.css';
 
@@ -14,76 +16,124 @@ export function PlaygroundsPanel() {
   const deletePlayground = useDomainStore((s) => s.deletePlayground);
   const duplicatePlayground = useDomainStore((s) => s.duplicatePlayground);
   const newPlayground = useDomainStore((s) => s.newPlayground);
-  const replacePlayground = useDomainStore((s) => s.replacePlayground);
-  const ensureProvider = useProviderStore((s) => s.ensureProvider);
+  const loadPlaygroundSample = useDomainStore((s) => s.loadPlaygroundSample);
   const setPanel = useUiStore((s) => s.setPanel);
   const requestConfirm = useUiStore((s) => s.requestConfirm);
 
-  // Register the preset's provider globally (reusing an equivalent one if it
-  // already exists), then load the playground wired to whatever id came back.
-  function loadPreset(build: () => { playground: Playground; provider: Provider }) {
-    const { playground, provider } = build();
-    const pid = ensureProvider(provider);
-    const wired =
-      pid === provider.id
-        ? playground
-        : {
-            ...playground,
-            agents: playground.agents.map((a) =>
-              a.llm.providerId === provider.id
-                ? { ...a, llm: { ...a.llm, providerId: pid } }
-                : a,
-            ),
-          };
-    replacePlayground(wired);
-    setPanel('none');
+  const samplesByDomain = useMemo(() => {
+    const map = new Map<SampleDomain, typeof PLAYGROUND_SAMPLES>();
+    for (const domain of SAMPLE_DOMAIN_ORDER) map.set(domain, []);
+    for (const sample of PLAYGROUND_SAMPLES) {
+      map.get(sample.domain)!.push(sample);
+    }
+    return SAMPLE_DOMAIN_ORDER.filter((d) => (map.get(d)?.length ?? 0) > 0).map((domain) => ({
+      domain,
+      samples: map.get(domain)!,
+    }));
+  }, []);
+
+  function loadSample(id: string) {
+    if (loadPlaygroundSample(id)) setPanel('none');
   }
 
   return (
-    <Modal title="Saved playgrounds" onClose={() => setPanel('none')} width={520}>
-      <div className={styles.actions}>
-        <button type="button" className="primary" onClick={() => { newPlayground('Untitled Playground'); setPanel('none'); }}>
-          + New playground
-        </button>
-        <button type="button" onClick={() => loadPreset(createExamplePlayground)}>
-          Load example
-        </button>
-        <button type="button" onClick={() => loadPreset(createEvidencePipelinePlayground)}>
-          Load evidence pipeline
-        </button>
-        {current && <button type="button" onClick={() => duplicatePlayground()}>Duplicate current</button>}
-      </div>
+    <Modal title="Saved playgrounds" onClose={() => setPanel('none')} width={560}>
+      <section className={styles.section} aria-labelledby="sample-playgrounds-heading">
+        <h3 id="sample-playgrounds-heading" className={styles.sectionTitle}>
+          Sample playgrounds
+        </h3>
+        <p className={styles.sectionHint}>
+          Pre-built graphs that show how multi-agent conversations work. Confirm Local
+          (Ollama) under Providers, then press Run.
+        </p>
+        {samplesByDomain.map(({ domain, samples }) => (
+          <div key={domain} className={styles.domainGroup}>
+            <h4 className={styles.domainLabel}>{domain}</h4>
+            <ul className={styles.sampleList}>
+              {samples.map((sample) => (
+                <li key={sample.id}>
+                  <button
+                    type="button"
+                    className={styles.sampleCard}
+                    onClick={() => loadSample(sample.id)}
+                  >
+                    <span className={styles.sampleName}>{sample.name}</span>
+                    <span className={styles.sampleDesc}>{sample.description}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </section>
 
-      {index.length === 0 ? (
-        <p className="muted">No saved playgrounds yet.</p>
-      ) : (
-        <ul className={styles.list}>
-          {index.map((p) => (
-            <li key={p.id} className={`${styles.item} ${p.id === current?.id ? styles.active : ''}`}>
-              <button type="button" className={styles.open} onClick={() => { void loadPlayground(p.id); setPanel('none'); }}>
-                <span className={styles.name}>{p.name}</span>
-                <span className={styles.date}>{new Date(p.updatedAt).toLocaleString()}</span>
+      <hr className={styles.divider} />
+
+      <section className={styles.section} aria-labelledby="your-playgrounds-heading">
+        <div className={styles.yourHeader}>
+          <h3 id="your-playgrounds-heading" className={styles.sectionTitle}>
+            Your playgrounds
+          </h3>
+          <div className={styles.actions}>
+            <button
+              type="button"
+              className="primary"
+              onClick={() => {
+                newPlayground('Untitled Playground');
+                setPanel('none');
+              }}
+            >
+              + New playground
+            </button>
+            {current && (
+              <button type="button" onClick={() => duplicatePlayground()}>
+                Duplicate current
               </button>
-              <button
-                type="button"
-                className={`${styles.deleteBtn} danger`}
-                aria-label={`Delete ${p.name}`}
-                onClick={async () => {
-                  const ok = await requestConfirm({
-                    title: 'Delete playground',
-                    message: `Delete playground "${p.name}"? This cannot be undone.`,
-                    confirmLabel: 'Delete',
-                    danger: true,
-                  });
-                  if (ok) void deletePlayground(p.id);
-                }}
+            )}
+          </div>
+        </div>
+
+        {index.length === 0 ? (
+          <p className="muted">No saved playgrounds yet.</p>
+        ) : (
+          <ul className={styles.list}>
+            {index.map((p) => (
+              <li
+                key={p.id}
+                className={`${styles.item} ${p.id === current?.id ? styles.active : ''}`}
               >
-                Delete
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+                <button
+                  type="button"
+                  className={styles.open}
+                  onClick={() => {
+                    void loadPlayground(p.id);
+                    setPanel('none');
+                  }}
+                >
+                  <span className={styles.name}>{p.name}</span>
+                  <span className={styles.date}>{new Date(p.updatedAt).toLocaleString()}</span>
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.deleteBtn} danger`}
+                  aria-label={`Delete ${p.name}`}
+                  onClick={async () => {
+                    const ok = await requestConfirm({
+                      title: 'Delete playground',
+                      message: `Delete playground "${p.name}"? This cannot be undone.`,
+                      confirmLabel: 'Delete',
+                      danger: true,
+                    });
+                    if (ok) void deletePlayground(p.id);
+                  }}
+                >
+                  Delete
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </Modal>
   );
 }

@@ -9,9 +9,11 @@ import {
   type UiLayoutState,
 } from '../domain/schema';
 import { createPlayground, duplicateAgent } from '../domain/factories';
+import { getPlaygroundSample } from '../domain/samples';
 import { deletePlayground as dbDelete, loadAllPlaygrounds, savePlayground } from '../persistence/db';
 import { regenerateIds } from '../persistence/serialization';
 import { setSelectedPlaygroundId } from './prefs';
+import { useProviderStore } from './providerStore';
 import { useRunHistoryStore } from './runHistoryStore';
 
 /**
@@ -35,6 +37,12 @@ interface DomainState {
   duplicatePlayground: () => void;
   deletePlayground: (id: string) => Promise<void>;
   replacePlayground: (pg: Playground) => void;
+  /**
+   * Build a curated sample, register its provider globally (reusing an
+   * equivalent one if present), rewire agent providerIds, and activate it.
+   * Returns false if the sample id is unknown.
+   */
+  loadPlaygroundSample: (id: string) => boolean;
 
   // agents
   addAgent: (agent: Agent) => void;
@@ -201,6 +209,27 @@ export const useDomainStore = create<DomainState>((set, get) => {
     replacePlayground(pg) {
       flushPending();
       activate(pg);
+    },
+
+    loadPlaygroundSample(id) {
+      const sample = getPlaygroundSample(id);
+      if (!sample) return false;
+      const { playground, provider } = sample.build();
+      const pid = useProviderStore.getState().ensureProvider(provider);
+      const wired =
+        pid === provider.id
+          ? playground
+          : {
+              ...playground,
+              agents: playground.agents.map((a) =>
+                a.llm.providerId === provider.id
+                  ? { ...a, llm: { ...a.llm, providerId: pid } }
+                  : a,
+              ),
+            };
+      flushPending();
+      activate(wired);
+      return true;
     },
 
     addAgent(agent) {

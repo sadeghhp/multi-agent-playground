@@ -70,8 +70,13 @@ export function Modal({ title, onClose, children, footer, width = 560 }: ModalPr
     // Lock background scroll while the dialog is open.
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    // Focus the first control, falling back to the dialog container.
-    (focusable()[0] ?? ref.current)?.focus();
+    // Focus the first control, falling back to the dialog container — but don't
+    // steal focus back from a child that declared React `autoFocus` (which React
+    // applies during commit, before this passive effect runs).
+    const active = document.activeElement;
+    if (!(ref.current?.contains(active) && active !== ref.current)) {
+      (focusable()[0] ?? ref.current)?.focus();
+    }
 
     return () => {
       window.removeEventListener('keydown', onKey);

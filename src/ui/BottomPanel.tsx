@@ -234,6 +234,7 @@ export function BottomPanel() {
             ) : (
               errors.map((err) => (
                 <div key={err.id} className={styles.errorItem}>
+                  <span className={styles.logTime}>{new Date(err.at).toLocaleTimeString()}</span>{' '}
                   <strong>[{err.level}] {err.summary}</strong>
                   {err.provider && <span className="muted"> · {err.provider}</span>}
                   {err.retryEligible && <span className="chip"> retry-eligible</span>}

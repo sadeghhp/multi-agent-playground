@@ -29,6 +29,7 @@ export function Toolbar() {
   const toggleTheme = useUiStore((s) => s.toggleTheme);
   const theme = useUiStore((s) => s.theme);
   const showToast = useUiStore((s) => s.showToast);
+  const requestConfirm = useUiStore((s) => s.requestConfirm);
 
   const isRunning = useRuntimeStore((s) => s.status === 'running');
   const clearTranscript = useDomainStore((s) => s.clearTranscript);
@@ -46,6 +47,16 @@ export function Toolbar() {
     }
     clearTranscript();
     void startRun();
+  }
+
+  async function handleClearChat() {
+    const ok = await requestConfirm({
+      title: 'Clear chat',
+      message: 'Remove the entire conversation transcript? This cannot be undone.',
+      confirmLabel: 'Clear chat',
+      danger: true,
+    });
+    if (ok) clearTranscript();
   }
 
   async function handleExport() {
@@ -94,6 +105,16 @@ export function Toolbar() {
         <span className={`${styles.save} ${styles[`save_${saveStatus}`] ?? ''}`}>
           {SAVE_LABEL[saveStatus]}
         </span>
+        {saveStatus === 'failed' && (
+          <button
+            type="button"
+            className="danger"
+            onClick={() => void flushSave()}
+            title="Retry saving the playground"
+          >
+            Retry
+          </button>
+        )}
       </div>
 
       <div className={styles.right}>
@@ -132,7 +153,7 @@ export function Toolbar() {
           >
             Timeline
           </button>
-          <button type="button" className="secondary" onClick={() => clearTranscript()} disabled={isRunning}>
+          <button type="button" className="danger" onClick={handleClearChat} disabled={isRunning}>
             Clear chat
           </button>
         </div>

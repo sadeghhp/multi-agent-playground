@@ -63,7 +63,7 @@
 
 .table th {
   font-weight: 600;
-  color: var(--muted, #666);
+  color: var(--text-muted);
 }
 
 .actions {

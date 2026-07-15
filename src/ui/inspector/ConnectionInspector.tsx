@@ -37,7 +37,8 @@ export function ConnectionInspector({ connection }: { connection: Connection }) 
   const target = playground.agents.find((a) => a.id === connection.target);
 
   return (
-    <div className={styles.body}>
+    <fieldset className={styles.body} disabled={isRunning}>
+      {isRunning && <p className={styles.hint}>Editing is locked while a conversation is running.</p>}
       <div className={styles.connHeader}>
         <strong>{source?.name ?? 'deleted'}</strong>
         <span className={styles.arrow}>→</span>
@@ -49,7 +50,6 @@ export function ConnectionInspector({ connection }: { connection: Connection }) 
           type="checkbox"
           checked={connection.enabled}
           onChange={(e) => update(connection.id, { enabled: e.target.checked })}
-          disabled={isRunning}
         />
         Enabled
       </label>
@@ -60,7 +60,6 @@ export function ConnectionInspector({ connection }: { connection: Connection }) 
           id="cn-type"
           value={connection.type}
           onChange={(e) => update(connection.id, { type: e.target.value as ConnectionType })}
-          disabled={isRunning}
         >
           <option value="conversation">Conversation flow</option>
           <option value="review">Review flow</option>
@@ -71,7 +70,7 @@ export function ConnectionInspector({ connection }: { connection: Connection }) 
 
       <div className="field">
         <label htmlFor="cn-label">Label (optional)</label>
-        <input id="cn-label" value={connection.label ?? ''} onChange={(e) => update(connection.id, { label: e.target.value })} disabled={isRunning} />
+        <input id="cn-label" value={connection.label ?? ''} onChange={(e) => update(connection.id, { label: e.target.value })} />
       </div>
 
       <div className="field">
@@ -84,7 +83,6 @@ export function ConnectionInspector({ connection }: { connection: Connection }) 
             const n = parsePriority(e.target.value);
             if (n !== null) update(connection.id, { priority: n });
           }}
-          disabled={isRunning}
         />
       </div>
 
@@ -102,7 +100,6 @@ export function ConnectionInspector({ connection }: { connection: Connection }) 
       <button
         type="button"
         className="danger"
-        disabled={isRunning}
         onClick={async () => {
           const ok = await requestConfirm({
             title: 'Delete connection',
@@ -117,6 +114,6 @@ export function ConnectionInspector({ connection }: { connection: Connection }) 
       >
         Delete connection
       </button>
-    </div>
+    </fieldset>
   );
 }

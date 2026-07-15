@@ -24,6 +24,13 @@ export function clearPersistenceMocks(): void {
   listRuns.mockClear();
   deleteRun.mockClear();
   deleteRunsForPlayground.mockClear();
+  saveUsageEntry.mockClear();
+  loadAllUsageEntries.mockClear();
+  clearUsageLedger.mockClear();
+  deleteUsageSince.mockClear();
+  saveModelPrice.mockClear();
+  loadAllModelPrices.mockClear();
+  deleteModelPrice.mockClear();
 }
 
 export const savePlayground = vi.fn().mockResolvedValue(undefined);
@@ -61,3 +68,13 @@ export const deleteRunsForPlayground = vi.fn().mockImplementation(async (playgro
     if (run.playgroundId === playgroundId) savedRuns.delete(id);
   }
 });
+
+// Usage ledger + model prices — no-op stubs so store/orchestrator paths that
+// persist usage don't throw in tests that don't assert on them.
+export const saveUsageEntry = vi.fn().mockResolvedValue(undefined);
+export const loadAllUsageEntries = vi.fn().mockResolvedValue([]);
+export const clearUsageLedger = vi.fn().mockResolvedValue(undefined);
+export const deleteUsageSince = vi.fn().mockResolvedValue(undefined);
+export const saveModelPrice = vi.fn().mockResolvedValue(undefined);
+export const loadAllModelPrices = vi.fn().mockResolvedValue([]);
+export const deleteModelPrice = vi.fn().mockResolvedValue(undefined);

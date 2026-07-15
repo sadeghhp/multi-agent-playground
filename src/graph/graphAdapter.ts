@@ -72,13 +72,30 @@ const TYPE_ABBREV: Record<Connection['type'], string> = {
   handoff: 'handoff',
 };
 
+// Connection types are distinguished by dash pattern so they read apart even in
+// grayscale (spec §22): review long-dashed, handoff dotted, conversation solid.
+// A disabled edge (whatever its type) falls back to the muted short-dash.
+function dashFor(conn: Connection): string | undefined {
+  if (!conn.enabled) return '2 3';
+  if (conn.type === 'review') return '6 4';
+  if (conn.type === 'handoff') return '1 5';
+  return undefined;
+}
+
 export function connectionsToEdges(
   connections: Connection[],
   activeConnectionId: string | null,
+  selectedConnectionId: string | null = null,
 ): Edge<ConnectionEdgeData>[] {
   return connections.map((conn) => {
     const active = conn.id === activeConnectionId;
+    const selected = conn.id === selectedConnectionId;
     const label = conn.label || TYPE_ABBREV[conn.type];
+    // Runtime-active and selected both read accent (active also animates + is
+    // thicker); otherwise enabled edges use --edge, muted ones --edge-muted. The
+    // arrowhead follows the same color so muted edges don't keep a solid tip.
+    const strokeColor =
+      active || selected ? 'var(--accent)' : conn.enabled ? 'var(--edge)' : 'var(--edge-muted)';
     return {
       id: conn.id,
       source: conn.source,
@@ -86,14 +103,13 @@ export function connectionsToEdges(
       type: 'smoothstep',
       animated: active,
       label,
-      // review flows are dashed to read differently even in grayscale (spec §22)
       style: {
-        stroke: active ? 'var(--accent)' : conn.enabled ? 'var(--edge)' : 'var(--edge-muted)',
-        strokeWidth: active ? 2.5 : 1.5,
-        strokeDasharray: conn.type === 'review' ? '6 4' : conn.enabled ? undefined : '2 3',
+        stroke: strokeColor,
+        strokeWidth: active || selected ? 2.5 : 1.5,
+        strokeDasharray: dashFor(conn),
         opacity: conn.enabled ? 1 : 0.5,
       },
-      markerEnd: { type: MarkerType.ArrowClosed, color: active ? 'var(--accent)' : 'var(--edge)' },
+      markerEnd: { type: MarkerType.ArrowClosed, color: strokeColor },
       data: {
         connectionId: conn.id,
         connectionType: conn.type,

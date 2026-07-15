@@ -152,6 +152,25 @@ button.icon.ghost { border-color: transparent; }
   outline-offset: 2px;
 }
 
+/* Keyboard skip-link: off-screen until focused, then pinned top-left. */
+.skip-link {
+  position: absolute;
+  left: var(--space-2);
+  top: -60px;
+  z-index: 1000;
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  text-decoration: none;
+  transition: top 0.15s ease;
+}
+.skip-link:focus {
+  top: var(--space-2);
+}
+
 input, textarea, select {
   font: inherit;
   color: var(--text);

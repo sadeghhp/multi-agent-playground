@@ -95,7 +95,7 @@
 /* Runtime states (spec §10.3). Status recolors the outer border + badge; the
  * identity dot and left bar stay, so an agent's identity survives a run. */
 .state_generating {
-  border-color: var(--accent);
+  --node-border: var(--accent);
   animation: pulse 1.2s ease-in-out infinite;
 }
 .state_completed { --node-border: var(--ok); }

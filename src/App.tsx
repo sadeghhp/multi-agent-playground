@@ -69,10 +69,11 @@ export default function App() {
 
   return (
     <div className={styles.app}>
+      <a href="#main" className="skip-link">Skip to canvas</a>
       <Toolbar />
       <div className={styles.body}>
         <Palette />
-        <main className={styles.center} aria-label="Graph canvas">
+        <main id="main" className={styles.center} aria-label="Graph canvas">
           {playground ? <GraphCanvas /> : <div className={styles.loading}>Loading…</div>}
         </main>
         <Inspector />

@@ -203,9 +203,11 @@ export function CreateAgentWithAiModal() {
 
           {generating && (
             <div className="field">
-              <label className={styles.liveBadge}>
+              {/* Announce state transitions (thinking → streaming), not the raw
+                  token stream, so screen readers aren't spammed per token. */}
+              <span className={styles.liveBadge} role="status" aria-live="polite">
                 {streamBuffer.length === 0 ? 'thinking…' : 'streaming…'}
-              </label>
+              </span>
               {streamBuffer.length === 0 && reasoningBuffer.length > 0 && (
                 <pre className={styles.streamPreview}>
                   {reasoningBuffer}
@@ -222,7 +224,7 @@ export function CreateAgentWithAiModal() {
           )}
 
           {result && !result.ok && (
-            <div className={styles.err}>
+            <div className={styles.err} role="alert">
               <strong>{result.errorKind ?? 'error'}</strong> — {result.errorSummary}
               {result.errorDetail && <div>{result.errorDetail}</div>}
               {result.rawText && (

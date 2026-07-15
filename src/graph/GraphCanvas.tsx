@@ -39,6 +39,9 @@ function CanvasInner() {
   const selectConnection = useUiStore((s) => s.selectConnection);
   const clearSelection = useUiStore((s) => s.clearSelection);
   const showToast = useUiStore((s) => s.showToast);
+  const setPanel = useUiStore((s) => s.setPanel);
+  const selection = useUiStore((s) => s.selection);
+  const selectedConnectionId = selection.kind === 'connection' ? selection.id : null;
 
   const providers = useProviderStore((s) => s.providers);
   const isRunning = useRuntimeStore((s) => s.status === 'running');
@@ -84,8 +87,8 @@ function CanvasInner() {
 
   const edges = useMemo<Edge[]>(() => {
     if (!playground) return [];
-    return connectionsToEdges(playground.connections, activeConnectionId);
-  }, [playground, activeConnectionId]);
+    return connectionsToEdges(playground.connections, activeConnectionId, selectedConnectionId);
+  }, [playground, activeConnectionId, selectedConnectionId]);
 
   const onNodesChange = useCallback(
     (changes: NodeChange<AgentFlowNode>[]) => {
@@ -189,24 +192,29 @@ function CanvasInner() {
           <div className={styles.emptyCard}>
             <h2 className={styles.emptyTitle}>Start building your agent graph</h2>
             <p className={styles.emptyText}>
-              Add an agent, then drag from its right edge to another agent's left edge to
-              wire them into a conversation.
+              Add an agent and wire edges, or try a sample playground to see how
+              multi-agent workflows work across domains like product, science, and law.
             </p>
-            <button
-              type="button"
-              className="primary"
-              onClick={() => {
-                const n = playground.agents.length;
-                const agent = createAgent({
-                  name: 'New Agent',
-                  position: { x: 120 + (n % 4) * 60, y: 100 + Math.floor(n / 4) * 60 },
-                });
-                addAgent(agent);
-                selectAgent(agent.id);
-              }}
-            >
-              + Add your first agent
-            </button>
+            <div className={styles.emptyActions}>
+              <button
+                type="button"
+                className="primary"
+                onClick={() => {
+                  const n = playground.agents.length;
+                  const agent = createAgent({
+                    name: 'New Agent',
+                    position: { x: 120 + (n % 4) * 60, y: 100 + Math.floor(n / 4) * 60 },
+                  });
+                  addAgent(agent);
+                  selectAgent(agent.id);
+                }}
+              >
+                + Add your first agent
+              </button>
+              <button type="button" onClick={() => setPanel('playgrounds')}>
+                Browse sample playgrounds
+              </button>
+            </div>
           </div>
         </div>
       )}

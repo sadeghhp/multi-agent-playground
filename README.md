@@ -78,17 +78,29 @@ ollama pull llama3.1
 
 Then in the app:
 
-1. **Open → Load example** — seeds Strategist → Critic → Moderator wired to a local
-   Ollama provider.
+1. **Open** (or **Browse sample playgrounds** on an empty canvas) and pick a
+   sample — for example **Open-source decision** (Strategist → Critic → Moderator)
+   or **Ship a mobile feature**. All samples wire to a local Ollama provider.
 2. Open **Providers**, confirm the base URL (`http://localhost:11434`) and model
    (`llama3.1`), and click **Test connection**.
-3. Press **Run…**, keep Strategist as the starting agent, and **Start**.
+3. Press **Run…**, keep the sample's starting agent, and **Start**.
 4. Watch the active node/edge highlight; each agent responds in sequence in the
    transcript.
 5. **Export** — the downloaded JSON excludes API keys. Reload the page; the
    playground is restored from IndexedDB.
 
-*(This is the acceptance scenario from spec §24.)*
+**Sample playgrounds** (domain catalog under Open):
+
+| Sample | Domain | What you learn |
+| --- | --- | --- |
+| Ship a mobile feature | Product | Role handoffs for a product decision |
+| Open-source decision | Product | Basic three-agent critique loop |
+| Evidence pipeline | Engineering | Propose vs. verify roles |
+| Climate claim check | Science & Nature | Evidence vs. uncertainty |
+| Treatment options brief | Health | Multi-stakeholder brief *(not medical advice)* |
+| Contract risk review | Law | Structured risk analysis *(not legal advice)* |
+
+*(Open-source decision is the acceptance scenario from spec §24.)*
 
 ## 🏗️ Architecture
 

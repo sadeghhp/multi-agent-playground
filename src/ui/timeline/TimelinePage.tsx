@@ -7,6 +7,7 @@ import { useRuntimeStore } from '../../store/runtimeStore';
 import { useUiStore } from '../../store/uiStore';
 import { agentColor } from '../../graph/colors';
 import { MessageMarkdown } from '../transcript/MessageMarkdown';
+import { formatDuration } from '../formatDuration';
 import styles from './Timeline.module.css';
 
 /** Consecutive messages sharing a turn number, in chronological order. */
@@ -252,7 +253,7 @@ function TimelineItem({ msg, color }: { msg: TranscriptMessage; color: string })
           )}
           <span className={styles.meta}>
             {msg.model || '—'} · {time}
-            {msg.durationMs != null && ` · ${msg.durationMs}ms`}
+            {msg.durationMs != null && ` · ${formatDuration(msg.durationMs)}`}
             {msg.totalTokens != null && ` · ${msg.totalTokens} tok`}
           </span>
         </div>

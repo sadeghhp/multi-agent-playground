@@ -1,7 +1,8 @@
 import type { Playground, Provider } from './schema';
-import { createPlayground, createProvider, createAgentFromTemplate } from './factories';
+import { createPlayground, createAgentFromTemplate } from './factories';
 import { evidenceRoleInstruction } from './conduct';
 import { newConnectionId } from './ids';
+import { createLocalOllamaProvider, LOCAL_LLM } from './samples/shared';
 
 /**
  * Evidence-pipeline preset (opt-in). Seeds a role-separated graph that keeps
@@ -22,17 +23,11 @@ import { newConnectionId } from './ids';
  */
 export function createEvidencePipelinePlayground(): { playground: Playground; provider: Provider } {
   const pg = createPlayground('Preset: Evidence pipeline');
+  pg.description =
+    'Propose → Critic/Verifier → Finalizer. Shows how review stays separate from generation. Confirm Local (Ollama) in Providers, then press Run.';
 
-  const provider = createProvider({
-    displayName: 'Local (Ollama)',
-    baseUrl: 'http://localhost:11434',
-    path: '/v1/chat/completions',
-    authMethod: 'none',
-    defaultModel: 'llama3.1',
-    models: ['llama3.1'],
-  });
-
-  const llm = { providerId: provider.id, model: 'llama3.1', maxOutputTokens: 512 };
+  const provider = createLocalOllamaProvider();
+  const llm = { providerId: provider.id, ...LOCAL_LLM };
 
   const proposer = createAgentFromTemplate('proposer', {
     position: { x: 60, y: 160 },

@@ -5,6 +5,7 @@ import { extractInlineThinking } from '../../providers/openaiAdapter';
 import { useUiStore } from '../../store/uiStore';
 import { useRuntimeStore } from '../../store/runtimeStore';
 import { MessageMarkdown } from './MessageMarkdown';
+import { formatDuration } from '../formatDuration';
 import styles from './Transcript.module.css';
 
 /**
@@ -56,8 +57,7 @@ export function Message({ msg, color }: { msg: TranscriptMessage; color?: string
         )}
         <span className={styles.msgMeta}>
           turn {msg.turn} · {msg.model || '—'} · {time}
-          {msg.durationMs != null &&
-            ` · ${msg.durationMs < 1000 ? `${msg.durationMs}ms` : `${(msg.durationMs / 1000).toFixed(1)}s`}`}
+          {msg.durationMs != null && ` · ${formatDuration(msg.durationMs)}`}
           {msg.totalTokens != null && ` · ${msg.totalTokens} tok`}
         </span>
         <span className={styles.msgActions}>

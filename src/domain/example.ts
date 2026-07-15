@@ -1,10 +1,7 @@
 import type { Playground, Provider } from './schema';
-import {
-  createPlayground,
-  createProvider,
-  createAgentFromTemplate,
-} from './factories';
+import { createPlayground, createAgentFromTemplate } from './factories';
 import { newConnectionId } from './ids';
+import { createLocalOllamaProvider, LOCAL_LLM } from './samples/shared';
 
 /**
  * Onboarding example (spec §25 Phase 7). Seeds the exact three-agent graph from
@@ -18,15 +15,10 @@ import { newConnectionId } from './ids';
  */
 export function createExamplePlayground(): { playground: Playground; provider: Provider } {
   const pg = createPlayground('Example: Open-source decision');
+  pg.description =
+    'Basic critique loop: Strategist proposes, Critic challenges, Moderator concludes. Confirm Local (Ollama) in Providers, then press Run.';
 
-  const provider = createProvider({
-    displayName: 'Local (Ollama)',
-    baseUrl: 'http://localhost:11434',
-    path: '/v1/chat/completions',
-    authMethod: 'none',
-    defaultModel: 'llama3.1',
-    models: ['llama3.1'],
-  });
+  const provider = createLocalOllamaProvider();
 
   const strategist = createAgentFromTemplate('analyst', {
     name: 'Strategist',
@@ -34,17 +26,17 @@ export function createExamplePlayground(): { playground: Playground; provider: P
     systemInstruction:
       'Propose a clear strategic recommendation with supporting reasoning.',
     position: { x: 80, y: 140 },
-    llm: { providerId: provider.id, model: 'llama3.1', temperature: 0.7, maxOutputTokens: 512 },
+    llm: { providerId: provider.id, ...LOCAL_LLM, temperature: 0.7 },
   });
   const critic = createAgentFromTemplate('critic', {
     name: 'Critic',
     position: { x: 380, y: 140 },
-    llm: { providerId: provider.id, model: 'llama3.1', temperature: 0.6, maxOutputTokens: 512 },
+    llm: { providerId: provider.id, ...LOCAL_LLM, temperature: 0.6 },
   });
   const moderator = createAgentFromTemplate('moderator', {
     name: 'Moderator',
     position: { x: 680, y: 140 },
-    llm: { providerId: provider.id, model: 'llama3.1', temperature: 0.5, maxOutputTokens: 512 },
+    llm: { providerId: provider.id, ...LOCAL_LLM, temperature: 0.5 },
   });
 
   pg.agents.push(strategist, critic, moderator);

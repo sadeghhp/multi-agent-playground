@@ -1,7 +1,9 @@
 import type { Provider } from '../domain/schema';
+import { assessProviderReachability } from './browserReachability';
 import { ProviderError, classifyThrown, summaryFor } from './errors';
 import { buildEndpoint, validateEndpoint } from './url';
 import { DEV_PROXY_TARGET_HEADER, resolveFetchTarget } from './devProxy';
+import { markRequestComplete, throttleBeforeRequest } from './requestThrottle';
 
 /** Headers the browser controls and that custom headers must never override (spec §21). */
 const FORBIDDEN_HEADER_NAMES = new Set([
@@ -88,6 +90,17 @@ export async function providerRequest(
     throw new ProviderError('invalid-url', validation.reason ?? summaryFor('invalid-url'));
   }
 
+  const reach = assessProviderReachability(provider.baseUrl);
+  if (!reach.ok) {
+    const kind =
+      reach.issue === 'private-network' || reach.issue === 'insecure-remote'
+        ? reach.issue
+        : 'invalid-url';
+    throw new ProviderError(kind, reach.message, {
+      detail: reach.hints.join(' '),
+    });
+  }
+
   const endpoint = buildEndpoint(provider.baseUrl, path);
   const { url: fetchUrl, proxyTarget } = resolveFetchTarget(endpoint, provider);
   const headers = buildProviderHeaders(provider, method === 'POST' && options.body !== undefined);
@@ -111,11 +124,13 @@ export async function providerRequest(
     clearRequestTimeout();
     armTimeout();
   };
-  armTimeout();
   const { signal, cleanup: signalCleanup } = mergeSignals(options.signal, timeoutController.signal);
 
-  const start = Date.now();
+  // Throttle before arming the idle timeout so delay wait does not consume timeoutMs.
+  await throttleBeforeRequest();
   try {
+    armTimeout();
+    const start = Date.now();
     const response = await fetch(fetchUrl, {
       method,
       headers,
@@ -147,6 +162,8 @@ export async function providerRequest(
       });
     }
     throw classifyThrown(err);
+  } finally {
+    markRequestComplete();
   }
 }
 

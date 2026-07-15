@@ -1,4 +1,5 @@
 import type { Playground, Provider } from '../domain/schema';
+import { assessProviderReachability } from '../providers/browserReachability';
 
 /**
  * Graph + run validation (spec §19). Warnings don't block a run; errors do.
@@ -12,10 +13,16 @@ export interface ValidationIssue {
   agentId?: string;
 }
 
-export function validateForRun(pg: Playground, providers: Provider[]): ValidationIssue[] {
+export function validateForRun(
+  pg: Playground,
+  providers: Provider[],
+  appOrigin?: string,
+): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const agentsById = new Map(pg.agents.map((a) => [a.id, a]));
   const enabledAgents = pg.agents.filter((a) => a.runtime.enabled);
+  /** Providers we already checked — avoid duplicate reachability messages. */
+  const reachabilityChecked = new Set<string>();
 
   // Starting agent (spec §19 run validation)
   const startId = pg.conversation.startingAgentId;
@@ -76,6 +83,22 @@ export function validateForRun(pg: Playground, providers: Provider[]): Validatio
         message: `Agent "${agent.name}" has no API key for its provider "${provider.displayName}".`,
         agentId: agent.id,
       });
+    } else if (!reachabilityChecked.has(provider.id)) {
+      reachabilityChecked.add(provider.id);
+      const reach = assessProviderReachability(provider.baseUrl, appOrigin);
+      if (!reach.ok) {
+        issues.push({
+          level: 'error',
+          message: `Provider "${provider.displayName}": ${reach.message}`,
+          agentId: agent.id,
+        });
+      } else if (reach.issue === 'cors-required') {
+        issues.push({
+          level: 'warning',
+          message: `Provider "${provider.displayName}": ${reach.message}`,
+          agentId: agent.id,
+        });
+      }
     }
     if (!agent.llm.model.trim()) {
       issues.push({ level: 'error', message: `Agent "${agent.name}" has no model set.`, agentId: agent.id });

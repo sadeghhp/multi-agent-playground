@@ -16,6 +16,7 @@ const NAV: { panel: OpenPanel; label: string; needsPlayground?: boolean }[] = [
   { panel: 'runHistory', label: 'Run history', needsPlayground: true },
   { panel: 'timeline', label: 'Timeline', needsPlayground: true },
   { panel: 'usage', label: 'Usage & cost' },
+  { panel: 'settings', label: 'Settings' },
 ];
 
 /** The "More" tab: navigation into existing full-screen panels + app-level actions. */

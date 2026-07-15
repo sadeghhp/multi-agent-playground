@@ -153,6 +153,9 @@ export function Toolbar() {
           >
             Timeline
           </button>
+          <button type="button" className="secondary" onClick={() => setPanel('settings')}>
+            Settings
+          </button>
           <button type="button" className="danger" onClick={handleClearChat} disabled={isRunning}>
             Clear chat
           </button>

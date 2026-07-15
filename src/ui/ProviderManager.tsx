@@ -5,6 +5,7 @@ import { useProviderStore } from '../store/providerStore';
 import { useUiStore } from '../store/uiStore';
 import { createProvider } from '../domain/factories';
 import { clearCredential, saveCredential } from '../persistence/credentialStore';
+import { assessProviderReachability } from '../providers/browserReachability';
 import { validateEndpoint } from '../providers/url';
 import { listModels, type ListedModel } from '../providers/listModels';
 import { testConnection, type TestConnectionResult } from '../providers/testConnection';
@@ -87,8 +88,10 @@ export function ProviderManager() {
   return (
     <Modal title="LLM providers" onClose={() => setPanel('none')} width={900}>
       <p className={styles.intro}>
-        Connect any OpenAI-compatible endpoint. Providers are shared across every playground in this
-        browser. API keys are stored locally on this device — never use unrestricted production keys.
+        Connect any OpenAI-compatible endpoint that is reachable from this browser. Providers are
+        shared across every playground in this browser. Localhost servers (Ollama, LM Studio) require
+        running the app locally (<code>npm run dev</code>). API keys are stored on this device — never
+        use unrestricted production keys.
       </p>
 
       <div className={styles.layout}>
@@ -179,7 +182,10 @@ function ProviderEditor({
 
   const urlValidation = validateEndpoint(provider.baseUrl);
   const hasUrl = Boolean(provider.baseUrl.trim());
-  const canQuery = hasUrl && urlValidation.ok;
+  const reachability = hasUrl && urlValidation.ok
+    ? assessProviderReachability(provider.baseUrl)
+    : null;
+  const canQuery = hasUrl && urlValidation.ok && (reachability?.ok ?? false);
 
   function applyPreset(preset: Preset) {
     const patch: Partial<Provider> = {
@@ -272,6 +278,11 @@ function ProviderEditor({
 
   async function handleFetchModels() {
     if (!canQuery) return;
+    const reach = assessProviderReachability(provider.baseUrl);
+    if (!reach.ok) {
+      setBanner({ kind: 'err', text: reach.message });
+      return;
+    }
     setBusy('fetch');
     setBanner(null);
     setFetchedModels(null);
@@ -298,6 +309,18 @@ function ProviderEditor({
 
   async function handleTest() {
     if (!canQuery) return;
+    const reach = assessProviderReachability(provider.baseUrl);
+    if (!reach.ok) {
+      setTestResult({
+        ok: false,
+        durationMs: 0,
+        errorKind: reach.issue ?? 'invalid-url',
+        errorSummary: reach.message,
+        errorDetail: reach.hints.join(' '),
+        retryEligible: false,
+      });
+      return;
+    }
     setBusy('test');
     setTestResult(null);
     try {
@@ -371,6 +394,23 @@ function ProviderEditor({
             spellCheck={false}
           />
           {!urlValidation.ok && hasUrl && <p className={styles.err}>{urlValidation.reason}</p>}
+          {reachability && !reachability.ok && (
+            <div className={styles.reachErr} role="alert">
+              <p className={styles.err}>{reachability.message}</p>
+              {reachability.hints.length > 0 && (
+                <ul className={styles.reachHints}>
+                  {reachability.hints.map((h) => (
+                    <li key={h}>{h}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+          {reachability?.ok && reachability.issue === 'cors-required' && (
+            <p className={styles.reachWarn} role="status">
+              {reachability.message} Use <strong>Test connection</strong> before running.
+            </p>
+          )}
         </div>
 
         <div className="field">
@@ -437,6 +477,22 @@ function ProviderEditor({
             <p className={styles.hint}>
               Leave the path at the default unless your host uses a custom route.
             </p>
+            {import.meta.env.DEV && (
+              <label className={styles.rememberRow}>
+                <input
+                  type="checkbox"
+                  checked={provider.bypassDevProxy}
+                  onChange={(e) => onChange({ bypassDevProxy: e.target.checked })}
+                />
+                <span>
+                  Send requests directly from the browser (bypass dev proxy)
+                  <span className={styles.rememberHint}>
+                    Dev only. Use when the endpoint is reachable only from the browser (VPN /
+                    browser-auth). Has no effect in production builds.
+                  </span>
+                </span>
+              </label>
+            )}
           </div>
         </details>
       </section>
@@ -452,7 +508,13 @@ function ProviderEditor({
             type="button"
             onClick={handleFetchModels}
             disabled={busy !== null || !canQuery}
-            title={canQuery ? undefined : 'Enter a valid base URL first'}
+            title={
+              canQuery
+                ? undefined
+                : reachability && !reachability.ok
+                  ? reachability.message
+                  : 'Enter a valid base URL first'
+            }
           >
             {busy === 'fetch' ? 'Fetching…' : 'Fetch from provider'}
           </button>

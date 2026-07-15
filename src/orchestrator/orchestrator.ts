@@ -147,6 +147,10 @@ export async function startRun(): Promise<void> {
     useProviderStore.getState().providers.map((p) => [p.id, p]),
   );
 
+  // Defense in depth: UI also gates on validateForRun, but startRun can be
+  // called without the Run dialog (e.g. re-run paths).
+  if (hasBlockingErrors(validateForRun(pg, [...providersById.values()]))) return;
+
   const controller = new AbortController();
   const runId = newRunId();
   runtime.startRun(runId, controller);

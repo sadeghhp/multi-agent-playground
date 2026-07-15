@@ -3,6 +3,8 @@
  */
 
 const LOCALHOST_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+/** Cloud metadata services — never treated as a legitimate local LLM host. */
+const METADATA_SERVICE_HOST = '169.254.169.254';
 
 /** Path segments relative to the OpenAI-style /v1 API root. */
 export const CHAT_COMPLETIONS_PATH = '/chat/completions';
@@ -10,6 +12,54 @@ export const MODELS_PATH = '/models';
 
 export function isLocalhost(hostname: string): boolean {
   return LOCALHOST_HOSTS.has(hostname) || hostname.endsWith('.localhost');
+}
+
+/**
+ * True for hostnames that resolve to loopback, private LAN, or link-local
+ * addresses — targets browsers treat as the private network address space.
+ */
+export function isPrivateNetworkHost(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (host === METADATA_SERVICE_HOST) return false;
+  if (LOCALHOST_HOSTS.has(hostname) || host === 'localhost') return true;
+  if (host.endsWith('.localhost') || host.endsWith('.local')) return true;
+
+  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4) {
+    const [a, b] = ipv4.slice(1, 3).map(Number);
+    if (a === 10 || a === 127) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 169 && b === 254) return true;
+    return false;
+  }
+
+  if (host === '::1') return true;
+  if (host.startsWith('fc') || host.startsWith('fd')) return true;
+  if (host.startsWith('fe8') || host.startsWith('fe9') || host.startsWith('fea') || host.startsWith('feb')) {
+    return true;
+  }
+
+  return false;
+}
+
+/** True when the app itself is served from loopback (local `vite` / preview). */
+export function isAppOnLocalhost(origin: string): boolean {
+  try {
+    return isLocalhost(new URL(origin).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/** True for `http://` targets that are not on the private network (spec §21). */
+export function isRemoteHttp(baseUrl: string): boolean {
+  try {
+    const url = new URL(baseUrl);
+    return url.protocol === 'http:' && !isPrivateNetworkHost(url.hostname);
+  } catch {
+    return false;
+  }
 }
 
 export interface UrlValidation {

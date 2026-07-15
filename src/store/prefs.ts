@@ -1,6 +1,7 @@
 /**
  * Small UI preferences persisted to localStorage only (spec §15.1): selected
- * playground id, theme, token budget caps. NOT domain data — that lives in IndexedDB.
+ * playground id, theme, token budget caps, LLM settings. NOT domain data —
+ * that lives in IndexedDB.
  */
 
 import {
@@ -8,13 +9,20 @@ import {
   UsageBudgetSettings as UsageBudgetSettingsSchema,
   type UsageBudgetSettings,
 } from '../domain/usage';
+import {
+  DEFAULT_LLM_SETTINGS,
+  LlmSettings as LlmSettingsSchema,
+  type LlmSettings,
+} from '../domain/llmSettings';
 
 const SELECTED_KEY = 'map.selectedPlaygroundId';
 const THEME_KEY = 'map.theme';
 const BUDGET_KEY = 'map.usageBudget';
+const LLM_SETTINGS_KEY = 'map.llmSettings';
 
 export type Theme = 'light' | 'dark';
 export type { UsageBudgetSettings };
+export type { LlmSettings };
 
 export function getSelectedPlaygroundId(): string | null {
   try {
@@ -62,6 +70,26 @@ export function setUsageBudget(budget: UsageBudgetSettings): void {
   try {
     const parsed = UsageBudgetSettingsSchema.parse(budget);
     window.localStorage.setItem(BUDGET_KEY, JSON.stringify(parsed));
+  } catch {
+    /* storage full / disabled — non-fatal */
+  }
+}
+
+export function getLlmSettings(): LlmSettings {
+  try {
+    const raw = window.localStorage.getItem(LLM_SETTINGS_KEY);
+    if (!raw) return { ...DEFAULT_LLM_SETTINGS };
+    const parsed = LlmSettingsSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : { ...DEFAULT_LLM_SETTINGS };
+  } catch {
+    return { ...DEFAULT_LLM_SETTINGS };
+  }
+}
+
+export function setLlmSettings(settings: LlmSettings): void {
+  try {
+    const parsed = LlmSettingsSchema.parse(settings);
+    window.localStorage.setItem(LLM_SETTINGS_KEY, JSON.stringify(parsed));
   } catch {
     /* storage full / disabled — non-fatal */
   }

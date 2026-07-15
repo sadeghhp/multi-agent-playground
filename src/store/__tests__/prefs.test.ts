@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getSelectedPlaygroundId, getTheme, setSelectedPlaygroundId, setTheme } from '../prefs';
+import {
+  getLlmSettings,
+  getSelectedPlaygroundId,
+  getTheme,
+  setLlmSettings,
+  setSelectedPlaygroundId,
+  setTheme,
+} from '../prefs';
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -22,6 +29,19 @@ describe('prefs round-trip', () => {
     expect(getTheme()).toBe('light');
     setTheme('dark');
     expect(getTheme()).toBe('dark');
+  });
+
+  it('persists LLM settings, defaulting to zero request delay', () => {
+    expect(getLlmSettings()).toEqual({ requestDelayMs: 0 });
+    setLlmSettings({ requestDelayMs: 1500 });
+    expect(getLlmSettings()).toEqual({ requestDelayMs: 1500 });
+  });
+
+  it('falls back to defaults for invalid LLM settings JSON', () => {
+    window.localStorage.setItem('map.llmSettings', '{not-json');
+    expect(getLlmSettings()).toEqual({ requestDelayMs: 0 });
+    window.localStorage.setItem('map.llmSettings', JSON.stringify({ requestDelayMs: -5 }));
+    expect(getLlmSettings()).toEqual({ requestDelayMs: 0 });
   });
 });
 
@@ -59,5 +79,15 @@ describe('localStorage failure resilience (L-11 regression)', () => {
     vi.restoreAllMocks();
     makeStorageThrow('setItem');
     expect(() => setTheme('dark')).not.toThrow();
+  });
+
+  it('getLlmSettings/setLlmSettings do not throw', () => {
+    makeStorageThrow('getItem');
+    expect(() => getLlmSettings()).not.toThrow();
+    expect(getLlmSettings()).toEqual({ requestDelayMs: 0 });
+
+    vi.restoreAllMocks();
+    makeStorageThrow('setItem');
+    expect(() => setLlmSettings({ requestDelayMs: 500 })).not.toThrow();
   });
 });

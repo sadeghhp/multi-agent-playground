@@ -113,6 +113,31 @@ describe('validateForRun', () => {
     expect(issues.some((i) => /missing agent/i.test(i.message))).toBe(false);
     expect(hasBlockingErrors(issues)).toBe(false);
   });
+
+  it('blocks localhost providers when the app origin is public (Private Network Access)', () => {
+    const { pg, providers } = readyPlayground();
+    const issues = validateForRun(pg, providers, 'https://sadeghhp.github.io');
+    expect(hasBlockingErrors(issues)).toBe(true);
+    expect(issues.some((i) => i.level === 'error' && /localhost|local network|Private Network/i.test(i.message))).toBe(
+      true,
+    );
+  });
+
+  it('allows localhost providers when the app origin is localhost', () => {
+    const { pg, providers } = readyPlayground();
+    const issues = validateForRun(pg, providers, 'http://localhost:5173');
+    expect(hasBlockingErrors(issues)).toBe(false);
+  });
+
+  it('warns (does not block) for remote HTTPS that requires CORS', () => {
+    const { pg, providers } = readyPlayground();
+    providers[0].baseUrl = 'https://api.openai.com';
+    providers[0].authMethod = 'bearer';
+    providers[0].apiKey = 'sk-test';
+    const issues = validateForRun(pg, providers, 'https://sadeghhp.github.io');
+    expect(hasBlockingErrors(issues)).toBe(false);
+    expect(issues.some((i) => i.level === 'warning' && /CORS/i.test(i.message))).toBe(true);
+  });
 });
 
 describe('reachableFrom', () => {

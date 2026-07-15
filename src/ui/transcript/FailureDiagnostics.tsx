@@ -13,6 +13,8 @@ const TITLE_FOR_KIND: Partial<Record<ProviderErrorKind, string>> = {
   'server-error': 'Upstream model error',
   auth: 'Authentication failed',
   cors: 'Browser blocked the request (CORS)',
+  'private-network': 'Cannot reach local provider from this site',
+  'insecure-remote': 'Insecure remote endpoint',
   network: 'Network error',
   'model-not-found': 'Model not found',
   aborted: 'Request cancelled',

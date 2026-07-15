@@ -7,6 +7,8 @@
 export type ProviderErrorKind =
   | 'invalid-url'
   | 'cors'
+  | 'private-network'
+  | 'insecure-remote'
   | 'network'
   | 'auth'
   | 'model-not-found'
@@ -64,6 +66,9 @@ export class ProviderError extends Error {
 const KIND_SUMMARY: Record<ProviderErrorKind, string> = {
   'invalid-url': 'The provider URL is invalid.',
   cors: 'The provider blocked this browser-origin request (CORS).',
+  'private-network':
+    'Browsers block public websites from reaching localhost or your local network.',
+  'insecure-remote': 'Remote endpoints must use HTTPS. HTTP is only allowed for localhost.',
   network: 'Could not reach the provider (network error).',
   auth: 'Authentication failed. Check the API key and auth header.',
   'model-not-found': 'The requested model was not found on this provider.',
@@ -130,9 +135,9 @@ export function classifyThrown(err: unknown): ProviderError {
           'This usually means the provider did not allow cross-origin (CORS) ' +
           'requests from this page, but can also mean the host is unreachable. ' +
           'Providers built for server-to-server use often cannot be called ' +
-          'directly from a browser. In `pnpm dev`, remote HTTPS endpoints are ' +
-          'routed through a local proxy automatically; production builds still ' +
-          'require CORS or a server-side proxy.',
+          'directly from a browser. Under `npm run dev`, remote HTTPS endpoints ' +
+          'are routed through a local proxy automatically; production (including ' +
+          'GitHub Pages) requires CORS from the provider itself.',
       });
     }
     return new ProviderError('network', summaryFor('network'), {
@@ -298,8 +303,23 @@ export function troubleshootingHints(
     }
   } else if (kind === 'auth') {
     hints.push('Verify the API key in Provider settings.');
+  } else if (kind === 'private-network') {
+    hints.push(
+      'Run the app locally with `npm run dev` at http://localhost:5173 to use Ollama or LM Studio.',
+    );
+    hints.push(
+      'Or switch the provider to a public HTTPS API that allows browser CORS (not localhost).',
+    );
+  } else if (kind === 'insecure-remote') {
+    hints.push('Change the provider base URL to https://…');
+    hints.push('HTTP is only allowed for localhost development endpoints.');
   } else if (kind === 'cors') {
-    hints.push('Use the local dev proxy or a server-side proxy for this provider.');
+    hints.push(
+      'This provider must allow CORS from this page, or you must call it from `npm run dev` (dev proxy).',
+    );
+    hints.push(
+      'Providers built for server-to-server use often cannot be called from a browser-only app.',
+    );
   } else if (kind === 'model-not-found') {
     hints.push('Pick a model this provider lists under Fetch models.');
   } else if (kind === 'network') {

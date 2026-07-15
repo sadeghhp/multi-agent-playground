@@ -58,7 +58,7 @@
   font-weight: 600;
 }
 
-.meta { color: var(--text-subtle); margin-left: auto; }
+.meta { color: var(--text-subtle); margin-inline-start: auto; }
 
 .body { font-size: 13px; line-height: 1.45; }
 

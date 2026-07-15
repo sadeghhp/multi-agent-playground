@@ -324,6 +324,29 @@
   margin: 4px 0 0;
 }
 
+.reachErr {
+  margin: 6px 0 0;
+}
+
+.reachHints {
+  margin: 4px 0 0;
+  padding-left: 1.2em;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.reachWarn {
+  margin: 6px 0 0;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  line-height: 1.4;
+  padding: 6px 8px;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+
 /* ── Models ── */
 
 .manualAdd {

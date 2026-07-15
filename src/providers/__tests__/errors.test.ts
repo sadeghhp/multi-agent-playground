@@ -76,9 +76,24 @@ describe('retryEligible', () => {
     expect(retryEligible('timeout')).toBe(true);
     expect(retryEligible('server-error')).toBe(true);
   });
-  it('is false for auth and cors', () => {
+  it('is false for auth, cors, and reachability kinds', () => {
     expect(retryEligible('auth')).toBe(false);
     expect(retryEligible('cors')).toBe(false);
+    expect(retryEligible('private-network')).toBe(false);
+    expect(retryEligible('insecure-remote')).toBe(false);
+  });
+});
+
+describe('troubleshootingHints', () => {
+  it('gives local-dev guidance for private-network', () => {
+    const hints = troubleshootingHints({ kind: 'private-network' });
+    expect(hints.some((h) => /npm run dev|localhost/i.test(h))).toBe(true);
+  });
+
+  it('does not advertise a production proxy for cors', () => {
+    const hints = troubleshootingHints({ kind: 'cors' });
+    expect(hints.some((h) => /CORS|browser|dev proxy/i.test(h))).toBe(true);
+    expect(hints.every((h) => !/server-side proxy/i.test(h))).toBe(true);
   });
 });
 

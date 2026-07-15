@@ -260,6 +260,10 @@ export type TranscriptMessage = z.infer<typeof TranscriptMessage>;
 // Conversation settings (spec §11.1, §11.4 defaults)
 // ---------------------------------------------------------------------------
 
+/** Reply-length preset applied to every agent for a run (spec extension). */
+export const ResponseLength = z.enum(['agent-default', 'short', 'medium', 'long']);
+export type ResponseLength = z.infer<typeof ResponseLength>;
+
 export const ConversationSettings = z.object({
   subject: z.string().default(''),
   objective: z.string().default(''),
@@ -273,6 +277,11 @@ export const ConversationSettings = z.object({
   maxResponsesPerAgent: z.number().int().positive().default(3),
   responseTimeoutMs: z.number().int().positive().default(60_000),
   stopOnError: z.boolean().default(true),
+  // Run-level overrides (additive, defaulted so old playgrounds parse
+  // unchanged): applied on top of each agent's own characteristics for this
+  // run only. Empty tone / 'agent-default' length means "no override".
+  toneOverride: z.string().default(''),
+  responseLength: ResponseLength.default('agent-default'),
 });
 export type ConversationSettings = z.infer<typeof ConversationSettings>;
 

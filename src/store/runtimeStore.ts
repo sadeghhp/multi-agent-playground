@@ -34,7 +34,14 @@ export interface RequestSnapshot {
  * (interrupted), never resumed (spec §16, §11).
  */
 
-export type RunStatus = 'idle' | 'running' | 'stopped' | 'completed' | 'error' | 'interrupted';
+export type RunStatus =
+  | 'idle'
+  | 'running'
+  | 'paused'
+  | 'stopped'
+  | 'completed'
+  | 'error'
+  | 'interrupted';
 
 export interface EventLogEntry {
   id: string;
@@ -101,6 +108,12 @@ interface RuntimeStoreState {
    * success by the same agent. Drives auto-disable escalation.
    */
   consecutiveFailures: Record<string, number>;
+  /**
+   * A pause was requested; the run loop suspends at the next turn boundary and
+   * flips status to 'paused' (spec extension: flow control). Cleared on resume
+   * and when a new run starts.
+   */
+  pauseRequested: boolean;
   /** Tokens recorded for the active run (for budget gating). */
   runTokens: number;
   runFallbackTokens: number;
@@ -121,6 +134,8 @@ interface RuntimeStoreState {
   bumpConsecutiveFailures: (agentId: string) => number;
   /** Reset the agent's consecutive-failure streak (call on success). */
   resetConsecutiveFailures: (agentId: string) => void;
+  /** Request/clear a pause (the loop acts on it at the next turn boundary). */
+  setPauseRequested: (requested: boolean) => void;
   addRunTokens: (tokens: number, fallback: boolean) => void;
   setStatus: (status: RunStatus) => void;
   setActive: (agentId: string | null, connectionId: string | null) => void;
@@ -169,6 +184,7 @@ const initial = {
   providerOverrides: {} as Record<string, ProviderOverride>,
   runDisabledAgents: {} as Record<string, true>,
   consecutiveFailures: {} as Record<string, number>,
+  pauseRequested: false,
   runTokens: 0,
   runFallbackTokens: 0,
   abortController: null,
@@ -237,6 +253,7 @@ export const useRuntimeStore = create<RuntimeStoreState>((set, get) => ({
       delete next[agentId];
       return { consecutiveFailures: next };
     }),
+  setPauseRequested: (requested) => set({ pauseRequested: requested }),
   addRunTokens: (tokens, fallback) =>
     set((s) => ({
       runTokens: s.runTokens + tokens,

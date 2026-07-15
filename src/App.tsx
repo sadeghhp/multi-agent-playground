@@ -7,6 +7,7 @@ import { Toolbar } from './ui/Toolbar';
 import { Palette } from './ui/Palette';
 import { Inspector } from './ui/Inspector';
 import { BottomPanel } from './ui/BottomPanel';
+import { AppFooter } from './ui/AppFooter';
 import { GraphCanvas } from './graph/GraphCanvas';
 import { ProviderManager } from './ui/ProviderManager';
 import { SkillLibraryManager } from './ui/SkillLibraryManager';
@@ -21,6 +22,7 @@ import { CreateAgentWithAiModal } from './ui/CreateAgentWithAiModal';
 import { Toast } from './ui/Toast';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import { FallbackSuggestModal } from './ui/FallbackSuggestModal';
+import { FailureDecisionModal } from './ui/FailureDecisionModal';
 import { UsagePanel } from './ui/UsagePanel';
 import { SettingsPanel } from './ui/SettingsPanel';
 import { useUsageStore } from './store/usageStore';
@@ -95,6 +97,7 @@ export default function App() {
           <BottomPanel />
         </>
       )}
+      <AppFooter />
 
       {openPanel === 'providers' && <ProviderManager />}
       {openPanel === 'skills' && <SkillLibraryManager />}
@@ -109,6 +112,7 @@ export default function App() {
       <Toast />
       <ConfirmDialog />
       <FallbackSuggestModal />
+      <FailureDecisionModal />
     </div>
   );
 }

@@ -63,6 +63,35 @@ function responseLimitFor(agent: Agent, pg: Playground): number {
 }
 
 /**
+ * Resolver for an in-flight pause wait (see waitForResume). Module-scoped
+ * because only one run is ever active (spec §19); `resumeRun` calls it to wake
+ * the loop. Null when the loop is not paused.
+ */
+let resumeResolve: (() => void) | null = null;
+
+/**
+ * Block the loop while paused until `resumeRun` wakes it or the run is aborted.
+ * Resolves (never rejects) on abort — the caller re-checks the signal and breaks.
+ */
+function waitForResume(signal: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    const onAbort = () => {
+      resumeResolve = null;
+      resolve();
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    resumeResolve = () => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    };
+  });
+}
+
+/**
  * Sleep that rejects with the abort reason if the signal fires first (spec §14).
  * Used for auto-retry backoff so a Stop during the wait breaks the loop promptly
  * instead of stalling for the full delay.
@@ -156,11 +185,77 @@ function findLastUserDirective(transcript: TranscriptMessage[]): string | null {
 
 export function stopRun(): void {
   const runtime = useRuntimeStore.getState();
-  if (runtime.status !== 'running') return;
+  // Stoppable from a paused run too — the abort resolves the pause wait so the
+  // loop unblocks and exits promptly.
+  if (runtime.status !== 'running' && runtime.status !== 'paused') return;
   runtime.abortController?.abort(new DOMException('Run stopped by user', 'AbortError'));
   runtime.setStatus('stopped');
   runtime.setActive(null, null);
+  runtime.setPauseRequested(false);
   log('execution-stopped', 'Run stopped by user.');
+}
+
+/**
+ * Suspend a running run at the next turn boundary (spec extension: flow
+ * control). Takes effect after the in-flight turn finishes; the graph and
+ * transcript are untouched while paused. No-op unless a run is active.
+ */
+export function pauseRun(): void {
+  const runtime = useRuntimeStore.getState();
+  if (runtime.status !== 'running') return;
+  runtime.setPauseRequested(true);
+  log('run-pause-requested', 'Pause requested — the run will pause after the current turn.');
+}
+
+/** Resume a paused run. No-op unless the run is actually paused. */
+export function resumeRun(): void {
+  const runtime = useRuntimeStore.getState();
+  if (runtime.status !== 'paused') return;
+  const resolve = resumeResolve;
+  resumeResolve = null;
+  // The loop clears pauseRequested and flips status back to 'running' when the
+  // wait resolves; resolve it here to wake it.
+  resolve?.();
+}
+
+/**
+ * Re-attempt a single agent's failed turn after a run has finished/stopped
+ * (spec extension: flow control). Starts a fresh run seeded at that agent, with
+ * its source/incoming connection reconstructed from its most recent failed
+ * transcript entry, then continues the graph from there. No-op while a run is
+ * active or when the graph no longer validates.
+ */
+export function retryAgentTurn(agentId: string): void {
+  const domain = useDomainStore.getState();
+  const pg = domain.playground;
+  if (!pg) return;
+  const status = useRuntimeStore.getState().status;
+  if (status === 'running' || status === 'paused') return;
+
+  const agent = pg.agents.find((a) => a.id === agentId);
+  if (!agent || !agent.runtime.enabled) return;
+
+  const providers = useProviderStore.getState().providers;
+  if (hasBlockingErrors(validateForRun(pg, providers))) return;
+
+  // Reconstruct the queue item from the agent's most recent failed turn so the
+  // retry sees the same source/incoming-connection context it originally had.
+  let sourceAgentId: string | null = null;
+  for (let i = pg.transcript.length - 1; i >= 0; i--) {
+    const m = pg.transcript[i];
+    if (m.agentId === agentId && m.status === 'failed') {
+      sourceAgentId = m.sourceAgentId;
+      break;
+    }
+  }
+  const connection = sourceAgentId
+    ? pg.connections.find(
+        (c) => c.enabled && c.source === sourceAgentId && c.target === agentId,
+      ) ?? null
+    : null;
+
+  log('run-retry', `Retrying "${agent.name}" from a stopped run.`, agentId);
+  void startRun({ seed: [{ agentId, connectionId: connection?.id ?? null, sourceAgentId }] });
 }
 
 /**
@@ -202,12 +297,12 @@ export function continueRun(userMessage: string): void {
   void startRun();
 }
 
-export async function startRun(): Promise<void> {
+export async function startRun(opts: { seed?: QueueItem[] } = {}): Promise<void> {
   const domain = useDomainStore.getState();
   const runtime = useRuntimeStore.getState();
   const pg = domain.playground;
   if (!pg) return;
-  if (runtime.status === 'running') return; // one run at a time (spec §19)
+  if (runtime.status === 'running' || runtime.status === 'paused') return; // one run at a time (spec §19)
 
   // Snapshot structure — the graph is locked during a run (spec §10.3), so agents,
   // connections and providers won't change under us. Providers are application-
@@ -228,10 +323,14 @@ export async function startRun(): Promise<void> {
   await beginVersionedRun(pg, runId);
   log('run-started', `Run started on subject: ${pg.conversation.subject || '(none)'}`);
 
-  const startId = pg.conversation.startingAgentId!;
-  const queue: QueueItem[] = [{ agentId: startId, connectionId: null, sourceAgentId: null }];
-  const queued = new Set<string>([startId]);
-  runtime.setAgentState(startId, 'queued');
+  // Seed the queue from the starting agent by default, or from an explicit seed
+  // (a post-run retry re-enters at a specific agent — see retryAgentTurn).
+  const seed = opts.seed ?? [
+    { agentId: pg.conversation.startingAgentId!, connectionId: null, sourceAgentId: null },
+  ];
+  const queue: QueueItem[] = [...seed];
+  const queued = new Set<string>(seed.map((s) => s.agentId));
+  for (const s of seed) runtime.setAgentState(s.agentId, 'queued');
 
   const maxTurns = pg.conversation.maxTotalTurns;
   const policy = resolveFailurePolicy(pg.conversation);
@@ -260,6 +359,20 @@ export async function startRun(): Promise<void> {
   try {
     while (queue.length > 0) {
       if (controller.signal.aborted) break;
+
+      // Pause point (spec extension: flow control). Suspend between turns until
+      // the user resumes or stops. The in-flight turn always completes first.
+      if (useRuntimeStore.getState().pauseRequested) {
+        runtime.setStatus('paused');
+        runtime.setActive(null, null);
+        log('run-paused', 'Run paused.');
+        await waitForResume(controller.signal);
+        if (controller.signal.aborted) break;
+        useRuntimeStore.getState().setPauseRequested(false);
+        runtime.setStatus('running');
+        log('run-resumed', 'Run resumed.');
+      }
+
       if (useRuntimeStore.getState().currentTurn >= maxTurns) {
         log('turn-limit', `Maximum total turns (${maxTurns}) reached.`);
         break;

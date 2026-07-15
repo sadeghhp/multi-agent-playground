@@ -4,7 +4,7 @@ import { useProviderStore } from '../store/providerStore';
 import { useUiStore } from '../store/uiStore';
 import { useRuntimeStore } from '../store/runtimeStore';
 import { exportToJson, importFromJson } from '../persistence/serialization';
-import { startRun, stopRun } from '../orchestrator/orchestrator';
+import { startRun, stopRun, pauseRun, resumeRun } from '../orchestrator/orchestrator';
 import { hasBlockingErrors, validateForRun } from '../orchestrator/validate';
 import styles from './Toolbar.module.css';
 
@@ -31,7 +31,11 @@ export function Toolbar() {
   const showToast = useUiStore((s) => s.showToast);
   const requestConfirm = useUiStore((s) => s.requestConfirm);
 
-  const isRunning = useRuntimeStore((s) => s.status === 'running');
+  const status = useRuntimeStore((s) => s.status);
+  const isRunning = status === 'running';
+  const isPaused = status === 'paused';
+  // A paused run is still "active" — one run at a time, and edits stay locked.
+  const isActive = isRunning || isPaused;
   const clearTranscript = useDomainStore((s) => s.clearTranscript);
 
   const fileInput = useRef<HTMLInputElement>(null);
@@ -100,7 +104,7 @@ export function Toolbar() {
           aria-label="Playground name"
           value={playground?.name ?? ''}
           onChange={(e) => renamePlayground(e.target.value)}
-          disabled={!playground || isRunning}
+          disabled={!playground || isActive}
         />
         <span className={`${styles.save} ${styles[`save_${saveStatus}`] ?? ''}`}>
           {SAVE_LABEL[saveStatus]}
@@ -119,11 +123,11 @@ export function Toolbar() {
 
       <div className={styles.right}>
         <div className={styles.group} role="group" aria-label="Playground file actions">
-          <button type="button" className="secondary" onClick={() => newPlayground('Untitled Playground')} disabled={isRunning}>
+          <button type="button" className="secondary" onClick={() => newPlayground('Untitled Playground')} disabled={isActive}>
             New
           </button>
           <button type="button" className="secondary" onClick={() => setPanel('playgrounds')}>Open</button>
-          <button type="button" className="secondary" onClick={() => fileInput.current?.click()} disabled={isRunning}>
+          <button type="button" className="secondary" onClick={() => fileInput.current?.click()} disabled={isActive}>
             Import
           </button>
           <button type="button" className="secondary" onClick={handleExport} disabled={!playground}>
@@ -156,15 +160,32 @@ export function Toolbar() {
           <button type="button" className="secondary" onClick={() => setPanel('settings')}>
             Settings
           </button>
-          <button type="button" className="danger" onClick={handleClearChat} disabled={isRunning}>
+          <button type="button" className="danger" onClick={handleClearChat} disabled={isActive}>
             Clear chat
           </button>
         </div>
         <span className={styles.sep} />
-        {isRunning ? (
-          <button type="button" className="danger" onClick={() => stopRun()}>
-            Stop
-          </button>
+        {isActive ? (
+          <>
+            {isRunning && (
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => pauseRun()}
+                title="Pause after the current turn finishes"
+              >
+                Pause
+              </button>
+            )}
+            {isPaused && (
+              <button type="button" className="primary" onClick={() => resumeRun()}>
+                Resume
+              </button>
+            )}
+            <button type="button" className="danger" onClick={() => stopRun()}>
+              Stop
+            </button>
+          </>
         ) : (
           <>
             {(playground?.transcript.length ?? 0) > 0 && (

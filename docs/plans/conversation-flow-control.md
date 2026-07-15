@@ -131,7 +131,14 @@ loop must never hang on a decision after the user hit Stop).
 
 ---
 
-## Phase 2 — UI surface
+## Phase 2 — UI surface  ✅ (decision modal, RunDialog controls, graph greying)
+
+Done: `FailureDecisionModal` (mounted in App), RunDialog `failurePolicy` controls
+(On failure / Auto-retries / Remove-after-N, `stopOnError` kept synced), and
+auto-disabled agents grey out via the `disabled` runtime state. The Errors-tab
+retry button is folded into Phase 3 (it needs `retryAgentTurn`).
+
+### Original Phase 2 notes
 
 - **Failure-decision modal** — new component modeled on
   `FallbackSuggestModal`, driven by `uiStore.failureDecision`, mounted next to the
@@ -152,17 +159,24 @@ loop must never hang on a decision after the user hit Stop).
 
 ---
 
-## Phase 3 (later) — Proactive pause/resume + post-run manual retry
+## Phase 3 — Proactive pause/resume + post-run manual retry  ✅
 
-Deferred because it needs the **one real structural change**: the loop must accept
-a **seed queue** so a turn can be re-entered.
+Delivered. The structural change was small: `startRun(opts?: { seed?: QueueItem[] })`
+now accepts an initial queue (default = the starting agent), which enables retry.
 
-- **Pause/Resume a healthy run:** add `'paused'` status; the loop checks a pause
-  flag at the top of each iteration and awaits an abortable resume signal. Lets
-  the user inspect/edit between turns.
-- **Post-run `retryAgentTurn(agentId)`:** refactor `startRun`'s body to accept an
-  initial `QueueItem[]`; a retry seeds the queue with the failed agent (source /
-  connection reconstructed from its transcript message) and re-enters.
+- **Pause/Resume:** new `'paused'` status + `pauseRequested` flag. The loop checks
+  it at the top of each iteration and awaits an abortable `waitForResume`; the
+  in-flight turn always finishes first. `pauseRun`/`resumeRun` in the orchestrator,
+  **Pause**/**Resume** buttons in the Toolbar. Stop works from paused too (abort
+  resolves the wait). Pause is desktop-only (mobile has no trigger, so no paused
+  state arises there).
+- **Post-run `retryAgentTurn(agentId)`:** seeds a fresh run at the failed agent,
+  reconstructing source/incoming-connection from its most recent failed transcript
+  entry, then continues the graph. Wired to a **Retry** button on each Errors-tab
+  row (shown only when no run is active).
+
+Tests added: pause-then-resume-to-completion, stop-while-paused (no hang),
+retry re-runs a failed agent, retry is a no-op while active.
 
 ---
 

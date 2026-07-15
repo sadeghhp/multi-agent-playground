@@ -10,7 +10,7 @@ import { useDomainStore } from '../store/domainStore';
 import { useProviderStore } from '../store/providerStore';
 import { useRuntimeStore } from '../store/runtimeStore';
 import { agentColor } from '../graph/colors';
-import { continueRun } from '../orchestrator/orchestrator';
+import { continueRun, retryAgentTurn } from '../orchestrator/orchestrator';
 import { hasBlockingErrors, validateForRun } from '../orchestrator/validate';
 import { Message } from './transcript/Message';
 import { LiveMessage } from './transcript/LiveMessage';
@@ -239,6 +239,17 @@ export function BottomPanel() {
                   {err.provider && <span className="muted"> · {err.provider}</span>}
                   {err.retryEligible && <span className="chip"> retry-eligible</span>}
                   {err.errorKind && <span className="chip">{err.errorKind}</span>}
+                  {err.agentId && status !== 'running' && status !== 'paused' && (
+                    <button
+                      type="button"
+                      className="secondary"
+                      style={{ marginLeft: 8 }}
+                      onClick={() => retryAgentTurn(err.agentId!)}
+                      title="Re-run this agent's turn and continue from there"
+                    >
+                      Retry
+                    </button>
+                  )}
                   {err.detail && <div className={styles.errorDetail}>{err.detail}</div>}
                 </div>
               ))

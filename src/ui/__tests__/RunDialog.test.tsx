@@ -58,4 +58,25 @@ describe('RunDialog', () => {
     fireEvent.change(screen.getByLabelText('Conversation environment'), { target: { value: 'debate' } });
     expect(useDomainStore.getState().playground!.conversation.conversationMode).toBe('debate');
   });
+
+  it('choosing "skip" on failure writes the policy and syncs stopOnError=false', () => {
+    setUpPlayground();
+    render(<RunDialog />);
+
+    fireEvent.change(screen.getByLabelText('On agent failure'), { target: { value: 'skip' } });
+    const conv = useDomainStore.getState().playground!.conversation;
+    expect(conv.failurePolicy?.onFailure).toBe('skip');
+    expect(conv.stopOnError).toBe(false); // legacy readers still see "don't stop"
+  });
+
+  it('editing the auto-disable threshold persists it and keeps stop mode by default', () => {
+    setUpPlayground();
+    render(<RunDialog />);
+
+    fireEvent.change(screen.getByLabelText('Remove after N failures'), { target: { value: '2' } });
+    const conv = useDomainStore.getState().playground!.conversation;
+    expect(conv.failurePolicy?.autoDisableAfterFailures).toBe(2);
+    // Untouched onFailure defaults to 'stop' → stopOnError stays true.
+    expect(conv.stopOnError).toBe(true);
+  });
 });

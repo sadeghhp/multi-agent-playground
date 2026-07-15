@@ -10,7 +10,14 @@ import { useDomainStore } from '../../store/domainStore';
 import { useProviderStore } from '../../store/providerStore';
 import { useRuntimeStore } from '../../store/runtimeStore';
 import { useUiStore } from '../../store/uiStore';
-import { continueRun, startRun, stopRun } from '../orchestrator';
+import {
+  continueRun,
+  pauseRun,
+  resumeRun,
+  retryAgentTurn,
+  startRun,
+  stopRun,
+} from '../orchestrator';
 
 /** Error chat response with the given HTTP status (500 = retryable, 400 = not). */
 function errorChat(status: number) {
@@ -866,5 +873,100 @@ describe('orchestrator flow control (failure policy)', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1); // backoff was interrupted, retry never sent
     expect(useRuntimeStore.getState().status).toBe('stopped');
+  });
+});
+
+describe('orchestrator pause / resume / retry', () => {
+  it('pauses at the next turn boundary and resumes to completion', async () => {
+    // Request a pause during the first turn; the loop should pause *after* it.
+    const fetchMock = vi.fn().mockImplementation(() => {
+      if (fetchMock.mock.calls.length === 1) pauseRun();
+      return Promise.resolve(okChat());
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const pg = cyclePlayground(10, 5);
+    useDomainStore.setState({ playground: pg });
+
+    const runPromise = startRun();
+    await vi.waitFor(() => expect(useRuntimeStore.getState().status).toBe('paused'));
+
+    const turnsAtPause = useRuntimeStore.getState().currentTurn;
+    expect(turnsAtPause).toBe(1); // the in-flight turn finished before pausing
+
+    resumeRun();
+    await runPromise;
+
+    expect(useRuntimeStore.getState().status).toBe('completed');
+    expect(useRuntimeStore.getState().currentTurn).toBeGreaterThan(turnsAtPause);
+  });
+
+  it('can be stopped while paused (no hang, ends stopped)', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => {
+      if (fetchMock.mock.calls.length === 1) pauseRun();
+      return Promise.resolve(okChat());
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const pg = cyclePlayground(10, 5);
+    useDomainStore.setState({ playground: pg });
+
+    const runPromise = startRun();
+    await vi.waitFor(() => expect(useRuntimeStore.getState().status).toBe('paused'));
+    stopRun();
+    await runPromise; // must settle
+
+    expect(useRuntimeStore.getState().status).toBe('stopped');
+    expect(useRuntimeStore.getState().currentTurn).toBe(1); // no further turns ran
+  });
+
+  it('retryAgentTurn re-runs a failed agent from a stopped run', async () => {
+    // First run: the only turn fails and stops the run.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(errorChat(400)));
+    const pg = cyclePlayground(1, 5);
+    pg.conversation.failurePolicy = {
+      onFailure: 'stop',
+      maxAutoRetries: 0,
+      backoffMs: 0,
+      autoDisableAfterFailures: 3,
+    };
+    useDomainStore.setState({ playground: pg });
+    await startRun();
+
+    const aId = pg.agents[0].id;
+    expect(useRuntimeStore.getState().status).toBe('error');
+    expect(
+      useDomainStore
+        .getState()
+        .playground!.transcript.some((m) => m.agentId === aId && m.status === 'failed'),
+    ).toBe(true);
+
+    // Retry with a provider that now succeeds.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okChat()));
+    retryAgentTurn(aId);
+    await vi.waitFor(() => expect(useRuntimeStore.getState().status).toBe('completed'));
+
+    const completedA = useDomainStore
+      .getState()
+      .playground!.transcript.filter((m) => m.agentId === aId && m.status === 'completed');
+    expect(completedA.length).toBeGreaterThan(0);
+  });
+
+  it('retryAgentTurn is a no-op while a run is active', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => {
+      if (fetchMock.mock.calls.length === 1) pauseRun();
+      return Promise.resolve(okChat());
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const pg = cyclePlayground(10, 5);
+    useDomainStore.setState({ playground: pg });
+
+    const runPromise = startRun();
+    await vi.waitFor(() => expect(useRuntimeStore.getState().status).toBe('paused'));
+
+    // A paused run is still active — retry must not start a competing run.
+    retryAgentTurn(pg.agents[1].id);
+    expect(useRuntimeStore.getState().status).toBe('paused');
+
+    resumeRun();
+    await runPromise;
   });
 });

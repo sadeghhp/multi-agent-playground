@@ -7,6 +7,7 @@ import { Modal } from './Modal';
 import { validateForRun, hasBlockingErrors, reachableFrom } from '../orchestrator/validate';
 import { startRun } from '../orchestrator/orchestrator';
 import { applyRunPreset } from '../domain/factories';
+import { resolveFailurePolicy, type FailureAction, type FailurePolicy } from '../domain/schema';
 import { CONVERSATION_MODES, QUICK_START_PRESETS, type QuickStartPreset } from '../domain/runEnvironments';
 import { parseBoundedInt } from './inputUtils';
 import styles from './RunDialog.module.css';
@@ -24,6 +25,15 @@ export function RunDialog() {
   const [presetName, setPresetName] = useState('');
 
   const conversation = playground?.conversation;
+  const policy = conversation ? resolveFailurePolicy(conversation) : null;
+  // Write the policy and keep the legacy `stopOnError` boolean in sync so older
+  // readers (and exports parsed by an older build) still stop on failure unless
+  // the user explicitly chose to skip.
+  const setPolicy = (patch: Partial<FailurePolicy>) => {
+    if (!conversation) return;
+    const next = { ...resolveFailurePolicy(conversation), ...patch };
+    updateConversation({ failurePolicy: next, stopOnError: next.onFailure !== 'skip' });
+  };
   const enabledAgents = useMemo(
     () => playground?.agents.filter((a) => a.runtime.enabled) ?? [],
     [playground],
@@ -377,14 +387,55 @@ export function RunDialog() {
           </div>
         </div>
 
-        <label className={styles.checkbox}>
-          <input
-            type="checkbox"
-            checked={conversation.stopOnError}
-            onChange={(e) => updateConversation({ stopOnError: e.target.checked })}
-          />
-          Stop the run if an agent fails
-        </label>
+        {policy && (
+          <div className="field-row">
+            <div className="field">
+              <label htmlFor="run-onfailure">On agent failure</label>
+              <select
+                id="run-onfailure"
+                value={policy.onFailure}
+                onChange={(e) => setPolicy({ onFailure: e.target.value as FailureAction })}
+              >
+                <option value="stop">Stop the run</option>
+                <option value="skip">Skip the turn, keep going</option>
+                <option value="prompt">Ask me what to do</option>
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="run-autoretries">Auto-retries</label>
+              <input
+                id="run-autoretries"
+                type="number"
+                min={0}
+                max={10}
+                value={policy.maxAutoRetries}
+                onChange={(e) => {
+                  const n = parseBoundedInt(e.target.value, 0);
+                  if (n !== null) setPolicy({ maxAutoRetries: Math.min(n, 10) });
+                }}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="run-autodisable">Remove after N failures</label>
+              <input
+                id="run-autodisable"
+                type="number"
+                min={0}
+                value={policy.autoDisableAfterFailures}
+                onChange={(e) => {
+                  const n = parseBoundedInt(e.target.value, 0);
+                  if (n !== null) setPolicy({ autoDisableAfterFailures: n });
+                }}
+              />
+            </div>
+          </div>
+        )}
+        <p className="muted" style={{ fontSize: 12, margin: '4px 0 0' }}>
+          Transient errors are auto-retried first. An agent that keeps failing is removed from the
+          circuit after the set number of failures (0 = never) — the rest of the run continues
+          without it. Removal needs “Skip” or “Ask me” mode; “Stop” ends the run on the first
+          hard failure.
+        </p>
 
         {conversation.startingAgentId && (
           <p className="muted" style={{ fontSize: 12, margin: '4px 0 0' }}>

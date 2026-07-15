@@ -1,12 +1,32 @@
 /// <reference types="vitest/config" />
+import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { providerDevProxyPlugin } from './vite/providerDevProxyPlugin';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf-8')) as { version: string };
+
+function getBuildId(): string {
+  if (process.env.GITHUB_SHA) return process.env.GITHUB_SHA.slice(0, 7);
+  try {
+    return execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim();
+  } catch {
+    return 'dev';
+  }
+}
 
 // https://vitejs.dev/config/
 export default defineConfig({
   // GitHub Pages serves this repo under /multi-agent-playground/; keep "/" for local dev/preview.
   base: process.env.GITHUB_PAGES === 'true' ? '/multi-agent-playground/' : '/',
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+    __BUILD_ID__: JSON.stringify(getBuildId()),
+  },
   plugins: [react(), providerDevProxyPlugin()],
   optimizeDeps: {
     // Pre-bundle heavy deps up front so restarts are less likely to 504 in open tabs.

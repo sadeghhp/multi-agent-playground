@@ -7,7 +7,9 @@ describe('resolveApiBase', () => {
   });
 
   it('keeps /v1 in base URL', () => {
-    expect(resolveApiBase('https://api.example.com/v1/')).toBe('https://api.example.com/v1');
+    expect(resolveApiBase('https://api.example.com/v1/')).toBe(
+      'https://api.example.com/v1',
+    );
   });
 });
 

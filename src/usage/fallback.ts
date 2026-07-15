@@ -52,9 +52,7 @@ export function supportsStreamUsage(baseUrl: string): boolean {
     return (
       host === 'api.openai.com' ||
       host === 'openrouter.ai' ||
-      host.endsWith('.openrouter.ai') ||
-      host === 'api.example.com' ||
-      host.endsWith('.example.com')
+      host.endsWith('.openrouter.ai')
     );
   } catch {
     return false;

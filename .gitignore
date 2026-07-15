@@ -6,3 +6,11 @@ dist-ssr
 coverage
 .vite
 *.tsbuildinfo
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+credentials.json
+.cursor/

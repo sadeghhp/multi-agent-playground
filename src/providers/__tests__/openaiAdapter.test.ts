@@ -247,7 +247,7 @@ describe('sendChat', () => {
     });
 
     await sendChat(
-      createProvider({ baseUrl: 'https://api.example.com', apiKey: 'k' }),
+      createProvider({ baseUrl: 'https://api.openai.com', apiKey: 'k' }),
       { model: 'm', messages: [{ role: 'user', content: 'hi' }] },
       { onToken: () => {} },
     );

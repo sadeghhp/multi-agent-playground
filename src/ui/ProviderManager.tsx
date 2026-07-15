@@ -41,12 +41,6 @@ const PRESETS: Preset[] = [
       'meta-llama/llama-3.3-70b-instruct',
     ],
   },
-  {
-    label: 'Example',
-    displayName: 'Example',
-    baseUrl: 'https://api.example.com',
-    path: '/v1/chat/completions',
-  },
   { label: 'Groq', displayName: 'Groq', baseUrl: 'https://api.groq.com/openai', path: '/v1/chat/completions' },
   { label: 'Together', displayName: 'Together AI', baseUrl: 'https://api.together.xyz', path: '/v1/chat/completions' },
   { label: 'Ollama', displayName: 'Ollama (local)', baseUrl: 'http://localhost:11434', path: '/v1/chat/completions' },

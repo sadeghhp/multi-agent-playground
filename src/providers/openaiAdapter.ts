@@ -360,7 +360,7 @@ export async function sendChat(
   const body = buildBody(params);
   // `stream` is widely supported; `stream_options.include_usage` is not (many
   // local servers 400 on it). Only request usage-in-stream for hosts known to
-  // support it (OpenAI, OpenRouter, Example / example).
+  // support it (OpenAI, OpenRouter).
   if (options.onToken) {
     body.stream = true;
     if (supportsStreamUsage(provider.baseUrl)) {

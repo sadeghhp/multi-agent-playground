@@ -101,7 +101,7 @@ describe('fallback helpers', () => {
     const providers: Provider[] = [
       {
         id: 'a',
-        displayName: 'Example',
+        displayName: 'Gateway A',
         baseUrl: 'https://api.example.com',
         path: '/v1/chat/completions',
         authMethod: 'bearer',
@@ -144,7 +144,7 @@ describe('fallback helpers', () => {
   });
 
   it('detects stream usage hosts', () => {
-    expect(supportsStreamUsage('https://api.example.com')).toBe(true);
+    expect(supportsStreamUsage('https://api.openai.com')).toBe(true);
     expect(supportsStreamUsage('https://openrouter.ai/api')).toBe(true);
     expect(supportsStreamUsage('http://localhost:11434')).toBe(false);
   });

@@ -87,6 +87,49 @@ const CHITCHAT_POLICY_DIRECTIVE: Record<ConversationSettings['chitchatPolicy'], 
     'the substance.',
 };
 
+/**
+ * Conversation-level environment ("mode"): the facilitation frame every agent
+ * operates in for the run. Each directive states concrete behaviour to do and
+ * to avoid (not a style adjective), so smaller models act on it. 'open' adds
+ * nothing — each agent just follows its own role.
+ */
+const CONVERSATION_MODE_DIRECTIVE: Record<ConversationSettings['conversationMode'], string | null> = {
+  open: null,
+  brainstorm:
+    'This is a brainstorming session: generate as many distinct ideas as you can and build on ' +
+    "others' ideas ('yes, and…'). Defer judgement — do not criticise, rank, or reject ideas yet, " +
+    'including your own. Favour volume and variety over polish.',
+  critique:
+    'This is a critique session: stress-test the ideas on the table. Surface hidden assumptions, ' +
+    'failure modes, edge cases, and risks, and state what would have to be true for each claim to ' +
+    'hold. Attack the idea, not the person, and when you reject something offer a stronger ' +
+    'alternative.',
+  debate:
+    'This is a debate: take a clear position on the question and defend it. Steelman the opposing ' +
+    'view before you rebut it, and back every point with a concrete reason or example rather than ' +
+    'assertion.',
+  planning:
+    'This is a planning session: turn the objective into a concrete, ordered set of steps. For each ' +
+    'step, note what it depends on and how you would know it is done. Call out unknowns that block ' +
+    'the plan instead of glossing over them.',
+  decision:
+    'This is a decision session: drive toward a single recommendation. Lay out the options, the ' +
+    'criteria you are weighing them against, and the tradeoffs, then end with one clearly ' +
+    'recommended choice and the reason it wins.',
+  retrospective:
+    'This is a retrospective: reflect on what happened. Separate what went well, what went poorly, ' +
+    'and what to change — and make every "change" a concrete, assignable action, not a vague ' +
+    'intention.',
+  postmortem:
+    'This is a blameless postmortem: reconstruct what happened as a factual timeline, then identify ' +
+    'root causes and contributing factors. Focus on systems, processes, and gaps — never individual ' +
+    'blame — and propose a specific prevention for each cause.',
+  socratic:
+    'This is a Socratic discussion: advance mainly by asking sharp, probing questions rather than ' +
+    'asserting conclusions. Use questions to expose gaps and assumptions, and assert directly only ' +
+    'when it is needed to move the discussion forward.',
+};
+
 /** Build the system prompt text (sections 1–8 of spec §12). */
 export function buildSystemPrompt(ctx: PromptContext): string {
   const { agent } = ctx;
@@ -107,7 +150,11 @@ export function buildSystemPrompt(ctx: PromptContext): string {
   const characteristics = characteristicsToInstruction(agent.characteristics);
   if (characteristics) sections.push(`Characteristics: ${characteristics}`);
 
-  // 4b. Conversation-level tone/length overrides (apply to every agent this run)
+  // 4b. Conversation-level environment + tone/length overrides (every agent, this run).
+  // The environment frame comes first so it sets the overall stance; the finer
+  // tone/length/chit-chat overrides then refine it.
+  const modeDirective = CONVERSATION_MODE_DIRECTIVE[ctx.conversation.conversationMode];
+  if (modeDirective) sections.push(modeDirective);
   if (ctx.conversation.toneOverride.trim()) {
     sections.push(`For this conversation, maintain a ${ctx.conversation.toneOverride.trim()} tone.`);
   }

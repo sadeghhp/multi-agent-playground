@@ -64,6 +64,7 @@ export function defaultConversationSettings(): ConversationSettings {
     stopOnError: true,
     toneOverride: '',
     responseLength: 'agent-default',
+    chitchatPolicy: 'agent-default',
   };
 }
 

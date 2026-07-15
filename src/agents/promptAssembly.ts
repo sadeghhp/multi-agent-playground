@@ -63,6 +63,21 @@ const RESPONSE_LENGTH_DIRECTIVE: Record<ConversationSettings['responseLength'], 
   long: 'Give a long, thorough response for this conversation, exploring multiple points or angles.',
 };
 
+/**
+ * Conversation-level chit-chat/flattery control, applied on top of each
+ * agent's own characteristics for the duration of a run. 'agent-default'
+ * leaves the per-agent characteristics as the only signal.
+ */
+const CHITCHAT_POLICY_DIRECTIVE: Record<ConversationSettings['chitchatPolicy'], string | null> = {
+  'agent-default': null,
+  'concise-factual':
+    'For this conversation: do not open with greetings, small talk, or transitional filler; ' +
+    'do not compliment, flatter, or praise other agents or their ideas; state claims only when ' +
+    'you can support them with a fact, source, or explicit reasoning, and say when you are ' +
+    'uncertain rather than guessing; respond with the minimum number of sentences needed to convey ' +
+    'the substance.',
+};
+
 /** Build the system prompt text (sections 1–8 of spec §12). */
 export function buildSystemPrompt(ctx: PromptContext): string {
   const { agent } = ctx;
@@ -89,6 +104,8 @@ export function buildSystemPrompt(ctx: PromptContext): string {
   }
   const lengthDirective = RESPONSE_LENGTH_DIRECTIVE[ctx.conversation.responseLength];
   if (lengthDirective) sections.push(lengthDirective);
+  const chitchatDirective = CHITCHAT_POLICY_DIRECTIVE[ctx.conversation.chitchatPolicy];
+  if (chitchatDirective) sections.push(chitchatDirective);
 
   // 5. Enabled skills
   const skills = agent.skills.filter((s) => s.enabled);

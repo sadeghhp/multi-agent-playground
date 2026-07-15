@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, renderHook, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 
 // IndexedDB isn't available in jsdom; stub persistence so hydration resolves.
 vi.mock('../persistence/db', () => import('../test/persistenceDbMock'));
@@ -60,5 +60,24 @@ describe('mobile layout', () => {
     // …and the desktop shell (toolbar brand + canvas) is not mounted.
     expect(screen.queryByText('Multi-Agent Playground')).not.toBeInTheDocument();
     expect(screen.queryByTestId('graph-canvas-stub')).not.toBeInTheDocument();
+  });
+
+  it('mounts all three tabs (Chat / Agents / More) without crashing', async () => {
+    stubMatchMedia(true);
+    render(<App />);
+
+    // Chat is the default tab: its Run composer appears once a playground exists.
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /run conversation/i })).toBeInTheDocument();
+    });
+
+    // Agents tab renders the list header.
+    fireEvent.click(screen.getByRole('tab', { name: 'Agents' }));
+    expect(await screen.findByRole('button', { name: /add agent/i })).toBeInTheDocument();
+
+    // More tab renders the navigation rows.
+    fireEvent.click(screen.getByRole('tab', { name: 'More' }));
+    expect(screen.getByRole('button', { name: /providers/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /usage & cost/i })).toBeInTheDocument();
   });
 });

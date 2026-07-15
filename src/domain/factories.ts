@@ -62,6 +62,8 @@ export function defaultConversationSettings(): ConversationSettings {
     maxResponsesPerAgent: 3,
     responseTimeoutMs: 60_000,
     stopOnError: true,
+    toneOverride: '',
+    responseLength: 'agent-default',
   };
 }
 

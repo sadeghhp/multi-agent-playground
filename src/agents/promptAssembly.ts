@@ -51,6 +51,18 @@ const LANGUAGE_DIRECTIVE: Record<AgentLanguage, string> = {
   fr: 'Write all of your responses in French. Rédige toutes tes réponses en français.',
 };
 
+/**
+ * Conversation-level reply-length override, applied on top of each agent's own
+ * verbosity characteristic for the duration of a run. 'agent-default' leaves
+ * the per-agent characteristic as the only signal.
+ */
+const RESPONSE_LENGTH_DIRECTIVE: Record<ConversationSettings['responseLength'], string | null> = {
+  'agent-default': null,
+  short: 'Keep your response short for this conversation: no more than 1-3 sentences.',
+  medium: 'Keep your response to a moderate length for this conversation: roughly one short paragraph.',
+  long: 'Give a long, thorough response for this conversation, exploring multiple points or angles.',
+};
+
 /** Build the system prompt text (sections 1–8 of spec §12). */
 export function buildSystemPrompt(ctx: PromptContext): string {
   const { agent } = ctx;
@@ -70,6 +82,13 @@ export function buildSystemPrompt(ctx: PromptContext): string {
   // 4. Characteristics
   const characteristics = characteristicsToInstruction(agent.characteristics);
   if (characteristics) sections.push(`Characteristics: ${characteristics}`);
+
+  // 4b. Conversation-level tone/length overrides (apply to every agent this run)
+  if (ctx.conversation.toneOverride.trim()) {
+    sections.push(`For this conversation, maintain a ${ctx.conversation.toneOverride.trim()} tone.`);
+  }
+  const lengthDirective = RESPONSE_LENGTH_DIRECTIVE[ctx.conversation.responseLength];
+  if (lengthDirective) sections.push(lengthDirective);
 
   // 5. Enabled skills
   const skills = agent.skills.filter((s) => s.enabled);
@@ -105,13 +124,23 @@ export function buildTaskPrompt(ctx: PromptContext): string {
   const { conversation, agent } = ctx;
   const sections: string[] = [];
 
+  // The opening turn reads as a natural conversational kickoff rather than a
+  // form-like field dump, so the first agent's reply sounds like the start of
+  // a real discussion instead of an acknowledgement of instructions.
+  if (ctx.isFirstTurn) {
+    sections.push(`You are opening a live discussion. The topic is: "${conversation.subject || '(no subject given)'}"`);
+    if (conversation.objective) sections.push(`Keep this goal in mind as the discussion unfolds: ${conversation.objective}`);
+    if (conversation.initialContext) sections.push(`Relevant background: ${conversation.initialContext}`);
+    if (agent.runtime.openingInstruction?.trim()) sections.push(agent.runtime.openingInstruction.trim());
+    sections.push(
+      'Begin the conversation now by speaking directly about the topic, the way a person would when opening a real discussion. Do not restate these instructions, list the fields above, announce that you are an AI, or acknowledge that you were given a prompt — just start talking.',
+    );
+    return sections.join('\n');
+  }
+
   sections.push(`Subject: ${conversation.subject || '(none)'}`);
   if (conversation.objective) sections.push(`Objective: ${conversation.objective}`);
   if (conversation.initialContext) sections.push(`Context: ${conversation.initialContext}`);
-
-  if (ctx.isFirstTurn && agent.runtime.openingInstruction?.trim()) {
-    sections.push(agent.runtime.openingInstruction.trim());
-  }
 
   if (ctx.sourceAgentName && ctx.incoming) {
     sections.push(`You are responding after ${ctx.sourceAgentName} via a ${ctx.incoming.type} connection.`);

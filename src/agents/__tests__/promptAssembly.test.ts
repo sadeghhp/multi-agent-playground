@@ -92,6 +92,26 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('in French');
     expect(prompt).toContain('en français');
   });
+
+  it('applies a run-level tone override on top of the agent characteristics', () => {
+    const agent = createAgent({ name: 'A' });
+    const conversation = { ...defaultConversationSettings(), toneOverride: 'playful' };
+    const prompt = buildSystemPrompt({ agent, conversation, history: [] });
+    expect(prompt).toContain('maintain a playful tone');
+  });
+
+  it('applies a run-level response-length directive', () => {
+    const agent = createAgent({ name: 'A' });
+    const conversation = { ...defaultConversationSettings(), responseLength: 'short' as const };
+    const prompt = buildSystemPrompt({ agent, conversation, history: [] });
+    expect(prompt).toContain('Keep your response short');
+  });
+
+  it('adds no length directive when responseLength is agent-default', () => {
+    const agent = createAgent({ name: 'A' });
+    const prompt = buildSystemPrompt({ agent, conversation: defaultConversationSettings(), history: [] });
+    expect(prompt).not.toContain('Keep your response');
+  });
 });
 
 describe('buildTaskPrompt', () => {
@@ -101,6 +121,17 @@ describe('buildTaskPrompt', () => {
     const task = buildTaskPrompt({ agent, conversation, history: [] });
     expect(task).toContain('Subject: Ship it?');
     expect(task).toContain('Objective: Decide');
+  });
+
+  it('opens the first turn with a natural kickoff instead of a field dump', () => {
+    const agent = createAgent({ name: 'A' });
+    const conversation = { ...defaultConversationSettings(), subject: 'Ship it?', objective: 'Decide' };
+    const task = buildTaskPrompt({ agent, conversation, history: [], isFirstTurn: true });
+    expect(task).toContain('opening a live discussion');
+    expect(task).toContain('"Ship it?"');
+    expect(task).toContain('Decide');
+    expect(task).not.toContain('Subject: Ship it?');
+    expect(task).not.toContain('Provide your response.');
   });
 
   it('embeds the source output for a review connection even without history', () => {

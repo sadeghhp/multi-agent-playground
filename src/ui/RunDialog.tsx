@@ -96,6 +96,31 @@ export function RunDialog() {
 
       <div className="field-row">
         <div className="field">
+          <label htmlFor="run-tone">Tone for this run (optional)</label>
+          <input
+            id="run-tone"
+            value={conversation.toneOverride}
+            onChange={(e) => updateConversation({ toneOverride: e.target.value })}
+            placeholder="e.g. energetic, formal, playful — leave blank to use each agent's own tone"
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="run-length">Response length</label>
+          <select
+            id="run-length"
+            value={conversation.responseLength}
+            onChange={(e) => updateConversation({ responseLength: e.target.value as typeof conversation.responseLength })}
+          >
+            <option value="agent-default">Agent default</option>
+            <option value="short">Short</option>
+            <option value="medium">Medium</option>
+            <option value="long">Long</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="field-row">
+        <div className="field">
           <label htmlFor="run-start">Starting agent</label>
           <select
             id="run-start"

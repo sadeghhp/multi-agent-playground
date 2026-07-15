@@ -63,6 +63,7 @@ export function defaultConversationSettings(): ConversationSettings {
     maxTotalTurns: 12,
     maxResponsesPerAgent: 3,
     stopOnError: true,
+    conversationMode: 'open',
     toneOverride: '',
     responseLength: 'agent-default',
     chitchatPolicy: 'agent-default',

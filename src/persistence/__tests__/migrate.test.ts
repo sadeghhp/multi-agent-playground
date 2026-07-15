@@ -26,14 +26,14 @@ describe('migrateToCurrent', () => {
     expect((res.data as { schemaVersion: number }).schemaVersion).toBe(SCHEMA_VERSION);
   });
 
-  it('re-stamps v2 to the current schema version (persona fields)', () => {
+  it('re-stamps an older version to the current schema version (persona / kind fields)', () => {
     const res = migrateToCurrent({
       schemaVersion: 2,
       id: 'pg_1',
       agents: [{ id: 'a1', name: 'A' }],
     });
     expect(res.ok).toBe(true);
-    expect((res.data as { schemaVersion: number }).schemaVersion).toBe(3);
+    expect((res.data as { schemaVersion: number }).schemaVersion).toBe(SCHEMA_VERSION);
   });
 
   it('leaves a current-version object intact', () => {

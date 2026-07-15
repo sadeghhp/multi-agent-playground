@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createAgent, createPlayground, createProvider } from '../../domain/factories';
+import { SCHEMA_VERSION } from '../../domain/schema';
 import { MAX_IMPORT_BYTES, exportToJson, importFromJson, toExport } from '../serialization';
 
 function playgroundWithSecret() {
@@ -147,18 +148,20 @@ describe('import', () => {
     expect(res.warnings.join(' ')).toMatch(/provider/i);
   });
 
-  it('migrates a valid v2 export and defaults agents to personaMode role', () => {
+  it('migrates a valid v2 export and defaults agents to personaMode role + kind participant', () => {
     const { pg, providers } = playgroundWithSecret();
     const exported = JSON.parse(exportToJson(pg, providers)) as Record<string, unknown>;
     exported.schemaVersion = 2;
     for (const agent of exported.agents as Record<string, unknown>[]) {
       delete agent.personaMode;
       delete agent.persona;
+      delete agent.kind;
     }
     const res = importFromJson(JSON.stringify(exported), false);
     expect(res.ok).toBe(true);
-    expect(res.playground!.schemaVersion).toBe(3);
+    expect(res.playground!.schemaVersion).toBe(SCHEMA_VERSION);
     expect(res.playground!.agents[0].personaMode).toBe('role');
+    expect(res.playground!.agents[0].kind).toBe('participant');
   });
 
   it('round-trips a digital-shadow persona', () => {

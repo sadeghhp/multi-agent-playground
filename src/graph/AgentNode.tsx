@@ -19,6 +19,31 @@ const STATUS_LABEL: Record<string, string> = {
   disabled: 'Disabled',
 };
 
+/** Visual treatment per lifecycle kind. `participant` shows no chip (the default). */
+const KIND_META: Record<
+  'moderator' | 'summarizer' | 'finalizer',
+  { icon: string; label: string; wrapUp: boolean; hint: string }
+> = {
+  moderator: {
+    icon: '⚖',
+    label: 'Moderator',
+    wrapUp: false,
+    hint: 'Facilitates the discussion; scheduled by edges but always sees the full transcript.',
+  },
+  summarizer: {
+    icon: '⏹',
+    label: 'Summarizer',
+    wrapUp: true,
+    hint: 'Runs automatically in the wrap-up phase, after the discussion ends.',
+  },
+  finalizer: {
+    icon: '🏁',
+    label: 'Finalizer',
+    wrapUp: true,
+    hint: 'Runs last, in the wrap-up phase — after every other agent.',
+  },
+};
+
 export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const status = data.runtimeState;
   const classNames = [
@@ -52,6 +77,15 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
         </span>
       </div>
       {data.role && <div className={styles.role}>{data.role}</div>}
+      {data.kind !== 'participant' && (
+        <div
+          className={`${styles.kindChip} ${KIND_META[data.kind].wrapUp ? styles.kindWrapUp : ''}`}
+          title={KIND_META[data.kind].hint}
+        >
+          <span aria-hidden="true">{KIND_META[data.kind].icon}</span> {KIND_META[data.kind].label}
+          {KIND_META[data.kind].wrapUp ? ' · wrap-up' : ''}
+        </div>
+      )}
       <div className={styles.provider} title={data.providerLabel}>
         {data.providerLabel}
       </div>

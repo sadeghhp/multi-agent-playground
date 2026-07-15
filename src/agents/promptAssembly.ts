@@ -6,6 +6,7 @@ import type {
   TranscriptMessage,
 } from '../domain/schema';
 import { buildPersonaIdentitySection } from '../domain/persona';
+import { KIND_DIRECTIVE } from '../domain/agentKind';
 import type { ChatMessage } from '../providers/types';
 import { extractInlineThinking } from '../providers/openaiAdapter';
 import { characteristicsToInstruction } from './characteristics';
@@ -156,6 +157,13 @@ export function buildSystemPrompt(ctx: PromptContext): string {
   if (agent.systemInstruction.trim()) {
     sections.push(agent.systemInstruction.trim());
   }
+
+  // 3b. Kind contract (moderator / summarizer / finalizer). A fixed behavioural
+  // contract for the agent's lifecycle kind, injected so the type's duty cannot
+  // be silently dropped by an empty or edited systemInstruction. 'participant'
+  // contributes nothing here.
+  const kindDirective = KIND_DIRECTIVE[agent.kind];
+  if (kindDirective) sections.push(kindDirective);
 
   // 4. Characteristics
   const characteristics = characteristicsToInstruction(agent.characteristics);

@@ -7,7 +7,7 @@ import { z } from 'zod';
  * schema version"). Bump it whenever a breaking shape change lands and add a
  * migration in persistence/migrate.ts.
  */
-export const SCHEMA_VERSION = 3 as const;
+export const SCHEMA_VERSION = 4 as const;
 
 // ---------------------------------------------------------------------------
 // Enums / small value types
@@ -25,6 +25,21 @@ export type RuntimeState = z.infer<typeof RuntimeState>;
 
 export const ConnectionType = z.enum(['conversation', 'review', 'handoff']);
 export type ConnectionType = z.infer<typeof ConnectionType>;
+
+/**
+ * Agent lifecycle/scheduling kind (orthogonal to the free-text `role`). Answers
+ * *when/whether* an agent runs, not what it says:
+ *   - participant: an ordinary agent, scheduled by graph edges (the default).
+ *   - moderator:    graph-scheduled like a participant, but always sees the full
+ *                   transcript and carries a facilitation contract.
+ *   - summarizer / finalizer: engine-scheduled terminal kinds — they never enter
+ *                   the normal queue; the orchestrator runs them once, in order,
+ *                   in a wrap-up phase after the discussion ends (see
+ *                   domain/agentKind.ts, orchestrator.ts).
+ * Default is 'participant' so existing v3 playgrounds parse and behave unchanged.
+ */
+export const AgentKind = z.enum(['participant', 'moderator', 'summarizer', 'finalizer']);
+export type AgentKind = z.infer<typeof AgentKind>;
 
 /** Language an agent asks and answers in (spec: per-agent conversation language). */
 export const AgentLanguage = z.enum(['en', 'fa', 'fr']);
@@ -171,6 +186,13 @@ export const Agent = z.object({
   personaMode: PersonaMode.default('role'),
   /** Present when the agent is (or was configured as) a digital shadow. */
   persona: PersonaConfig.optional(),
+  /**
+   * Lifecycle/scheduling kind (see AgentKind). Distinct from `role`: `kind`
+   * decides when/whether this agent runs (terminal wrap-up vs graph traversal)
+   * and its behavioral contract; `role`/`systemInstruction` remain prompt content.
+   * Defaults to 'participant' so pre-v4 agents behave exactly as before.
+   */
+  kind: AgentKind.default('participant'),
   characteristics: Characteristics,
   skills: z.array(Skill).default([]),
   llm: LlmConfig,

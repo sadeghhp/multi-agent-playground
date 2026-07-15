@@ -1,4 +1,5 @@
 import type { Playground, Provider } from '../domain/schema';
+import { isTerminalKind } from '../domain/agentKind';
 import { assessProviderReachability } from '../providers/browserReachability';
 
 /**
@@ -31,6 +32,14 @@ export function validateForRun(
     issues.push({ level: 'error', message: 'No starting agent selected.' });
   } else if (!start.runtime.enabled) {
     issues.push({ level: 'error', message: 'The starting agent is disabled.', agentId: start.id });
+  } else if (isTerminalKind(start.kind)) {
+    // A summarizer/finalizer never seeds discussion — it runs in the wrap-up
+    // phase. Starting on one means no participants ever speak.
+    issues.push({
+      level: 'warning',
+      message: `The starting agent "${start.name}" is a ${start.kind}, which only runs in the wrap-up phase after the discussion — pick a participant or moderator to start.`,
+      agentId: start.id,
+    });
   }
 
   // Subject is the one required conversation field (spec §11.1).
@@ -50,7 +59,13 @@ export function validateForRun(
   // back to validating all enabled agents (the missing-start error blocks anyway).
   const reachable =
     start && start.runtime.enabled ? reachableFrom(pg, start.id) : null;
-  const willParticipate = (agentId: string) => (reachable ? reachable.has(agentId) : true);
+  // Terminal kinds (summarizer/finalizer) are scheduled by the engine wrap-up
+  // phase, not by graph edges, so they always participate regardless of whether
+  // any edge reaches them.
+  const willParticipate = (agentId: string) => {
+    if (isTerminalKind(agentsById.get(agentId)?.kind ?? 'participant')) return true;
+    return reachable ? reachable.has(agentId) : true;
+  };
 
   // Per-agent readiness (spec §19 agent validation)
   for (const agent of enabledAgents) {
@@ -132,6 +147,28 @@ export function validateForRun(
     if (conn.enabled && (!agentsById.has(conn.source) || !agentsById.has(conn.target))) {
       issues.push({ level: 'error', message: `A connection references a missing agent.` });
     }
+  }
+
+  // Terminal-kind arrangement warnings. Terminal kinds are engine-scheduled, so
+  // outgoing edges from them never fire, and their order is fixed (summarizers
+  // then finalizers); surface these so the visual arrangement isn't misleading.
+  const finalizers = enabledAgents.filter((a) => a.kind === 'finalizer');
+  for (const agent of enabledAgents) {
+    if (!isTerminalKind(agent.kind)) continue;
+    const hasOutgoing = pg.connections.some((c) => c.enabled && c.source === agent.id);
+    if (hasOutgoing) {
+      issues.push({
+        level: 'warning',
+        message: `Agent "${agent.name}" is a ${agent.kind}; it runs last in the wrap-up phase, so its outgoing connections are ignored.`,
+        agentId: agent.id,
+      });
+    }
+  }
+  if (finalizers.length > 1) {
+    issues.push({
+      level: 'warning',
+      message: `There are ${finalizers.length} finalizers; they run one after another in the wrap-up phase, each seeing the previous one's output.`,
+    });
   }
 
   return issues;

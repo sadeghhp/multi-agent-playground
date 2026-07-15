@@ -104,6 +104,7 @@ export function createAgent(overrides: Partial<Agent> = {}): Agent {
     systemInstruction: '',
     language: 'en',
     personaMode: 'role',
+    kind: 'participant',
     characteristics: defaultCharacteristics(),
     skills: [],
     llm: defaultLlmConfig(),
@@ -290,6 +291,8 @@ interface TemplateDef {
   skills: { name: string; description: string; instruction: string }[];
   personaMode?: Agent['personaMode'];
   persona?: Agent['persona'];
+  /** Lifecycle kind; omitted templates default to 'participant'. */
+  kind?: Agent['kind'];
 }
 
 const TEMPLATES: Record<TemplateKey, TemplateDef> = {
@@ -327,6 +330,7 @@ const TEMPLATES: Record<TemplateKey, TemplateDef> = {
     characteristics: { cooperation: 80, tone: 'balanced', assertiveness: 50 },
     color: 'green',
     skills: [presetSkill('summarization')],
+    kind: 'moderator',
   },
   researcher: {
     label: 'Researcher',
@@ -345,6 +349,7 @@ const TEMPLATES: Record<TemplateKey, TemplateDef> = {
     characteristics: { verbosity: 25, tone: 'concise' },
     color: 'violet',
     skills: [presetSkill('summarization')],
+    kind: 'summarizer',
   },
   'digital-shadow': {
     label: 'Digital shadow',
@@ -397,6 +402,7 @@ const TEMPLATES: Record<TemplateKey, TemplateDef> = {
     characteristics: { verbosity: 30, tone: 'concise', assertiveness: 55 },
     color: 'green',
     skills: [],
+    kind: 'finalizer',
   },
 };
 
@@ -428,6 +434,7 @@ export function createAgentFromTemplate(
     })),
     ...(t.personaMode ? { personaMode: t.personaMode } : {}),
     ...(t.persona ? { persona: { ...t.persona } } : {}),
+    ...(t.kind ? { kind: t.kind } : {}),
     ...overrides,
   });
 }

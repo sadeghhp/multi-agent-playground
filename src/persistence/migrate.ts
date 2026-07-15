@@ -13,6 +13,9 @@ import { SCHEMA_VERSION } from '../domain/schema';
  *
  * v2 → v3: agents gained optional personaMode / persona fields. Zod defaults
  * fill personaMode: 'role' for records that omit them; we only re-stamp.
+ *
+ * v3 → v4: agents gained a `kind` lifecycle discriminator. Zod defaults fill
+ * kind: 'participant' for records that omit it; we only re-stamp.
  */
 
 export interface MigrationResult {
@@ -45,6 +48,10 @@ export function migrateToCurrent(raw: unknown): MigrationResult {
   if ((data as { schemaVersion: number }).schemaVersion < 3) {
     // v2 → v3: persona fields are optional with defaults; re-stamp only.
     data = { ...(data as object), schemaVersion: 3 };
+  }
+  if ((data as { schemaVersion: number }).schemaVersion < 4) {
+    // v3 → v4: agent `kind` has a zod default ('participant'); re-stamp only.
+    data = { ...(data as object), schemaVersion: 4 };
   }
   return { ok: true, data };
 }

@@ -12,6 +12,7 @@ export interface AgentNodeData extends Record<string, unknown> {
   agentId: string;
   name: string;
   role: string;
+  kind: Agent['kind'];
   providerLabel: string;
   colorCategory: Agent['colorCategory'];
   enabled: boolean;
@@ -56,6 +57,7 @@ export function agentsToNodes(
         agentId: agent.id,
         name: agent.name,
         role: agent.role,
+        kind: agent.kind,
         providerLabel: providerLabel(agent, providers),
         colorCategory: agent.colorCategory,
         enabled: agent.runtime.enabled,

@@ -64,6 +64,26 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('Rank risks by severity.');
   });
 
+  it('injects no kind directive for a participant (the default)', () => {
+    const agent = createAgent({ name: 'A', systemInstruction: 'x' });
+    expect(agent.kind).toBe('participant');
+    const prompt = buildSystemPrompt({ agent, conversation: defaultConversationSettings(), history: [] });
+    expect(prompt).not.toMatch(/You are the (moderator|summarizer|finalizer)/);
+  });
+
+  it('injects the kind contract for moderator, summarizer, and finalizer', () => {
+    const conversation = defaultConversationSettings();
+    const moderator = buildSystemPrompt({ agent: createAgent({ name: 'M', kind: 'moderator', systemInstruction: 'x' }), conversation, history: [] });
+    expect(moderator).toContain('You are the moderator');
+
+    const summarizer = buildSystemPrompt({ agent: createAgent({ name: 'S', kind: 'summarizer', systemInstruction: 'x' }), conversation, history: [] });
+    expect(summarizer).toContain('You are the summarizer');
+
+    const finalizer = buildSystemPrompt({ agent: createAgent({ name: 'F', kind: 'finalizer', systemInstruction: 'x' }), conversation, history: [] });
+    expect(finalizer).toContain('You are the finalizer');
+    expect(finalizer).toMatch(/last|final word/i);
+  });
+
   it('applies the review connection rule and instruction override', () => {
     const agent = createAgent({ name: 'Critic', systemInstruction: 'x' });
     const incoming: Connection = { id: 'c', source: 'a', target: agent.id, enabled: true, type: 'review', priority: 0, instructionOverride: 'Focus only on factual weaknesses.' };

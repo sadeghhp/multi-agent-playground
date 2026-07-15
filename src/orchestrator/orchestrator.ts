@@ -19,6 +19,7 @@ import { buildEndpoint } from '../providers/url';
 import type { ChatMessage, NormalizedResponse } from '../providers/types';
 import type { RequestSnapshot } from '../store/runtimeStore';
 import { assembleMessages, boundHistory, estimateTokens, visibleAnswerText } from '../agents/promptAssembly';
+import { isTerminalKind, terminalKindRank, usesFullHistory } from '../domain/agentKind';
 import { hasBlockingErrors, validateForRun } from './validate';
 import { beginVersionedRun, finalizeVersionedRun } from './runHistory';
 import {
@@ -39,6 +40,17 @@ interface QueueItem {
   connectionId: string | null;
   sourceAgentId: string | null;
 }
+
+/**
+ * Control outcome of a single agent turn (see runAgentTurn). Decoupled from the
+ * queue so both the discussion loop and the wrap-up phase can drive turns and
+ * apply their own failure handling.
+ *  - 'success'          a transcript message was appended
+ *  - 'skipped'          agent missing/disabled/removed/at its response limit
+ *  - 'aborted'          the run was stopped mid-turn
+ *  - { failedDetail }   generation failed; the failure is already recorded
+ */
+type TurnOutcome = 'success' | 'skipped' | 'aborted' | { failedDetail: string };
 
 function log(kind: string, message: string, agentId?: string | null) {
   useRuntimeStore.getState().logEvent({
@@ -356,6 +368,233 @@ export async function startRun(opts: { seed?: QueueItem[] } = {}): Promise<void>
     return outcome === 'stop' ? 'stop' : 'continue';
   };
 
+  // Run a single agent's turn end-to-end: guards → generate → record. It never
+  // touches the queue, so the discussion loop and the wrap-up phase both use it
+  // and each applies its own failure handling to the returned outcome.
+  const runAgentTurn = async (item: QueueItem): Promise<TurnOutcome> => {
+    const agent = agentsById.get(item.agentId);
+    if (!agent || !agent.runtime.enabled) {
+      log('agent-skipped', `Agent skipped (missing or disabled).`, item.agentId);
+      return 'skipped';
+    }
+    // Removed from the circuit for this run (flow control).
+    if (useRuntimeStore.getState().isAgentDisabledForRun(agent.id)) {
+      log('agent-skipped', `Agent "${agent.name}" was removed from this run.`, agent.id);
+      return 'skipped';
+    }
+    const already = useRuntimeStore.getState().responsesPerAgent[agent.id] ?? 0;
+    if (already >= responseLimitFor(agent, pg)) {
+      log('agent-skipped', `Agent "${agent.name}" reached its response limit.`, agent.id);
+      return 'skipped';
+    }
+
+    const connection = item.connectionId
+      ? pg.connections.find((c) => c.id === item.connectionId) ?? null
+      : null;
+    const sourceName = item.sourceAgentId ? agentsById.get(item.sourceAgentId)?.name ?? null : null;
+
+    // --- generate ---
+    useRuntimeStore.getState().incTurn();
+    runtime.setActive(agent.id, item.connectionId);
+    runtime.setAgentState(agent.id, 'generating');
+    useRuntimeStore.getState().clearStreaming(agent.id); // reset any prior live buffer
+    log('request-started', `Requesting response from "${agent.name}".`, agent.id);
+
+    const override = useRuntimeStore.getState().providerOverrides[agent.id];
+    const providerId = override?.providerId ?? agent.llm.providerId;
+    const model = override?.model || agent.llm.model;
+    const isFallback = Boolean(override);
+    const provider = providersById.get(providerId ?? '');
+    const turnNumber = useRuntimeStore.getState().currentTurn;
+
+    if (!provider) {
+      const detail = 'No provider configured for this agent.';
+      recordFailure(agent, turnNumber, newMessageId(), item, detail, 'run');
+      return { failedDetail: detail };
+    }
+
+    const liveTranscript = useDomainStore.getState().playground!.transcript;
+    // Moderators and terminal kinds (summarizer/finalizer) must reason over the
+    // whole conversation, not the agent's bounded window (agentKind.usesFullHistory).
+    const history = usesFullHistory(agent.kind)
+      ? liveTranscript
+      : boundHistory(liveTranscript, agent.runtime.historyWindow);
+    // The source agent's most recent output, always available to review/handoff
+    // targets regardless of the history window (spec §12).
+    const sourceOutput = findLastSourceOutput(liveTranscript, item.sourceAgentId);
+    const pendingUserDirective = findLastUserDirective(liveTranscript);
+    const messages = assembleMessages({
+      agent,
+      conversation: pg.conversation,
+      history,
+      incoming: connection,
+      sourceAgentName: sourceName,
+      sourceOutput,
+      pendingUserDirective,
+      // "Opening" framing only fits a genuinely empty transcript.
+      isFirstTurn: liveTranscript.length === 0,
+    });
+
+    // Pre-generate the id so the request snapshot and the transcript message
+    // share a key. The snapshot carries NO credentials.
+    const messageId = newMessageId();
+    const effectiveTemperature = pg.conversation.temperatureOverride ?? agent.llm.temperature;
+    const chatParams = {
+      model,
+      messages,
+      temperature: effectiveTemperature,
+      maxOutputTokens: agent.llm.maxOutputTokens,
+      topP: agent.llm.topP,
+      seed: agent.llm.seed,
+      stopSequences: agent.llm.stopSequences,
+    };
+    const snapshotBase = {
+      url: buildEndpoint(provider.baseUrl, provider.path),
+      providerName: provider.displayName,
+      model,
+      messages: messages as ChatMessage[],
+      params: {
+        temperature: effectiveTemperature,
+        maxOutputTokens: agent.llm.maxOutputTokens,
+        topP: agent.llm.topP,
+        seed: agent.llm.seed,
+        stopSequences: agent.llm.stopSequences,
+      },
+    };
+
+    const effectiveTimeoutMs =
+      pg.conversation.responseTimeoutOverrideMs != null
+        ? Math.min(agent.runtime.responseTimeoutMs, pg.conversation.responseTimeoutOverrideMs)
+        : agent.runtime.responseTimeoutMs;
+
+    try {
+      const res = await callWithBudgetAndOptionalFallback({
+        agent,
+        provider,
+        providersById,
+        chatParams,
+        messages,
+        controller,
+        effectiveTimeoutMs,
+        isFallback,
+        runId,
+        playgroundId: pg.id,
+        messageId,
+        snapshotBase,
+        item,
+        turnNumber,
+        policy,
+      });
+      if (!res) {
+        // Failure already recorded inside the call; caller applies policy.
+        if (controller.signal.aborted) return 'aborted';
+        const errors = useRuntimeStore.getState().errors;
+        const detail = errors[errors.length - 1]?.detail ?? 'Request failed.';
+        return { failedDetail: detail };
+      }
+
+      const usedProvider = res.provider;
+      const usedFallback = res.fallback;
+      const message: TranscriptMessage = {
+        id: messageId,
+        turn: turnNumber,
+        agentId: agent.id,
+        agentName: agent.name,
+        agentDeleted: false,
+        role: agent.role,
+        language: agent.language,
+        model: res.response.model,
+        providerId: usedProvider.id,
+        // Keep thinking out of the visible transcript body.
+        content: res.response.text || '',
+        reasoning: res.response.reasoning || undefined,
+        status: 'completed',
+        sourceAgentId: item.sourceAgentId,
+        connectionType: connection?.type ?? null,
+        timestamp: Date.now(),
+        durationMs: res.response.durationMs,
+        promptTokens: res.response.promptTokens,
+        completionTokens: res.response.completionTokens,
+        totalTokens: res.response.totalTokens,
+      };
+      useDomainStore.getState().appendTranscript(message);
+      useRuntimeStore.getState().clearStreaming(agent.id);
+      useRuntimeStore.getState().incAgentResponses(agent.id);
+      // Any success clears the consecutive-failure streak.
+      useRuntimeStore.getState().resetConsecutiveFailures(agent.id);
+      runtime.setAgentState(agent.id, 'completed');
+      log(
+        'request-completed',
+        `"${agent.name}" responded in ${res.response.durationMs}ms` +
+          (usedFallback ? ' (fallback provider).' : '.'),
+        agent.id,
+      );
+      void recordCallUsage({
+        response: res.response,
+        messages,
+        provider: usedProvider,
+        model: res.response.model || model,
+        playgroundId: pg.id,
+        runId,
+        fallback: usedFallback,
+      });
+      return 'success';
+    } catch (err) {
+      const partialOutputChars =
+        useRuntimeStore.getState().streamingText[agent.id]?.length ?? 0;
+      useRuntimeStore.getState().clearStreaming(agent.id);
+      if (controller.signal.aborted) return 'aborted';
+      const pe =
+        err instanceof BudgetExceededError
+          ? new ProviderError('bad-request', err.message)
+          : err instanceof ProviderError
+            ? err
+            : new ProviderError('unknown', summaryFor('unknown'));
+      const detail = formatProviderErrorDetail(pe);
+      useRuntimeStore.getState().recordSnapshot(
+        messageId,
+        buildFailureSnapshot(snapshotBase, pe, messages, partialOutputChars),
+      );
+      recordFailure(agent, turnNumber, messageId, item, detail, 'agent', provider.displayName, pe);
+      return { failedDetail: detail };
+    }
+  };
+
+  // Wrap-up phase: engine-scheduled terminal kinds. Runs after the discussion
+  // ends by natural drain or turn-limit (not on a user Stop). Summarizers run
+  // first (so a finalizer can build on the summary), then finalizers; each sees
+  // the full transcript including prior wrap-up output. Returns 'stopped' if the
+  // failure policy stopped the run, 'aborted' on a mid-phase Stop, else 'completed'.
+  const runWrapUpPhase = async (): Promise<'completed' | 'stopped' | 'aborted'> => {
+    const terminal = pg.agents
+      .filter((a) => isTerminalKind(a.kind) && a.runtime.enabled)
+      .filter((a) => !useRuntimeStore.getState().isAgentDisabledForRun(a.id))
+      // Skip a terminal agent that already spoke this run — e.g. one seeded into
+      // the discussion queue by retryAgentTurn — so it never runs twice.
+      .filter((a) => (useRuntimeStore.getState().responsesPerAgent[a.id] ?? 0) === 0)
+      .sort((a, b) => terminalKindRank(a.kind) - terminalKindRank(b.kind));
+
+    for (const agent of terminal) {
+      if (controller.signal.aborted) return 'aborted';
+      const item: QueueItem = { agentId: agent.id, connectionId: null, sourceAgentId: null };
+      // Retry loop without a queue: honor the failure policy inline (no re-queue).
+      let attempt = await runAgentTurn(item);
+      while (typeof attempt === 'object') {
+        const decision = await handleFailedTurn(agent, policy, attempt.failedDetail, controller.signal);
+        if (controller.signal.aborted) return 'aborted';
+        if (decision === 'retry') {
+          log('agent-queued', `Retrying "${agent.name}" at the user's request.`, agent.id);
+          attempt = await runAgentTurn(item);
+          continue;
+        }
+        if (decision === 'stop') return 'stopped';
+        break; // skip / disable / continue → move on to the next terminal agent
+      }
+      if (attempt === 'aborted') return 'aborted';
+    }
+    return 'completed';
+  };
+
   try {
     while (queue.length > 0) {
       if (controller.signal.aborted) break;
@@ -380,209 +619,28 @@ export async function startRun(opts: { seed?: QueueItem[] } = {}): Promise<void>
 
       const item = queue.shift()!;
       queued.delete(item.agentId);
-      const agent = agentsById.get(item.agentId);
-      if (!agent || !agent.runtime.enabled) {
-        log('agent-skipped', `Agent skipped (missing or disabled).`, item.agentId);
-        continue;
-      }
-      // Removed from the circuit for this run (flow control) after it was queued.
-      if (useRuntimeStore.getState().isAgentDisabledForRun(agent.id)) {
-        log('agent-skipped', `Agent "${agent.name}" was removed from this run.`, agent.id);
-        continue;
-      }
 
-      const already = useRuntimeStore.getState().responsesPerAgent[agent.id] ?? 0;
-      if (already >= responseLimitFor(agent, pg)) {
-        log('agent-skipped', `Agent "${agent.name}" reached its response limit.`, agent.id);
-        continue;
-      }
-
-      const connection = item.connectionId
-        ? pg.connections.find((c) => c.id === item.connectionId) ?? null
-        : null;
-      const sourceName = item.sourceAgentId ? agentsById.get(item.sourceAgentId)?.name ?? null : null;
-
-      // --- generate ---
-      useRuntimeStore.getState().incTurn();
-      runtime.setActive(agent.id, item.connectionId);
-      runtime.setAgentState(agent.id, 'generating');
-      useRuntimeStore.getState().clearStreaming(agent.id); // reset any prior live buffer
-      log('request-started', `Requesting response from "${agent.name}".`, agent.id);
-
-      const override = useRuntimeStore.getState().providerOverrides[agent.id];
-      const providerId = override?.providerId ?? agent.llm.providerId;
-      const model = override?.model || agent.llm.model;
-      const isFallback = Boolean(override);
-      const provider = providersById.get(providerId ?? '');
-      const turnNumber = useRuntimeStore.getState().currentTurn;
-
-      if (!provider) {
-        const detail = 'No provider configured for this agent.';
-        recordFailure(agent, turnNumber, newMessageId(), item, detail, 'run');
-        const fo = await applyFailure(item, agent, detail);
-        if (fo === 'abort') break;
-        if (fo === 'stop') return finish(runId, 'error');
-        continue;
-      }
-
-      const liveTranscript = useDomainStore.getState().playground!.transcript;
-      const history = boundHistory(liveTranscript, agent.runtime.historyWindow);
-      // The source agent's most recent output, always available to review/handoff
-      // targets regardless of the history window (spec §12). Walked backwards
-      // in place rather than cloning+reversing the whole transcript every turn
-      // (which would be O(n) per turn, O(n²) over a long conversation).
-      const sourceOutput = findLastSourceOutput(liveTranscript, item.sourceAgentId);
-      const pendingUserDirective = findLastUserDirective(liveTranscript);
-      const messages = assembleMessages({
-        agent,
-        conversation: pg.conversation,
-        history,
-        incoming: connection,
-        sourceAgentName: sourceName,
-        sourceOutput,
-        pendingUserDirective,
-        // "Opening" framing only fits a genuinely empty transcript. Turn 1 of
-        // a run that continues an existing transcript (see continueRun) must
-        // still see itself as replying within an ongoing discussion.
-        isFirstTurn: liveTranscript.length === 0,
-      });
-
-      // Pre-generate the id so the request snapshot (spec §13.3) and the
-      // transcript message share a key. The snapshot carries NO credentials.
-      const messageId = newMessageId();
-      // Run-level override: takes precedence over the agent's own sampling
-      // temperature for this conversation only (null means "no override").
-      const effectiveTemperature = pg.conversation.temperatureOverride ?? agent.llm.temperature;
-      const chatParams = {
-        model,
-        messages,
-        temperature: effectiveTemperature,
-        maxOutputTokens: agent.llm.maxOutputTokens,
-        topP: agent.llm.topP,
-        seed: agent.llm.seed,
-        stopSequences: agent.llm.stopSequences,
-      };
-      const snapshotBase = {
-        url: buildEndpoint(provider.baseUrl, provider.path),
-        providerName: provider.displayName,
-        model,
-        messages: messages as ChatMessage[],
-        params: {
-          temperature: effectiveTemperature,
-          maxOutputTokens: agent.llm.maxOutputTokens,
-          topP: agent.llm.topP,
-          seed: agent.llm.seed,
-          stopSequences: agent.llm.stopSequences,
-        },
-      };
-
-      const effectiveTimeoutMs =
-        pg.conversation.responseTimeoutOverrideMs != null
-          ? Math.min(agent.runtime.responseTimeoutMs, pg.conversation.responseTimeoutOverrideMs)
-          : agent.runtime.responseTimeoutMs;
-
-      try {
-        const res = await callWithBudgetAndOptionalFallback({
-          agent,
-          provider,
-          providersById,
-          chatParams,
-          messages,
-          controller,
-          effectiveTimeoutMs,
-          isFallback,
-          runId,
-          playgroundId: pg.id,
-          messageId,
-          snapshotBase,
-          item,
-          turnNumber,
-          policy,
-        });
-        if (!res) {
-          // Failure already recorded inside the call; escalate + apply policy.
-          if (controller.signal.aborted) break;
-          const errors = useRuntimeStore.getState().errors;
-          const detail = errors[errors.length - 1]?.detail ?? 'Request failed.';
-          const fo = await applyFailure(item, agent, detail);
-          if (fo === 'abort') break;
-          if (fo === 'stop') return finish(runId, 'error');
-          continue;
-        }
-
-        const usedProvider = res.provider;
-        const usedFallback = res.fallback;
-        const message: TranscriptMessage = {
-          id: messageId,
-          turn: turnNumber,
-          agentId: agent.id,
-          agentName: agent.name,
-          agentDeleted: false,
-          role: agent.role,
-          language: agent.language,
-          model: res.response.model,
-          providerId: usedProvider.id,
-          // Keep thinking out of the visible transcript body (thinking is hidden
-          // by default behind the chip). Reasoning-only turns leave content empty.
-          content: res.response.text || '',
-          reasoning: res.response.reasoning || undefined,
-          status: 'completed',
-          sourceAgentId: item.sourceAgentId,
-          connectionType: connection?.type ?? null,
-          timestamp: Date.now(),
-          durationMs: res.response.durationMs,
-          promptTokens: res.response.promptTokens,
-          completionTokens: res.response.completionTokens,
-          totalTokens: res.response.totalTokens,
-        };
-        useDomainStore.getState().appendTranscript(message);
-        useRuntimeStore.getState().clearStreaming(agent.id);
-        useRuntimeStore.getState().incAgentResponses(agent.id);
-        // Any success clears the consecutive-failure streak (defines "consecutive").
-        useRuntimeStore.getState().resetConsecutiveFailures(agent.id);
-        runtime.setAgentState(agent.id, 'completed');
-        log(
-          'request-completed',
-          `"${agent.name}" responded in ${res.response.durationMs}ms` +
-            (usedFallback ? ' (fallback provider).' : '.'),
-          agent.id,
-        );
-        void recordCallUsage({
-          response: res.response,
-          messages,
-          provider: usedProvider,
-          model: res.response.model || model,
-          playgroundId: pg.id,
-          runId,
-          fallback: usedFallback,
-        });
-      } catch (err) {
-        const partialOutputChars =
-          useRuntimeStore.getState().streamingText[agent.id]?.length ?? 0;
-        useRuntimeStore.getState().clearStreaming(agent.id);
-        if (controller.signal.aborted) break;
-        const pe =
-          err instanceof BudgetExceededError
-            ? new ProviderError('bad-request', err.message)
-            : err instanceof ProviderError
-              ? err
-              : new ProviderError('unknown', summaryFor('unknown'));
-        const detail = formatProviderErrorDetail(pe);
-        useRuntimeStore.getState().recordSnapshot(
-          messageId,
-          buildFailureSnapshot(snapshotBase, pe, messages, partialOutputChars),
-        );
-        recordFailure(agent, turnNumber, messageId, item, detail, 'agent', provider.displayName, pe);
-        const fo = await applyFailure(item, agent, detail);
+      const outcome = await runAgentTurn(item);
+      if (outcome === 'aborted') break;
+      if (outcome === 'skipped') continue;
+      if (typeof outcome === 'object') {
+        // Generation failed (already recorded). Apply the failure policy, which
+        // may re-queue (retry), stop the run, or skip/disable and continue.
+        const failedAgent = agentsById.get(item.agentId)!;
+        const fo = await applyFailure(item, failedAgent, outcome.failedDetail);
         if (fo === 'abort') break;
         if (fo === 'stop') return finish(runId, 'error');
         continue;
       }
 
       // --- enqueue targets (spec §11.2 steps 3–5) ---
+      const agent = agentsById.get(item.agentId)!;
       for (const conn of outgoing(pg, agent.id)) {
         const target = agentsById.get(conn.target);
         if (!target) continue;
+        // Terminal kinds (summarizer/finalizer) are never graph-scheduled — the
+        // wrap-up phase runs them once, last. Edges into them are ignored here.
+        if (isTerminalKind(target.kind)) continue;
         if (useRuntimeStore.getState().isAgentDisabledForRun(target.id)) continue; // removed this run
         const targetResponses = useRuntimeStore.getState().responsesPerAgent[target.id] ?? 0;
         if (targetResponses >= responseLimitFor(target, pg)) continue; // can't produce anyway
@@ -592,6 +650,17 @@ export async function startRun(opts: { seed?: QueueItem[] } = {}): Promise<void>
         runtime.setAgentState(target.id, 'queued');
         log('agent-queued', `Queued "${target.name}" after "${agent.name}".`, target.id);
       }
+    }
+
+    // Wrap-up phase — engine-scheduled terminal kinds run after the discussion
+    // ends by natural drain or turn-limit. A user Stop (aborted signal) skips it.
+    if (
+      !controller.signal.aborted &&
+      useRuntimeStore.getState().runId === runId &&
+      useRuntimeStore.getState().status === 'running'
+    ) {
+      const wrapUp = await runWrapUpPhase();
+      if (wrapUp === 'stopped') return finish(runId, 'error');
     }
 
     if (useRuntimeStore.getState().runId === runId && useRuntimeStore.getState().status === 'running') {

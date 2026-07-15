@@ -104,6 +104,47 @@ describe('validateForRun', () => {
     expect(issues.some((i) => i.level === 'warning' && /reads like an advocate/i.test(i.message))).toBe(true);
   });
 
+  it('treats a finalizer with no incoming edges as a participating, ready agent', () => {
+    const { pg, providers } = readyPlayground();
+    const provider = providers[0];
+    const base = createAgent();
+    // A finalizer with no edges is intentional — it runs in wrap-up. It must NOT
+    // be flagged "unreachable", and its readiness (provider/model) must still be
+    // checked. Give it a bad provider and expect a blocking error, not a warning.
+    pg.agents.push(
+      createAgent({ name: 'F', role: 'r', systemInstruction: 'do', kind: 'finalizer', llm: { ...base.llm, providerId: null, model: '' } }),
+    );
+    const issues = validateForRun(pg, providers);
+    expect(issues.some((i) => /not reachable/i.test(i.message))).toBe(false);
+    expect(issues.some((i) => /provider/i.test(i.message))).toBe(true);
+    // A correctly configured finalizer with no edges is fully valid.
+    pg.agents[pg.agents.length - 1].llm = { ...base.llm, providerId: provider.id, model: 'm' };
+    expect(hasBlockingErrors(validateForRun(pg, providers))).toBe(false);
+  });
+
+  it('warns when the starting agent is a terminal kind', () => {
+    const { pg, providers } = readyPlayground();
+    const provider = providers[0];
+    const base = createAgent();
+    const finalizer = createAgent({ name: 'F', role: 'r', systemInstruction: 'do', kind: 'finalizer', llm: { ...base.llm, providerId: provider.id, model: 'm' } });
+    pg.agents.push(finalizer);
+    pg.conversation.startingAgentId = finalizer.id;
+    const issues = validateForRun(pg, providers);
+    expect(issues.some((i) => i.level === 'warning' && /wrap-up phase/i.test(i.message))).toBe(true);
+  });
+
+  it('warns when a terminal-kind agent has outgoing edges', () => {
+    const { pg, providers, bId } = readyPlayground();
+    const provider = providers[0];
+    const base = createAgent();
+    const summarizer = createAgent({ name: 'S', role: 'r', systemInstruction: 'do', kind: 'summarizer', llm: { ...base.llm, providerId: provider.id, model: 'm' } });
+    pg.agents.push(summarizer);
+    // An (ignored) outgoing edge from the summarizer back to B.
+    pg.connections.push({ id: 'c-s', source: summarizer.id, target: bId, enabled: true, type: 'conversation', priority: 0 });
+    const issues = validateForRun(pg, providers);
+    expect(issues.some((i) => i.level === 'warning' && i.agentId === summarizer.id && /outgoing connections are ignored/i.test(i.message))).toBe(true);
+  });
+
   it('errors when the conversation subject is empty (spec §11.1)', () => {
     const { pg, providers } = readyPlayground();
     pg.conversation.subject = '   ';

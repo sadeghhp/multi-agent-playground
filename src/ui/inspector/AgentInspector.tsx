@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
-import type { Agent, ConnectionType, PersonaCitationStyle, PersonaMode, Skill } from '../../domain/schema';
+import type { Agent, AgentKind, ConnectionType, PersonaCitationStyle, PersonaMode, Skill } from '../../domain/schema';
+import { KIND_LABEL, isTerminalKind } from '../../domain/agentKind';
 import { useDomainStore } from '../../store/domainStore';
 import { useProviderStore } from '../../store/providerStore';
 import { useUiStore } from '../../store/uiStore';
@@ -566,6 +567,35 @@ export function AgentInspector({ agent }: { agent: Agent }) {
       </Section>
 
       <Section title="Role & instruction" defaultOpen>
+        <div className="field">
+          <label htmlFor="ag-kind">Type</label>
+          <select
+            id="ag-kind"
+            value={agent.kind}
+            onChange={(e) => patch({ kind: e.target.value as AgentKind })}
+          >
+            <option value="participant">{KIND_LABEL.participant} — speaks in graph order</option>
+            <option value="moderator">{KIND_LABEL.moderator} — facilitates, sees the whole discussion</option>
+            <option value="summarizer">{KIND_LABEL.summarizer} — runs in wrap-up</option>
+            <option value="finalizer">{KIND_LABEL.finalizer} — runs last, in wrap-up</option>
+          </select>
+          {isTerminalKind(agent.kind) && (
+            <p className={styles.hint}>
+              Runs automatically in the wrap-up phase, after the discussion ends —
+              you don't need to wire edges into it, and any incoming edges are
+              ignored for scheduling. {agent.kind === 'finalizer'
+                ? 'Finalizers run after summarizers and produce the final word.'
+                : 'Summarizers run before finalizers.'}
+            </p>
+          )}
+          {agent.kind === 'moderator' && (
+            <p className={styles.hint}>
+              Scheduled by graph edges like a participant, but always sees the full
+              transcript and carries a facilitation contract. Wire it in wherever
+              you want it to intervene (e.g. after each round).
+            </p>
+          )}
+        </div>
         <div className="field">
           <label htmlFor="ag-role">Role</label>
           <input id="ag-role" value={agent.role} onChange={(e) => patch({ role: e.target.value })} placeholder="Skeptical reviewer" />

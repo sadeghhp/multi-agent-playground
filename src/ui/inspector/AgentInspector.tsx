@@ -247,12 +247,21 @@ export function AgentInspector({ agent }: { agent: Agent }) {
     const history = debouncedAgent.runtime.includeHistory
       ? boundHistory(debouncedPlayground.transcript, debouncedAgent.runtime.historyWindow)
       : [];
+    // Mirror orchestrator.findLastUserDirective so the preview reflects a
+    // pending follow-up (see continueRun) exactly as a real turn would.
+    const transcript = debouncedPlayground.transcript;
+    let pendingUserDirective: string | null = null;
+    for (let i = transcript.length - 1; i >= 0; i--) {
+      const m = transcript[i];
+      if (m.agentId === null && m.role === 'user' && m.content) { pendingUserDirective = m.content; break; }
+    }
     const ctx = {
       agent: debouncedAgent,
       conversation: debouncedPlayground.conversation,
       history,
       incoming: null,
       isFirstTurn: true,
+      pendingUserDirective,
     };
     const text = `${buildSystemPrompt(ctx)}\n\n--- USER TURN ---\n${buildTaskPrompt(ctx)}`;
     const full = assembleMessages(ctx)

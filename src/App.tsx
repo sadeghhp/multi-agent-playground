@@ -15,6 +15,7 @@ import { PlaygroundsPanel } from './ui/PlaygroundsPanel';
 import { TimelinePage } from './ui/timeline/TimelinePage';
 import { AgentLibraryPanel } from './ui/AgentLibraryPanel';
 import { useAgentLibraryStore } from './store/agentLibraryStore';
+import { useRunPresetStore } from './store/runPresetStore';
 import { CreateAgentWithAiModal } from './ui/CreateAgentWithAiModal';
 import { Toast } from './ui/Toast';
 import { ConfirmDialog } from './ui/ConfirmDialog';
@@ -29,6 +30,7 @@ export default function App() {
   const loadPlayground = useDomainStore((s) => s.loadPlayground);
   const newPlayground = useDomainStore((s) => s.newPlayground);
   const hydrateLibrary = useAgentLibraryStore((s) => s.hydrate);
+  const hydrateRunPresets = useRunPresetStore((s) => s.hydrate);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -41,8 +43,9 @@ export default function App() {
       // Providers are application-global; load the registry before any playground
       // so agent/provider references resolve on first paint.
       await Promise.all([hydrate(), hydrateProviders()]);
-      // Load the cross-playground agent library alongside playgrounds.
+      // Load the cross-playground agent library and run presets alongside playgrounds.
       void hydrateLibrary();
+      void hydrateRunPresets();
       if (cancelled) return;
       const selected = getSelectedPlaygroundId();
       if (selected) {

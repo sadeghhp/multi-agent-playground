@@ -31,6 +31,15 @@ export interface PromptContext {
   sourceOutput?: string | null;
   /** True on the very first turn of a run — enables the opening instruction. */
   isFirstTurn?: boolean;
+  /**
+   * The most recent user-authored message in the transcript (see
+   * orchestrator.continueRun), if any. Surfaced explicitly and outside the
+   * `includeHistory`/`historyWindow` gate so a user's follow-up ("argue
+   * against this", "give me the facts") stays an authoritative instruction
+   * for every agent in this run, not just a line that can scroll out of the
+   * bounded history window.
+   */
+  pendingUserDirective?: string | null;
 }
 
 const CONNECTION_RULE: Record<Connection['type'], string> = {
@@ -63,6 +72,21 @@ const RESPONSE_LENGTH_DIRECTIVE: Record<ConversationSettings['responseLength'], 
   long: 'Give a long, thorough response for this conversation, exploring multiple points or angles.',
 };
 
+/**
+ * Conversation-level chit-chat/flattery control, applied on top of each
+ * agent's own characteristics for the duration of a run. 'agent-default'
+ * leaves the per-agent characteristics as the only signal.
+ */
+const CHITCHAT_POLICY_DIRECTIVE: Record<ConversationSettings['chitchatPolicy'], string | null> = {
+  'agent-default': null,
+  'concise-factual':
+    'For this conversation: do not open with greetings, small talk, or transitional filler; ' +
+    'do not compliment, flatter, or praise other agents or their ideas; state claims only when ' +
+    'you can support them with a fact, source, or explicit reasoning, and say when you are ' +
+    'uncertain rather than guessing; respond with the minimum number of sentences needed to convey ' +
+    'the substance.',
+};
+
 /** Build the system prompt text (sections 1–8 of spec §12). */
 export function buildSystemPrompt(ctx: PromptContext): string {
   const { agent } = ctx;
@@ -89,6 +113,8 @@ export function buildSystemPrompt(ctx: PromptContext): string {
   }
   const lengthDirective = RESPONSE_LENGTH_DIRECTIVE[ctx.conversation.responseLength];
   if (lengthDirective) sections.push(lengthDirective);
+  const chitchatDirective = CHITCHAT_POLICY_DIRECTIVE[ctx.conversation.chitchatPolicy];
+  if (chitchatDirective) sections.push(chitchatDirective);
 
   // 5. Enabled skills
   const skills = agent.skills.filter((s) => s.enabled);
@@ -109,7 +135,12 @@ export function buildSystemPrompt(ctx: PromptContext): string {
   }
 
   // 7. Language directive — governs both what the agent asks and answers.
-  sections.push(LANGUAGE_DIRECTIVE[agent.language]);
+  // A run-level override replaces the agent's own language for this run
+  // rather than stacking with it, since two "write in X" directives would
+  // conflict.
+  const effectiveLanguage =
+    ctx.conversation.languageOverride === 'agent-default' ? agent.language : ctx.conversation.languageOverride;
+  sections.push(LANGUAGE_DIRECTIVE[effectiveLanguage]);
 
   // 8. Output constraints (final-response instruction)
   if (agent.runtime.finalResponseInstruction?.trim()) {
@@ -132,6 +163,11 @@ export function buildTaskPrompt(ctx: PromptContext): string {
     if (conversation.objective) sections.push(`Keep this goal in mind as the discussion unfolds: ${conversation.objective}`);
     if (conversation.initialContext) sections.push(`Relevant background: ${conversation.initialContext}`);
     if (agent.runtime.openingInstruction?.trim()) sections.push(agent.runtime.openingInstruction.trim());
+    if (ctx.pendingUserDirective?.trim()) {
+      sections.push(
+        `The user has interjected with the following — you must address it directly: "${ctx.pendingUserDirective.trim()}"`,
+      );
+    }
     sections.push(
       'Begin the conversation now by speaking directly about the topic, the way a person would when opening a real discussion. Do not restate these instructions, list the fields above, announce that you are an AI, or acknowledge that you were given a prompt — just start talking.',
     );
@@ -141,6 +177,16 @@ export function buildTaskPrompt(ctx: PromptContext): string {
   sections.push(`Subject: ${conversation.subject || '(none)'}`);
   if (conversation.objective) sections.push(`Objective: ${conversation.objective}`);
   if (conversation.initialContext) sections.push(`Context: ${conversation.initialContext}`);
+
+  // The user's latest follow-up (spec extension: "continue the conversation").
+  // Surfaced explicitly, outside the includeHistory/historyWindow gate, so it
+  // stays an authoritative instruction for every agent for the rest of the
+  // run rather than one line that can scroll out of the bounded history.
+  if (ctx.pendingUserDirective?.trim()) {
+    sections.push(
+      `The user has interjected with the following — you must address it directly in your response: "${ctx.pendingUserDirective.trim()}"`,
+    );
+  }
 
   if (ctx.sourceAgentName && ctx.incoming) {
     sections.push(`You are responding after ${ctx.sourceAgentName} via a ${ctx.incoming.type} connection.`);

@@ -1,3 +1,12 @@
+.presetRow {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.presetRow > .field { flex: 1; margin-bottom: 0; }
+.presetRow > button { flex-shrink: 0; }
+
 .checkbox {
   display: flex;
   align-items: center;

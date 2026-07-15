@@ -17,6 +17,7 @@ function uuid(): string {
 
 export const newPlaygroundId = () => `pg_${uuid()}`;
 export const newLibraryAgentId = () => `lib_${uuid()}`;
+export const newRunPresetId = () => `rp_${uuid()}`;
 export const newAgentId = () => `ag_${uuid()}`;
 export const newConnectionId = () => `cn_${uuid()}`;
 export const newProviderId = () => `pv_${uuid()}`;

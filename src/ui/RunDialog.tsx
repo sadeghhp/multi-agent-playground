@@ -1,10 +1,12 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useDomainStore } from '../store/domainStore';
 import { useProviderStore } from '../store/providerStore';
+import { useRunPresetStore } from '../store/runPresetStore';
 import { useUiStore } from '../store/uiStore';
 import { Modal } from './Modal';
 import { validateForRun, hasBlockingErrors, reachableFrom } from '../orchestrator/validate';
 import { startRun } from '../orchestrator/orchestrator';
+import { applyRunPreset } from '../domain/factories';
 import { parseBoundedInt } from './inputUtils';
 import styles from './RunDialog.module.css';
 
@@ -13,6 +15,12 @@ export function RunDialog() {
   const updateConversation = useDomainStore((s) => s.updateConversation);
   const providers = useProviderStore((s) => s.providers);
   const setPanel = useUiStore((s) => s.setPanel);
+  const requestConfirm = useUiStore((s) => s.requestConfirm);
+  const presets = useRunPresetStore((s) => s.presets);
+  const savePreset = useRunPresetStore((s) => s.savePreset);
+  const deletePreset = useRunPresetStore((s) => s.deletePreset);
+  const [selectedPresetId, setSelectedPresetId] = useState('');
+  const [presetName, setPresetName] = useState('');
 
   const conversation = playground?.conversation;
   const enabledAgents = useMemo(
@@ -94,6 +102,73 @@ export function RunDialog() {
         />
       </div>
 
+      <div className={styles.presetRow}>
+        <div className="field">
+          <label htmlFor="run-preset-load">Option preset</label>
+          <select
+            id="run-preset-load"
+            value={selectedPresetId}
+            onChange={(e) => {
+              const id = e.target.value;
+              setSelectedPresetId(id);
+              const preset = presets.find((p) => p.id === id);
+              if (preset) updateConversation(applyRunPreset(conversation, preset));
+            }}
+          >
+            <option value="">— none (current settings) —</option>
+            {presets.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </div>
+        {selectedPresetId && (
+          <button
+            type="button"
+            className="secondary"
+            onClick={async () => {
+              const preset = presets.find((p) => p.id === selectedPresetId);
+              if (!preset) return;
+              const ok = await requestConfirm({
+                title: 'Delete preset',
+                message: `Delete the option preset "${preset.name}"?`,
+                confirmLabel: 'Delete',
+                danger: true,
+              });
+              if (ok) {
+                void deletePreset(preset.id);
+                setSelectedPresetId('');
+              }
+            }}
+          >
+            Delete preset
+          </button>
+        )}
+      </div>
+
+      <div className={styles.presetRow}>
+        <div className="field">
+          <label htmlFor="run-preset-name">Save current options as a preset</label>
+          <input
+            id="run-preset-name"
+            value={presetName}
+            onChange={(e) => setPresetName(e.target.value)}
+            placeholder="e.g. Terse fact-check"
+          />
+        </div>
+        <button
+          type="button"
+          className="secondary"
+          disabled={!presetName.trim()}
+          onClick={async () => {
+            const saved = await savePreset(presetName.trim(), conversation);
+            setPresetName('');
+            setSelectedPresetId(saved.id);
+          }}
+        >
+          Save preset
+        </button>
+      </div>
+
       <div className="field-row">
         <div className="field">
           <label htmlFor="run-tone">Tone for this run (optional)</label>
@@ -130,6 +205,63 @@ export function RunDialog() {
             <option value="agent-default">Allow — use each agent's own style</option>
             <option value="concise-factual">Disallow — concise, strict, and factual only</option>
           </select>
+        </div>
+        <div className="field">
+          <label htmlFor="run-language">Language for this run</label>
+          <select
+            id="run-language"
+            value={conversation.languageOverride}
+            onChange={(e) => updateConversation({ languageOverride: e.target.value as typeof conversation.languageOverride })}
+          >
+            <option value="agent-default">Agent default — each agent keeps its own language</option>
+            <option value="en">Force English</option>
+            <option value="fa">Force Persian (Farsi)</option>
+            <option value="fr">Force French</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="field-row">
+        <div className="field">
+          <label htmlFor="run-temperature">Temperature override (optional)</label>
+          <input
+            id="run-temperature"
+            type="number"
+            min={0}
+            max={2}
+            step={0.1}
+            value={conversation.temperatureOverride ?? ''}
+            placeholder="Leave blank to use each agent's own temperature"
+            onChange={(e) => {
+              const raw = e.target.value;
+              if (raw === '') {
+                updateConversation({ temperatureOverride: null });
+                return;
+              }
+              const n = Number(raw);
+              if (Number.isFinite(n) && n >= 0 && n <= 2) updateConversation({ temperatureOverride: n });
+            }}
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="run-timeout">Response timeout cap, ms (optional)</label>
+          <input
+            id="run-timeout"
+            type="number"
+            min={1000}
+            step={1000}
+            value={conversation.responseTimeoutOverrideMs ?? ''}
+            placeholder="Leave blank to use each agent's own timeout"
+            onChange={(e) => {
+              const raw = e.target.value;
+              if (raw === '') {
+                updateConversation({ responseTimeoutOverrideMs: null });
+                return;
+              }
+              const n = parseBoundedInt(raw, 1000);
+              if (n !== null) updateConversation({ responseTimeoutOverrideMs: n });
+            }}
+          />
         </div>
       </div>
 

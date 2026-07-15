@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { TranscriptMessage } from '../../domain/schema';
 import { dirForLanguage } from '../../domain/language';
 import { useDomainStore } from '../../store/domainStore';
@@ -140,6 +140,7 @@ function TimelineItem({ msg, color }: { msg: TranscriptMessage; color: string })
   const failed = msg.status === 'failed';
   // Mirror the card (header + body) for RTL languages; the spine node stays put.
   const dir = dirForLanguage(msg.language);
+  const [showReasoning, setShowReasoning] = useState(false);
 
   return (
     <div className={`${styles.item} ${failed ? styles.itemFailed : ''}`}>
@@ -152,6 +153,16 @@ function TimelineItem({ msg, color }: { msg: TranscriptMessage; color: string })
           </span>
           {msg.role && <span className="chip">{msg.role}</span>}
           {msg.status === 'stopped' && <span className="chip">stopped</span>}
+          {msg.reasoning && (
+            <button
+              type="button"
+              className="chip"
+              aria-expanded={showReasoning}
+              onClick={() => setShowReasoning((v) => !v)}
+            >
+              thinking {showReasoning ? '▾' : '▸'}
+            </button>
+          )}
           <span className={styles.meta}>
             {msg.model || '—'} · {time}
             {msg.durationMs != null && ` · ${msg.durationMs}ms`}
@@ -160,6 +171,11 @@ function TimelineItem({ msg, color }: { msg: TranscriptMessage; color: string })
         </div>
         {msg.sourceAgentId && msg.connectionType && (
           <div className={styles.source}>via {msg.connectionType} connection</div>
+        )}
+        {showReasoning && msg.reasoning && (
+          <div className={styles.body} dir="ltr">
+            <pre>{msg.reasoning}</pre>
+          </div>
         )}
         {/* No explicit dir: inherits the forced direction from the card
             above (driven by the agent's language), not a content guess. */}

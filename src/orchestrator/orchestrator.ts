@@ -274,8 +274,11 @@ export async function startRun(): Promise<void> {
           providerId: provider.id,
           // Reasoning models sometimes emit their whole reply as
           // `reasoning_content` deltas and leave `content` empty; fall back
-          // to the reasoning text so the turn isn't rendered blank.
-          content: res.text || res.reasoning,
+          // to the reasoning text so the turn isn't rendered blank. When
+          // `text` is present, keep the reasoning separate (spec: thinking
+          // is hidden by default, shown only via an explicit chip).
+          content: res.text || res.reasoning || '',
+          reasoning: res.text ? res.reasoning : undefined,
           status: 'completed',
           sourceAgentId: item.sourceAgentId,
           connectionType: connection?.type ?? null,

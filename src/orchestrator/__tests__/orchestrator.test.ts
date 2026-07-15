@@ -46,6 +46,23 @@ function sseChat(text: string) {
   return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
 }
 
+/** An SSE chat response that emits only `reasoning_content` deltas, no `content`. */
+function sseReasoningOnlyChat(text: string) {
+  const words = text.split(' ');
+  const chunks = words.map(
+    (w, i) => `data: {"choices":[{"delta":{"reasoning_content":${JSON.stringify((i ? ' ' : '') + w)}}}]}\n\n`,
+  );
+  chunks.push('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n', 'data: [DONE]\n\n');
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const c of chunks) controller.enqueue(encoder.encode(c));
+      controller.close();
+    },
+  });
+  return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+}
+
 /** Two agents A<->B in a cycle, both using a localhost provider. */
 function cyclePlayground(maxTurns: number, maxPerAgent: number): Playground {
   const pg = createPlayground('Test');
@@ -197,6 +214,21 @@ describe('orchestrator streaming', () => {
     // The assembled stream became the finalized transcript entry.
     const transcript = useDomainStore.getState().playground!.transcript;
     expect(transcript[0].content).toBe('streamed reply here');
+  });
+
+  it('falls back to reasoning text when a reasoning model emits no visible content', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() => Promise.resolve(sseReasoningOnlyChat('thinking out loud'))),
+    );
+    const pg = cyclePlayground(1, 5);
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+
+    const transcript = useDomainStore.getState().playground!.transcript;
+    expect(transcript[0].content).toBe('thinking out loud');
+    expect(transcript[0].status).toBe('completed');
   });
 });
 

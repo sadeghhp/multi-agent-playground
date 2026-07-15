@@ -112,6 +112,7 @@ export function Toolbar() {
         <span className={styles.sep} />
         <div className={styles.group} role="group" aria-label="Manage">
           <button type="button" className="secondary" onClick={() => setPanel('providers')}>Providers</button>
+          <button type="button" className="secondary" onClick={() => setPanel('usage')}>Usage</button>
           <button type="button" className="secondary" onClick={() => setPanel('skills')} disabled={!playground}>Skills</button>
           <button
             type="button"

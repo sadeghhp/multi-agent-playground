@@ -26,3 +26,5 @@ export const newMessageId = () => `msg_${uuid()}`;
 export const newRunId = () => `run_${uuid()}`;
 export const newLogId = () => `log_${uuid()}`;
 export const newErrorId = () => `err_${uuid()}`;
+export const newUsageId = () => `usg_${uuid()}`;
+export const newPriceId = () => `prc_${uuid()}`;

@@ -11,6 +11,7 @@ import type {
 } from './types';
 import { validateEndpoint } from './url';
 import { providerRequest } from './providerRequest';
+import { supportsStreamUsage } from '../usage/fallback';
 
 /**
  * OpenAI-compatible chat-completions adapter (spec §17). The single place that
@@ -322,10 +323,15 @@ export async function sendChat(
   }
 
   const body = buildBody(params);
-  // `stream` is widely supported; `stream_options` (usage-in-stream) is not, and
-  // some local OpenAI-compatible servers 400 on it — so we don't send it. Token
-  // counts are simply absent for streamed turns, which the UI already tolerates.
-  if (options.onToken) body.stream = true;
+  // `stream` is widely supported; `stream_options.include_usage` is not (many
+  // local servers 400 on it). Only request usage-in-stream for hosts known to
+  // support it (OpenAI, OpenRouter, Example / example).
+  if (options.onToken) {
+    body.stream = true;
+    if (supportsStreamUsage(provider.baseUrl)) {
+      body.stream_options = { include_usage: true };
+    }
+  }
   const { response, durationMs, resetTimeout, clearRequestTimeout, timeoutSignal } = await providerRequest(
     provider,
     provider.path,

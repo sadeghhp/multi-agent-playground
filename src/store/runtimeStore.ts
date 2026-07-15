@@ -47,6 +47,12 @@ export interface RunError {
   retryEligible?: boolean;
 }
 
+/** Temporary provider/model remap for the current run only (suggest-only fallback). */
+export interface ProviderOverride {
+  providerId: string;
+  model: string;
+}
+
 interface RuntimeStoreState {
   runId: string | null;
   status: RunStatus;
@@ -66,6 +72,11 @@ interface RuntimeStoreState {
    * Memory-only; cleared when the agent's turn finalizes into the transcript.
    */
   streamingText: Record<string, string>;
+  /** Run-scoped provider overrides from accepted fallback suggestions. */
+  providerOverrides: Record<string, ProviderOverride>;
+  /** Tokens recorded for the active run (for budget gating). */
+  runTokens: number;
+  runFallbackTokens: number;
   /** Non-serialized: aborts the in-flight provider request (spec §14). */
   abortController: AbortController | null;
 
@@ -73,6 +84,8 @@ interface RuntimeStoreState {
   recordSnapshot: (messageId: string, snapshot: RequestSnapshot) => void;
   appendToken: (agentId: string, chunk: string) => void;
   clearStreaming: (agentId: string) => void;
+  setProviderOverride: (agentId: string, override: ProviderOverride) => void;
+  addRunTokens: (tokens: number, fallback: boolean) => void;
   setStatus: (status: RunStatus) => void;
   setActive: (agentId: string | null, connectionId: string | null) => void;
   setAgentState: (agentId: string, state: RuntimeState) => void;
@@ -116,6 +129,9 @@ const initial = {
   errors: [],
   requestSnapshots: {},
   streamingText: {},
+  providerOverrides: {} as Record<string, ProviderOverride>,
+  runTokens: 0,
+  runFallbackTokens: 0,
   abortController: null,
 };
 
@@ -148,6 +164,15 @@ export const useRuntimeStore = create<RuntimeStoreState>((set, get) => ({
       delete next[agentId];
       return { streamingText: next };
     }),
+  setProviderOverride: (agentId, override) =>
+    set((s) => ({
+      providerOverrides: { ...s.providerOverrides, [agentId]: override },
+    })),
+  addRunTokens: (tokens, fallback) =>
+    set((s) => ({
+      runTokens: s.runTokens + tokens,
+      runFallbackTokens: fallback ? s.runFallbackTokens + tokens : s.runFallbackTokens,
+    })),
   setStatus: (status) => set({ status }),
   setActive: (activeAgentId, activeConnectionId) => set({ activeAgentId, activeConnectionId }),
   setAgentState: (agentId, state) =>

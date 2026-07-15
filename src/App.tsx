@@ -20,6 +20,9 @@ import { useRunPresetStore } from './store/runPresetStore';
 import { CreateAgentWithAiModal } from './ui/CreateAgentWithAiModal';
 import { Toast } from './ui/Toast';
 import { ConfirmDialog } from './ui/ConfirmDialog';
+import { FallbackSuggestModal } from './ui/FallbackSuggestModal';
+import { UsagePanel } from './ui/UsagePanel';
+import { useUsageStore } from './store/usageStore';
 import styles from './App.module.css';
 
 export default function App() {
@@ -28,6 +31,7 @@ export default function App() {
   const playground = useDomainStore((s) => s.playground);
   const hydrate = useDomainStore((s) => s.hydrate);
   const hydrateProviders = useProviderStore((s) => s.hydrate);
+  const hydrateUsage = useUsageStore((s) => s.hydrate);
   const loadPlayground = useDomainStore((s) => s.loadPlayground);
   const newPlayground = useDomainStore((s) => s.newPlayground);
   const hydrateLibrary = useAgentLibraryStore((s) => s.hydrate);
@@ -43,7 +47,7 @@ export default function App() {
     (async () => {
       // Providers are application-global; load the registry before any playground
       // so agent/provider references resolve on first paint.
-      await Promise.all([hydrate(), hydrateProviders()]);
+      await Promise.all([hydrate(), hydrateProviders(), hydrateUsage()]);
       // Load the cross-playground agent library and run presets alongside playgrounds.
       void hydrateLibrary();
       void hydrateRunPresets();
@@ -83,8 +87,10 @@ export default function App() {
       {openPanel === 'runHistory' && <ConversationRunsPanel />}
       {openPanel === 'library' && <AgentLibraryPanel />}
       {openPanel === 'createAgentAi' && <CreateAgentWithAiModal />}
+      {openPanel === 'usage' && <UsagePanel />}
       <Toast />
       <ConfirmDialog />
+      <FallbackSuggestModal />
     </div>
   );
 }

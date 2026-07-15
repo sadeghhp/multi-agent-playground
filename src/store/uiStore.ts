@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import { type Theme, getTheme, setTheme } from './prefs';
+import type { FallbackCandidate } from '../usage/fallback';
+import type { BudgetSnapshot } from '../usage/budget';
 
 /**
  * Transient UI state (spec §16). Never persisted with the domain model.
@@ -15,7 +17,8 @@ export type OpenPanel =
   | 'settings'
   | 'timeline'
   | 'runHistory'
-  | 'createAgentAi';
+  | 'createAgentAi'
+  | 'usage';
 
 export type Selection =
   | { kind: 'none' }
@@ -34,6 +37,21 @@ interface ConfirmState extends ConfirmOptions {
   resolve: (ok: boolean) => void;
 }
 
+export interface FallbackSuggestionOptions {
+  agentName: string;
+  failedProviderName: string;
+  failedModel: string;
+  errorSummary: string;
+  candidates: FallbackCandidate[];
+  budget: BudgetSnapshot;
+}
+
+export type FallbackChoice = { providerId: string; model: string } | null;
+
+interface FallbackState extends FallbackSuggestionOptions {
+  resolve: (choice: FallbackChoice) => void;
+}
+
 interface UiState {
   selection: Selection;
   openPanel: OpenPanel;
@@ -42,6 +60,8 @@ interface UiState {
   toast: { kind: 'info' | 'warn' | 'error'; message: string } | null;
   /** In-app confirmation dialog request (replaces window.confirm). */
   confirm: ConfirmState | null;
+  /** Suggest-only provider fallback while a run is paused on failure. */
+  fallbackSuggest: FallbackState | null;
 
   selectAgent: (id: string) => void;
   selectConnection: (id: string) => void;
@@ -53,6 +73,9 @@ interface UiState {
   /** Open a themed confirm dialog; resolves true if the user confirms. */
   requestConfirm: (opts: ConfirmOptions) => Promise<boolean>;
   resolveConfirm: (ok: boolean) => void;
+  /** Pause for a temporary provider switch suggestion; null = dismissed. */
+  requestFallbackSuggestion: (opts: FallbackSuggestionOptions) => Promise<FallbackChoice>;
+  resolveFallbackSuggestion: (choice: FallbackChoice) => void;
 }
 
 export const useUiStore = create<UiState>((set, get) => ({
@@ -61,6 +84,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   theme: getTheme(),
   toast: null,
   confirm: null,
+  fallbackSuggest: null,
 
   selectAgent: (id) => set({ selection: { kind: 'agent', id } }),
   selectConnection: (id) => set({ selection: { kind: 'connection', id } }),
@@ -85,5 +109,17 @@ export const useUiStore = create<UiState>((set, get) => ({
     if (!current) return;
     current.resolve(ok);
     set({ confirm: null });
+  },
+  requestFallbackSuggestion: (opts) =>
+    new Promise<FallbackChoice>((resolve) => {
+      const existing = get().fallbackSuggest;
+      if (existing) existing.resolve(null);
+      set({ fallbackSuggest: { ...opts, resolve } });
+    }),
+  resolveFallbackSuggestion: (choice) => {
+    const current = get().fallbackSuggest;
+    if (!current) return;
+    current.resolve(choice);
+    set({ fallbackSuggest: null });
   },
 }));

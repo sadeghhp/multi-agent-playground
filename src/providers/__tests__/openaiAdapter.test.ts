@@ -223,6 +223,46 @@ describe('sendChat', () => {
     expect(body.stream).toBe(true);
   });
 
+  it('requests stream_options.include_usage for OpenRouter / OpenAI hosts only', async () => {
+    const makeSse = () =>
+      sseResponse([
+        'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n',
+        'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+        'data: [DONE]\n\n',
+      ]);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(makeSse())
+      .mockResolvedValueOnce(makeSse())
+      .mockResolvedValueOnce(makeSse());
+    vi.stubGlobal('fetch', fetchMock);
+
+    await sendChat(
+      createProvider({ baseUrl: 'https://openrouter.ai/api', apiKey: 'k' }),
+      { model: 'm', messages: [{ role: 'user', content: 'hi' }] },
+      { onToken: () => {} },
+    );
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string).stream_options).toEqual({
+      include_usage: true,
+    });
+
+    await sendChat(
+      createProvider({ baseUrl: 'https://api.example.com', apiKey: 'k' }),
+      { model: 'm', messages: [{ role: 'user', content: 'hi' }] },
+      { onToken: () => {} },
+    );
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body as string).stream_options).toEqual({
+      include_usage: true,
+    });
+
+    await sendChat(
+      createProvider({ baseUrl: 'http://localhost:11434', apiKey: '' }),
+      { model: 'm', messages: [{ role: 'user', content: 'hi' }] },
+      { onToken: () => {} },
+    );
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body as string).stream_options).toBeUndefined();
+  });
+
   it('streams reasoning deltas via onReasoningToken, separate from content', async () => {
     const sse = [
       'data: {"model":"test-model","choices":[{"delta":{"reasoning_content":"pondering "}}]}\n\n',

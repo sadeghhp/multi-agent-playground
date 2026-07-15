@@ -8,6 +8,8 @@ import { clearCredential, saveCredential } from '../persistence/credentialStore'
 import { validateEndpoint } from '../providers/url';
 import { listModels } from '../providers/listModels';
 import { testConnection, type TestConnectionResult } from '../providers/testConnection';
+import { DEFAULT_OPENROUTER_PRICES } from '../usage/pricing';
+import { useUsageStore } from '../store/usageStore';
 import { Modal } from './Modal';
 import styles from './ProviderManager.module.css';
 
@@ -21,11 +23,30 @@ interface Preset {
   displayName: string;
   baseUrl: string;
   path: string;
+  /** Optional model ids to prefill when applying the preset. */
+  models?: string[];
 }
 
 const PRESETS: Preset[] = [
   { label: 'OpenAI', displayName: 'OpenAI', baseUrl: 'https://api.openai.com', path: '/v1/chat/completions' },
-  { label: 'OpenRouter', displayName: 'OpenRouter', baseUrl: 'https://openrouter.ai/api', path: '/v1/chat/completions' },
+  {
+    label: 'OpenRouter',
+    displayName: 'OpenRouter',
+    baseUrl: 'https://openrouter.ai/api',
+    path: '/v1/chat/completions',
+    models: [
+      'openai/gpt-4o-mini',
+      'anthropic/claude-3.5-sonnet',
+      'google/gemini-2.0-flash-001',
+      'meta-llama/llama-3.3-70b-instruct',
+    ],
+  },
+  {
+    label: 'Example',
+    displayName: 'Example',
+    baseUrl: 'https://api.example.com',
+    path: '/v1/chat/completions',
+  },
   { label: 'Groq', displayName: 'Groq', baseUrl: 'https://api.groq.com/openai', path: '/v1/chat/completions' },
   { label: 'Together', displayName: 'Together AI', baseUrl: 'https://api.together.xyz', path: '/v1/chat/completions' },
   { label: 'Ollama', displayName: 'Ollama (local)', baseUrl: 'http://localhost:11434', path: '/v1/chat/completions' },
@@ -167,14 +188,32 @@ function ProviderEditor({
   const canQuery = hasUrl && urlValidation.ok;
 
   function applyPreset(preset: Preset) {
-    onChange({
+    const patch: Partial<Provider> = {
       displayName:
         !provider.displayName || provider.displayName === 'New provider'
           ? preset.displayName
           : provider.displayName,
       baseUrl: preset.baseUrl,
       path: preset.path,
-    });
+    };
+    if (preset.models?.length) {
+      patch.models = preset.models;
+      patch.defaultModel = preset.models[0];
+      setTestModel(preset.models[0]);
+    }
+    onChange(patch);
+    if (preset.label === 'OpenRouter' && preset.models?.length) {
+      const upsertPrice = useUsageStore.getState().upsertPrice;
+      for (const seed of DEFAULT_OPENROUTER_PRICES) {
+        if (!preset.models.includes(seed.model)) continue;
+        upsertPrice({
+          providerId: provider.id,
+          model: seed.model,
+          inputPer1M: seed.inputPer1M,
+          outputPer1M: seed.outputPer1M,
+        });
+      }
+    }
     setBanner(null);
     setTestResult(null);
     setFetchedModels(null);

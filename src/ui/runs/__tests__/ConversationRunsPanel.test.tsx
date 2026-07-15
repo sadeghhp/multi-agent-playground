@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConversationRun } from '../../../domain/schema';
 import { createPlayground } from '../../../domain/factories';
@@ -80,8 +80,13 @@ describe('ConversationRunsPanel', () => {
     );
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Delete run v2' })[0]!);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
 
-    expect(removeRun).toHaveBeenCalledWith('run_2');
+    await waitFor(() => {
+      expect(removeRun).toHaveBeenCalledWith('run_2');
+    });
   });
 });

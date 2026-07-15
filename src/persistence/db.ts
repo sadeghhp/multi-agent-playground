@@ -11,18 +11,20 @@ import {
   RunPreset as RunPresetSchema,
   SavedAgent as SavedAgentSchema,
 } from '../domain/schema';
+import {
+  type ModelPrice,
+  type UsageEntry,
+  ModelPrice as ModelPriceSchema,
+  UsageEntry as UsageEntrySchema,
+} from '../domain/usage';
 import { migrateToCurrent } from './migrate';
 import { clearCredential, loadCredential, saveCredential } from './credentialStore';
 
 /**
- * IndexedDB persistence (spec §15.1). Four object stores:
- *   - `playgrounds`: full playground records (no providers as of schema v2).
- *   - `providers`: the application-global provider registry (schema v2). Any
- *     playground can reference these by id, so providers created once are reused
- *     everywhere.
- *   - `agentLibrary`: the cross-playground agent library ("pool").
- *   - `runPresets`: named, reusable "Run conversation" option bundles.
- *   - `conversationRuns`: versioned snapshots of each conversation execution.
+ * IndexedDB persistence (spec §15.1). Object stores:
+ *   - `playgrounds`, `providers`, `agentLibrary`, `runPresets`, `conversationRuns`
+ *   - `usageLedger`: per-call token/cost accounting
+ *   - `modelPrices`: editable USD/1M token prices
  *
  * API keys are never written to any store: they're stripped and kept in the
  * credential store instead (spec §8.4), keyed by provider id, so the DB blob
@@ -34,12 +36,15 @@ import { clearCredential, loadCredential, saveCredential } from './credentialSto
  */
 
 const DB_NAME = 'multi-agent-playground';
-const DB_VERSION = 4;
+// v6 adds usageLedger + modelPrices. Prior bumps: v4/v5 conversationRuns.
+const DB_VERSION = 6;
 const STORE = 'playgrounds';
 const PROVIDER_STORE = 'providers';
 const LIBRARY_STORE = 'agentLibrary';
 const RUN_PRESET_STORE = 'runPresets';
 const CONVERSATION_RUN_STORE = 'conversationRuns';
+const USAGE_LEDGER_STORE = 'usageLedger';
+const MODEL_PRICES_STORE = 'modelPrices';
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 let dbInstance: IDBPDatabase | null = null;
@@ -66,6 +71,13 @@ function getDb(): Promise<IDBPDatabase> {
           const runStore = db.createObjectStore(CONVERSATION_RUN_STORE, { keyPath: 'id' });
           runStore.createIndex('by-playground', 'playgroundId');
           runStore.createIndex('by-playground-version', ['playgroundId', 'version']);
+        }
+        if (!db.objectStoreNames.contains(USAGE_LEDGER_STORE)) {
+          const usageStore = db.createObjectStore(USAGE_LEDGER_STORE, { keyPath: 'id' });
+          usageStore.createIndex('by-at', 'at');
+        }
+        if (!db.objectStoreNames.contains(MODEL_PRICES_STORE)) {
+          db.createObjectStore(MODEL_PRICES_STORE, { keyPath: 'id' });
         }
         // v1 → v2: hoist providers that were embedded in each playground into the
         // global registry, then strip them from the playground record. Runs once.
@@ -362,4 +374,63 @@ export async function deleteProvider(id: string): Promise<void> {
   // with its credential already wiped.
   await db.delete(PROVIDER_STORE, id);
   clearCredential(id);
+}
+
+// ---------------------------------------------------------------------------
+// Usage ledger + model prices
+// ---------------------------------------------------------------------------
+
+export async function saveUsageEntry(entry: UsageEntry): Promise<void> {
+  const db = await getDb();
+  await db.put(USAGE_LEDGER_STORE, entry);
+}
+
+export async function loadAllUsageEntries(): Promise<UsageEntry[]> {
+  const db = await getDb();
+  const all = await db.getAll(USAGE_LEDGER_STORE);
+  const result: UsageEntry[] = [];
+  for (const raw of all) {
+    const parsed = UsageEntrySchema.safeParse(raw);
+    if (parsed.success) result.push(parsed.data);
+    else console.warn('Skipping corrupted usage entry:', parsed.error.issues[0]?.message);
+  }
+  result.sort((a, b) => a.at - b.at);
+  return result;
+}
+
+export async function clearUsageLedger(): Promise<void> {
+  const db = await getDb();
+  await db.clear(USAGE_LEDGER_STORE);
+}
+
+export async function deleteUsageSince(sinceMs: number): Promise<void> {
+  const db = await getDb();
+  const all = await loadAllUsageEntries();
+  const tx = db.transaction(USAGE_LEDGER_STORE, 'readwrite');
+  for (const e of all) {
+    if (e.at >= sinceMs) await tx.store.delete(e.id);
+  }
+  await tx.done;
+}
+
+export async function saveModelPrice(price: ModelPrice): Promise<void> {
+  const db = await getDb();
+  await db.put(MODEL_PRICES_STORE, price);
+}
+
+export async function loadAllModelPrices(): Promise<ModelPrice[]> {
+  const db = await getDb();
+  const all = await db.getAll(MODEL_PRICES_STORE);
+  const result: ModelPrice[] = [];
+  for (const raw of all) {
+    const parsed = ModelPriceSchema.safeParse(raw);
+    if (parsed.success) result.push(parsed.data);
+    else console.warn('Skipping corrupted model price:', parsed.error.issues[0]?.message);
+  }
+  return result;
+}
+
+export async function deleteModelPrice(id: string): Promise<void> {
+  const db = await getDb();
+  await db.delete(MODEL_PRICES_STORE, id);
 }

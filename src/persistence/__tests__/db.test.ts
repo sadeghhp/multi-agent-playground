@@ -333,4 +333,32 @@ describe('conversation runs', () => {
     await db.deletePlayground(pg.id);
     expect(await db.listRuns(pg.id)).toEqual([]);
   });
+
+  it('creates conversationRuns when upgrading a v4 DB that lacked the store', async () => {
+    installFreshIndexedDb();
+
+    // Simulate a browser that reached IDB v4 without conversationRuns (e.g. a
+    // partial local bump). Opening the current module must still create it.
+    await new Promise<void>((resolve, reject) => {
+      const req = indexedDB.open('multi-agent-playground', 4);
+      req.onupgradeneeded = () => {
+        const idb = req.result;
+        idb.createObjectStore('playgrounds', { keyPath: 'id' });
+        idb.createObjectStore('providers', { keyPath: 'id' });
+        idb.createObjectStore('agentLibrary', { keyPath: 'id' });
+        idb.createObjectStore('runPresets', { keyPath: 'id' });
+      };
+      req.onsuccess = () => {
+        req.result.close();
+        resolve();
+      };
+      req.onerror = () => reject(req.error);
+    });
+
+    const db = await import('../db');
+    const pg = createPlayground('Upgrade');
+    await db.savePlayground(pg);
+    await db.saveRun(makeRun(pg.id, 1));
+    expect((await db.listRuns(pg.id)).map((r) => r.version)).toEqual([1]);
+  });
 });

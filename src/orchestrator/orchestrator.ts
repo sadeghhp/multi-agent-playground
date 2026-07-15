@@ -1,15 +1,23 @@
-import type { Agent, Connection, Playground, TranscriptMessage } from '../domain/schema';
+import type { Agent, Connection, Playground, Provider, TranscriptMessage } from '../domain/schema';
 import { newErrorId, newLogId, newMessageId, newRunId } from '../domain/ids';
 import { useDomainStore } from '../store/domainStore';
 import { useProviderStore } from '../store/providerStore';
 import { useRuntimeStore } from '../store/runtimeStore';
+import { useUiStore } from '../store/uiStore';
+import { useUsageStore } from '../store/usageStore';
 import { ProviderError, retryEligible, summaryFor } from '../providers/errors';
 import { sendChat } from '../providers/openaiAdapter';
 import { buildEndpoint } from '../providers/url';
-import type { ChatMessage } from '../providers/types';
-import { assembleMessages, boundHistory } from '../agents/promptAssembly';
+import type { ChatMessage, NormalizedResponse } from '../providers/types';
+import { assembleMessages, boundHistory, estimateTokens } from '../agents/promptAssembly';
 import { hasBlockingErrors, validateForRun } from './validate';
 import { beginVersionedRun, finalizeVersionedRun } from './runHistory';
+import {
+  assertWithinBudget,
+  BudgetExceededError,
+  buildBudgetSnapshot,
+} from '../usage/budget';
+import { isSuggestableFailure, listFallbackCandidates } from '../usage/fallback';
 
 /**
  * Conversation orchestrator (spec §11). Directed sequential traversal of the
@@ -183,7 +191,11 @@ export async function startRun(): Promise<void> {
       useRuntimeStore.getState().clearStreaming(agent.id); // reset any prior live buffer
       log('request-started', `Requesting response from "${agent.name}".`, agent.id);
 
-      const provider = providersById.get(agent.llm.providerId ?? '');
+      const override = useRuntimeStore.getState().providerOverrides[agent.id];
+      const providerId = override?.providerId ?? agent.llm.providerId;
+      const model = override?.model || agent.llm.model;
+      const isFallback = Boolean(override);
+      const provider = providersById.get(providerId ?? '');
       const turnNumber = useRuntimeStore.getState().currentTurn;
 
       if (!provider) {
@@ -221,7 +233,7 @@ export async function startRun(): Promise<void> {
       // temperature for this conversation only (null means "no override").
       const effectiveTemperature = pg.conversation.temperatureOverride ?? agent.llm.temperature;
       const chatParams = {
-        model: agent.llm.model,
+        model,
         messages,
         temperature: effectiveTemperature,
         maxOutputTokens: agent.llm.maxOutputTokens,
@@ -232,7 +244,7 @@ export async function startRun(): Promise<void> {
       const snapshotBase = {
         url: buildEndpoint(provider.baseUrl, provider.path),
         providerName: provider.displayName,
-        model: agent.llm.model,
+        model,
         messages: messages as ChatMessage[],
         params: {
           temperature: effectiveTemperature,
@@ -243,27 +255,36 @@ export async function startRun(): Promise<void> {
         },
       };
 
+      const effectiveTimeoutMs =
+        pg.conversation.responseTimeoutOverrideMs != null
+          ? Math.min(agent.runtime.responseTimeoutMs, pg.conversation.responseTimeoutOverrideMs)
+          : agent.runtime.responseTimeoutMs;
+
       try {
-        // A run-level timeout override caps (never raises) the agent's own
-        // configured timeout, so tightening it for one run (e.g. to keep a
-        // demo snappy) can't be defeated by a slower per-agent setting.
-        const effectiveTimeoutMs =
-          pg.conversation.responseTimeoutOverrideMs != null
-            ? Math.min(agent.runtime.responseTimeoutMs, pg.conversation.responseTimeoutOverrideMs)
-            : agent.runtime.responseTimeoutMs;
-        const res = await sendChat(provider, chatParams, {
-          signal: controller.signal,
-          timeoutMs: effectiveTimeoutMs,
-          onToken: (chunk) => useRuntimeStore.getState().appendToken(agent.id, chunk),
+        const res = await callWithBudgetAndOptionalFallback({
+          agent,
+          provider,
+          providersById,
+          chatParams,
+          messages,
+          controller,
+          effectiveTimeoutMs,
+          isFallback,
+          runId,
+          playgroundId: pg.id,
+          messageId,
+          snapshotBase,
+          item,
+          turnNumber,
         });
+        if (!res) {
+          // Failure already recorded; stop or continue based on stopOnError.
+          if (pg.conversation.stopOnError) return finish(runId, 'error');
+          continue;
+        }
 
-        useRuntimeStore.getState().recordSnapshot(messageId, {
-          ...snapshotBase,
-          status: res.status,
-          finishReason: res.finishReason,
-          rawExcerpt: safeExcerpt(res.raw),
-        });
-
+        const usedProvider = res.provider;
+        const usedFallback = res.fallback;
         const message: TranscriptMessage = {
           id: messageId,
           turn: turnNumber,
@@ -272,34 +293,47 @@ export async function startRun(): Promise<void> {
           agentDeleted: false,
           role: agent.role,
           language: agent.language,
-          model: res.model,
-          providerId: provider.id,
-          // Keep thinking out of the visible transcript body (spec: thinking is
-          // hidden by default, shown only via an explicit chip). Reasoning-only
-          // turns leave content empty and still surface `reasoning`.
-          content: res.text || '',
-          reasoning: res.reasoning || undefined,
+          model: res.response.model,
+          providerId: usedProvider.id,
+          content: res.response.text || '',
+          reasoning: res.response.reasoning || undefined,
           status: 'completed',
           sourceAgentId: item.sourceAgentId,
           connectionType: connection?.type ?? null,
           timestamp: Date.now(),
-          durationMs: res.durationMs,
-          promptTokens: res.promptTokens,
-          completionTokens: res.completionTokens,
-          totalTokens: res.totalTokens,
+          durationMs: res.response.durationMs,
+          promptTokens: res.response.promptTokens,
+          completionTokens: res.response.completionTokens,
+          totalTokens: res.response.totalTokens,
         };
         useDomainStore.getState().appendTranscript(message);
-        useRuntimeStore.getState().clearStreaming(agent.id); // final message replaces the live buffer
+        useRuntimeStore.getState().clearStreaming(agent.id);
         useRuntimeStore.getState().incAgentResponses(agent.id);
         runtime.setAgentState(agent.id, 'completed');
-        log('request-completed', `"${agent.name}" responded in ${res.durationMs}ms.`, agent.id);
+        log(
+          'request-completed',
+          `"${agent.name}" responded in ${res.response.durationMs}ms` +
+            (usedFallback ? ' (fallback provider).' : '.'),
+          agent.id,
+        );
+        void recordCallUsage({
+          response: res.response,
+          messages,
+          provider: usedProvider,
+          model: res.response.model || model,
+          playgroundId: pg.id,
+          runId,
+          fallback: usedFallback,
+        });
       } catch (err) {
-        useRuntimeStore.getState().clearStreaming(agent.id); // drop the partial live buffer
-        if (controller.signal.aborted) {
-          // Stop was pressed; leave the loop quietly (status already 'stopped').
-          break;
-        }
-        const pe = err instanceof ProviderError ? err : new ProviderError('unknown', summaryFor('unknown'));
+        useRuntimeStore.getState().clearStreaming(agent.id);
+        if (controller.signal.aborted) break;
+        const pe =
+          err instanceof BudgetExceededError
+            ? new ProviderError('bad-request', err.message)
+            : err instanceof ProviderError
+              ? err
+              : new ProviderError('unknown', summaryFor('unknown'));
         const detail = `${pe.message}${pe.detail ? ` (${pe.detail})` : ''}`;
         useRuntimeStore.getState().recordSnapshot(messageId, {
           ...snapshotBase,
@@ -308,7 +342,7 @@ export async function startRun(): Promise<void> {
         });
         recordFailure(agent, turnNumber, messageId, item, detail, 'agent', provider.displayName, pe);
         if (pg.conversation.stopOnError) return finish(runId, 'error');
-        continue; // skip enqueuing this agent's targets on failure
+        continue;
       }
 
       // --- enqueue targets (spec §11.2 steps 3–5) ---
@@ -400,4 +434,238 @@ function finish(runId: string, status: 'completed' | 'error') {
   runtime.setStatus(status);
   runtime.setActive(null, null);
   log(status === 'completed' ? 'run-completed' : 'run-error', `Run ${status}.`);
+}
+
+function estimateRequestTokens(messages: ChatMessage[], maxOutputTokens: number): number {
+  const prompt = messages.reduce((sum, m) => sum + estimateTokens(m.content), 0);
+  // Budget conservatively: assume the model may use up to maxOutputTokens.
+  return prompt + maxOutputTokens;
+}
+
+async function recordCallUsage(opts: {
+  response: NormalizedResponse;
+  messages: ChatMessage[];
+  provider: Provider;
+  model: string;
+  playgroundId: string;
+  runId: string;
+  fallback: boolean;
+}): Promise<void> {
+  const hasReal =
+    opts.response.promptTokens != null ||
+    opts.response.completionTokens != null ||
+    opts.response.totalTokens != null;
+  const promptTokens =
+    opts.response.promptTokens ??
+    opts.messages.reduce((sum, m) => sum + estimateTokens(m.content), 0);
+  const completionTokens =
+    opts.response.completionTokens ?? estimateTokens(opts.response.text || '');
+  const totalTokens =
+    opts.response.totalTokens ?? promptTokens + completionTokens;
+
+  useRuntimeStore.getState().addRunTokens(totalTokens, opts.fallback);
+  await useUsageStore.getState().recordUsage({
+    playgroundId: opts.playgroundId,
+    runId: opts.runId,
+    providerId: opts.provider.id,
+    providerName: opts.provider.displayName,
+    model: opts.model,
+    promptTokens,
+    completionTokens,
+    totalTokens,
+    estimated: !hasReal,
+    fallback: opts.fallback,
+  });
+}
+
+/**
+ * Send a chat call after budget checks. On suggestable provider failure, pause
+ * for a user-confirmed temporary fallback and retry once. Returns null when the
+ * failure was recorded and the caller should stop/continue the run loop.
+ */
+async function callWithBudgetAndOptionalFallback(opts: {
+  agent: Agent;
+  provider: Provider;
+  providersById: Map<string, Provider>;
+  chatParams: {
+    model: string;
+    messages: ChatMessage[];
+    temperature: number;
+    maxOutputTokens: number;
+    topP?: number;
+    seed?: number;
+    stopSequences?: string[];
+  };
+  messages: ChatMessage[];
+  controller: AbortController;
+  effectiveTimeoutMs: number;
+  isFallback: boolean;
+  runId: string;
+  playgroundId: string;
+  messageId: string;
+  snapshotBase: {
+    url: string;
+    providerName: string;
+    model: string;
+    messages: ChatMessage[];
+    params: Record<string, unknown>;
+  };
+  item: QueueItem;
+  turnNumber: number;
+}): Promise<{ response: NormalizedResponse; provider: Provider; fallback: boolean } | null> {
+  const usage = useUsageStore.getState();
+  const runtime = useRuntimeStore.getState();
+  const estimatedTokens = estimateRequestTokens(opts.messages, opts.chatParams.maxOutputTokens);
+  const snap = buildBudgetSnapshot(usage.budget, {
+    runTokens: runtime.runTokens,
+    runFallbackTokens: runtime.runFallbackTokens,
+    dayTokens: usage.dayTokens(),
+  });
+  assertWithinBudget(usage.budget, snap, {
+    estimatedTokens,
+    isFallback: opts.isFallback,
+  });
+
+  try {
+    const response = await sendChat(opts.provider, opts.chatParams, {
+      signal: opts.controller.signal,
+      timeoutMs: opts.effectiveTimeoutMs,
+      onToken: (chunk) => useRuntimeStore.getState().appendToken(opts.agent.id, chunk),
+    });
+    useRuntimeStore.getState().recordSnapshot(opts.messageId, {
+      ...opts.snapshotBase,
+      status: response.status,
+      finishReason: response.finishReason,
+      rawExcerpt: safeExcerpt(response.raw),
+    });
+    return { response, provider: opts.provider, fallback: opts.isFallback };
+  } catch (err) {
+    useRuntimeStore.getState().clearStreaming(opts.agent.id);
+    if (opts.controller.signal.aborted) throw err;
+
+    const pe = err instanceof ProviderError ? err : new ProviderError('unknown', summaryFor('unknown'));
+
+    // Suggest-only: offer another provider when the primary looks unreachable
+    // and we are not already on a fallback override for this agent.
+    if (!opts.isFallback && isSuggestableFailure(pe.kind)) {
+      const candidates = listFallbackCandidates(
+        [...opts.providersById.values()],
+        opts.provider.id,
+      );
+      if (candidates.length > 0) {
+        const budget = buildBudgetSnapshot(useUsageStore.getState().budget, {
+          runTokens: useRuntimeStore.getState().runTokens,
+          runFallbackTokens: useRuntimeStore.getState().runFallbackTokens,
+          dayTokens: useUsageStore.getState().dayTokens(),
+        });
+        log(
+          'fallback-suggested',
+          `Suggesting temporary provider switch after "${opts.provider.displayName}" failed.`,
+          opts.agent.id,
+        );
+        const choice = await useUiStore.getState().requestFallbackSuggestion({
+          agentName: opts.agent.name,
+          failedProviderName: opts.provider.displayName,
+          failedModel: opts.chatParams.model,
+          errorSummary: `${pe.message}${pe.detail ? ` (${pe.detail})` : ''}`,
+          candidates,
+          budget,
+        });
+        if (choice) {
+          const fbProvider = opts.providersById.get(choice.providerId);
+          if (fbProvider) {
+            useRuntimeStore.getState().setProviderOverride(opts.agent.id, choice);
+            log(
+              'fallback-accepted',
+              `Using "${fbProvider.displayName}" / ${choice.model} for the rest of this run.`,
+              opts.agent.id,
+            );
+            const fbSnap = buildBudgetSnapshot(useUsageStore.getState().budget, {
+              runTokens: useRuntimeStore.getState().runTokens,
+              runFallbackTokens: useRuntimeStore.getState().runFallbackTokens,
+              dayTokens: useUsageStore.getState().dayTokens(),
+            });
+            assertWithinBudget(useUsageStore.getState().budget, fbSnap, {
+              estimatedTokens,
+              isFallback: true,
+            });
+            const fbParams = { ...opts.chatParams, model: choice.model };
+            const fbSnapshotBase = {
+              ...opts.snapshotBase,
+              url: buildEndpoint(fbProvider.baseUrl, fbProvider.path),
+              providerName: fbProvider.displayName,
+              model: choice.model,
+            };
+            try {
+              const response = await sendChat(fbProvider, fbParams, {
+                signal: opts.controller.signal,
+                timeoutMs: opts.effectiveTimeoutMs,
+                onToken: (chunk) => useRuntimeStore.getState().appendToken(opts.agent.id, chunk),
+              });
+              useRuntimeStore.getState().recordSnapshot(opts.messageId, {
+                ...fbSnapshotBase,
+                status: response.status,
+                finishReason: response.finishReason,
+                rawExcerpt: safeExcerpt(response.raw),
+              });
+              return { response, provider: fbProvider, fallback: true };
+            } catch (retryErr) {
+              if (opts.controller.signal.aborted) throw retryErr;
+              const rpe =
+                retryErr instanceof BudgetExceededError
+                  ? new ProviderError('bad-request', retryErr.message)
+                  : retryErr instanceof ProviderError
+                    ? retryErr
+                    : new ProviderError('unknown', summaryFor('unknown'));
+              const detail = `${rpe.message}${rpe.detail ? ` (${rpe.detail})` : ''}`;
+              useRuntimeStore.getState().recordSnapshot(opts.messageId, {
+                ...fbSnapshotBase,
+                status: rpe.status,
+                error: detail,
+              });
+              recordFailure(
+                opts.agent,
+                opts.turnNumber,
+                opts.messageId,
+                opts.item,
+                detail,
+                'agent',
+                fbProvider.displayName,
+                rpe,
+              );
+              return null;
+            }
+          }
+        }
+      }
+    }
+
+    if (err instanceof BudgetExceededError) {
+      const detail = err.message;
+      useRuntimeStore.getState().recordSnapshot(opts.messageId, {
+        ...opts.snapshotBase,
+        error: detail,
+      });
+      recordFailure(opts.agent, opts.turnNumber, opts.messageId, opts.item, detail, 'run', opts.provider.displayName);
+      return null;
+    }
+
+    const detail = `${pe.message}${pe.detail ? ` (${pe.detail})` : ''}`;
+    useRuntimeStore.getState().recordSnapshot(opts.messageId, {
+      ...opts.snapshotBase,
+      status: pe.status,
+      error: detail,
+    });
+    recordFailure(
+      opts.agent,
+      opts.turnNumber,
+      opts.messageId,
+      opts.item,
+      detail,
+      'agent',
+      opts.provider.displayName,
+      pe,
+    );
+    return null;
+  }
 }

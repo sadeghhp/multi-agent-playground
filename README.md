@@ -16,6 +16,23 @@ npm test         # run the unit + smoke test suite
 npm run build    # type-check + production build
 ```
 
+## Deploy / GitHub Pages
+
+Pushes and PRs to `main` run lint, typecheck, tests, and a production build via
+[`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml). Successful pushes to
+`main` also publish `dist/` to GitHub Pages.
+
+Live URL: https://sadeghhp.github.io/multi-agent-playground/
+
+One-time repo setup: **Settings → Pages → Source = GitHub Actions**.
+
+To verify the Pages base path locally:
+
+```bash
+GITHUB_PAGES=true npm run build
+# dist/index.html asset hrefs should start with /multi-agent-playground/
+```
+
 ## Running a conversation (acceptance scenario, spec §24)
 
 The app talks to any **OpenAI-compatible** chat-completions endpoint that allows

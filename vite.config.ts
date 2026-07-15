@@ -5,6 +5,8 @@ import { providerDevProxyPlugin } from './vite/providerDevProxyPlugin';
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  // GitHub Pages serves this repo under /multi-agent-playground/; keep "/" for local dev/preview.
+  base: process.env.GITHUB_PAGES === 'true' ? '/multi-agent-playground/' : '/',
   plugins: [react(), providerDevProxyPlugin()],
   optimizeDeps: {
     // Pre-bundle heavy deps up front so restarts are less likely to 504 in open tabs.

@@ -5,8 +5,8 @@
 
 import {
   DEFAULT_USAGE_BUDGET,
-  UsageBudgetSettings,
-  type UsageBudgetSettings as UsageBudgetSettingsType,
+  UsageBudgetSettings as UsageBudgetSettingsSchema,
+  type UsageBudgetSettings,
 } from '../domain/usage';
 
 const SELECTED_KEY = 'map.selectedPlaygroundId';
@@ -14,7 +14,7 @@ const THEME_KEY = 'map.theme';
 const BUDGET_KEY = 'map.usageBudget';
 
 export type Theme = 'light' | 'dark';
-export type UsageBudgetSettings = UsageBudgetSettingsType;
+export type { UsageBudgetSettings };
 
 export function getSelectedPlaygroundId(): string | null {
   try {
@@ -51,7 +51,7 @@ export function getUsageBudget(): UsageBudgetSettings {
   try {
     const raw = window.localStorage.getItem(BUDGET_KEY);
     if (!raw) return { ...DEFAULT_USAGE_BUDGET };
-    const parsed = UsageBudgetSettings.safeParse(JSON.parse(raw));
+    const parsed = UsageBudgetSettingsSchema.safeParse(JSON.parse(raw));
     return parsed.success ? parsed.data : { ...DEFAULT_USAGE_BUDGET };
   } catch {
     return { ...DEFAULT_USAGE_BUDGET };
@@ -60,7 +60,7 @@ export function getUsageBudget(): UsageBudgetSettings {
 
 export function setUsageBudget(budget: UsageBudgetSettings): void {
   try {
-    const parsed = UsageBudgetSettings.parse(budget);
+    const parsed = UsageBudgetSettingsSchema.parse(budget);
     window.localStorage.setItem(BUDGET_KEY, JSON.stringify(parsed));
   } catch {
     /* storage full / disabled — non-fatal */

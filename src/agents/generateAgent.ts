@@ -115,6 +115,8 @@ export interface GenerateAgentOptions {
   timeoutMs?: number;
   /** Streaming preview passthrough only — never parsed mid-stream. */
   onToken?: (chunk: string) => void;
+  /** Reasoning/thinking token passthrough for reasoning models — never parsed. */
+  onReasoningToken?: (chunk: string) => void;
 }
 
 export interface GenerateAgentResult {
@@ -169,7 +171,12 @@ export async function generateAgentDraft(
     const res = await sendChat(
       provider,
       { model, messages, temperature: 0.4, maxOutputTokens: 2048 },
-      { signal: options.signal, timeoutMs: options.timeoutMs, onToken: options.onToken },
+      {
+        signal: options.signal,
+        timeoutMs: options.timeoutMs,
+        onToken: options.onToken,
+        onReasoningToken: options.onReasoningToken,
+      },
     );
 
     if (!res.text.trim()) {
@@ -177,7 +184,10 @@ export async function generateAgentDraft(
         ok: false,
         durationMs: Date.now() - start,
         errorKind: 'empty-response',
-        errorSummary: 'The model returned an empty response.',
+        errorSummary: res.reasoning
+          ? 'The model spent its whole response reasoning and never produced a visible answer.'
+          : 'The model returned an empty response.',
+        rawText: res.reasoning || undefined,
       };
     }
 

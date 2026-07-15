@@ -26,6 +26,28 @@
 }
 @keyframes blink { 50% { opacity: 0; } }
 
+.liveBadge {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.liveBadge::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: liveBlink 1s steps(2) infinite;
+}
+@keyframes liveBlink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .liveBadge::before, .caret { animation: none; }
+}
+
 .err {
   font-size: 12px;
   color: var(--danger);

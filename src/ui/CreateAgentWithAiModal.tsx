@@ -40,6 +40,7 @@ export function CreateAgentWithAiModal() {
   const [model, setModel] = useState(selectedProvider?.defaultModel ?? '');
   const [generating, setGenerating] = useState(false);
   const [streamBuffer, setStreamBuffer] = useState('');
+  const [reasoningBuffer, setReasoningBuffer] = useState('');
   const [draft, setDraft] = useState<GeneratedAgentDraft | null>(null);
   const [result, setResult] = useState<GenerateAgentResult | null>(null);
   const [showRaw, setShowRaw] = useState(false);
@@ -72,6 +73,7 @@ export function CreateAgentWithAiModal() {
     setDraft(null);
     setResult(null);
     setStreamBuffer('');
+    setReasoningBuffer('');
     setShowRaw(false);
     const controller = new AbortController();
     abortRef.current = controller;
@@ -81,6 +83,9 @@ export function CreateAgentWithAiModal() {
       timeoutMs: selectedProvider.timeoutMs,
       onToken: (chunk) => {
         if (abortRef.current === controller) setStreamBuffer((b) => b + chunk);
+      },
+      onReasoningToken: (chunk) => {
+        if (abortRef.current === controller) setReasoningBuffer((b) => b + chunk);
       },
     });
 
@@ -198,11 +203,21 @@ export function CreateAgentWithAiModal() {
 
           {generating && (
             <div className="field">
-              <label>Generating…</label>
-              <pre className={styles.streamPreview}>
-                {streamBuffer}
-                <span className={styles.caret} aria-hidden="true" />
-              </pre>
+              <label className={styles.liveBadge}>
+                {streamBuffer.length === 0 ? 'thinking…' : 'streaming…'}
+              </label>
+              {streamBuffer.length === 0 && reasoningBuffer.length > 0 && (
+                <pre className={styles.streamPreview}>
+                  {reasoningBuffer}
+                  <span className={styles.caret} aria-hidden="true" />
+                </pre>
+              )}
+              {streamBuffer.length > 0 && (
+                <pre className={styles.streamPreview}>
+                  {streamBuffer}
+                  <span className={styles.caret} aria-hidden="true" />
+                </pre>
+              )}
             </div>
           )}
 

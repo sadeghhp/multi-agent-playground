@@ -107,6 +107,29 @@ describe('generateAgentDraft', () => {
     expect(result.errorKind).toBe('empty-response');
   });
 
+  it('surfaces reasoning text and a distinct message when a reasoning model burns its budget without answering', async () => {
+    sendChatMock.mockResolvedValue({
+      ...reply(''),
+      reasoning: 'Thinking through the request at length...',
+    });
+    const result = await generateAgentDraft('desc', provider, 'm1');
+    expect(result.ok).toBe(false);
+    expect(result.errorKind).toBe('empty-response');
+    expect(result.errorSummary).toMatch(/reasoning/i);
+    expect(result.rawText).toBe('Thinking through the request at length...');
+  });
+
+  it('threads onReasoningToken through to sendChat', async () => {
+    sendChatMock.mockResolvedValue(reply(JSON.stringify(VALID_DRAFT)));
+    const onReasoningToken = vi.fn();
+    await generateAgentDraft('desc', provider, 'm1', { onReasoningToken });
+    expect(sendChatMock).toHaveBeenCalledWith(
+      provider,
+      expect.anything(),
+      expect.objectContaining({ onReasoningToken }),
+    );
+  });
+
   it('does not call the provider when the description is empty', async () => {
     const result = await generateAgentDraft('   ', provider, 'm1');
     expect(result.ok).toBe(false);

@@ -90,6 +90,29 @@ function normalizeDeltaReasoning(delta: Record<string, unknown>): string {
   return '';
 }
 
+/**
+ * Some reasoning models (e.g. local DeepSeek-R1/QwQ-style servers) don't use a
+ * separate `reasoning_content` field at all — they emit `<think>...</think>`
+ * inline inside the normal content string. Strip it out so it never gets
+ * treated as (or fed back to other agents as) the agent's visible reply.
+ * A dangling unterminated `<think>` (output truncated mid-thought) is also
+ * treated as reasoning through to the end of the string.
+ */
+function extractInlineThinking(raw: string): { text: string; reasoning: string } {
+  if (!/<think>/i.test(raw)) return { text: raw, reasoning: '' };
+  let reasoning = '';
+  let text = raw.replace(/<think>([\s\S]*?)<\/think>/gi, (_, inner: string) => {
+    reasoning += inner;
+    return '';
+  });
+  const openIdx = text.search(/<think>/i);
+  if (openIdx !== -1) {
+    reasoning += text.slice(openIdx).replace(/<think>/i, '');
+    text = text.slice(0, openIdx);
+  }
+  return { text: text.trim(), reasoning: reasoning.trim() };
+}
+
 function extractText(data: unknown): { text: string; finishReason: string | null } {
   const choices = (data as { choices?: unknown }).choices;
   if (!Array.isArray(choices) || choices.length === 0) {
@@ -303,9 +326,11 @@ export async function sendChat(
       clearRequestTimeout();
     }
     const model = streamed.model ?? params.model;
+    const { text: cleanedText, reasoning: inlineReasoning } = extractInlineThinking(streamed.text);
+    const combinedReasoning = [streamed.reasoning, inlineReasoning].filter(Boolean).join('\n\n');
     return {
-      text: streamed.text,
-      ...(streamed.reasoning ? { reasoning: streamed.reasoning } : {}),
+      text: cleanedText,
+      ...(combinedReasoning ? { reasoning: combinedReasoning } : {}),
       model,
       finishReason: streamed.finishReason,
       ...streamed.usage,
@@ -337,7 +362,8 @@ export async function sendChat(
     clearRequestTimeout();
   }
 
-  const { text, finishReason } = extractText(data);
+  const { text: rawText, finishReason } = extractText(data);
+  const { text, reasoning: inlineReasoning } = extractInlineThinking(rawText);
   // Non-streaming provider (or one that ignored `stream`): surface the full text
   // once so streaming consumers still get a live update.
   if (options.onToken && text) options.onToken(text);
@@ -349,6 +375,7 @@ export async function sendChat(
 
   return {
     text,
+    ...(inlineReasoning ? { reasoning: inlineReasoning } : {}),
     model,
     finishReason,
     ...usage,

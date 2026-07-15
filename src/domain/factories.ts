@@ -276,7 +276,7 @@ const TEMPLATES: Record<TemplateKey, TemplateDef> = {
     label: 'Analyst',
     role: 'Analyst',
     systemInstruction:
-      'Analyze the topic methodically. Break problems into parts and reason from evidence.',
+      'Analyze the topic methodically. Break problems into parts and reason from evidence. Distinguish established facts from assumptions and inferences; state explicitly when evidence is insufficient rather than guessing.',
     characteristics: { assertiveness: 60, skepticism: 60, creativity: 40 },
     color: 'blue',
     skills: [presetSkill('analysis')],
@@ -285,7 +285,7 @@ const TEMPLATES: Record<TemplateKey, TemplateDef> = {
     label: 'Critic',
     role: 'Skeptical reviewer',
     systemInstruction:
-      'Critically evaluate the previous responses. Challenge unsupported claims and identify weaknesses.',
+      'Critically evaluate the previous responses. Challenge unsupported claims and identify weaknesses. Ground every objection in the text itself or in missing evidence — do not invent flaws. State each defect directly, without praise, hedging, or agreement.',
     characteristics: { skepticism: 85, assertiveness: 70, cooperation: 35 },
     color: 'red',
     skills: [presetSkill('critique')],
@@ -294,7 +294,7 @@ const TEMPLATES: Record<TemplateKey, TemplateDef> = {
     label: 'Moderator',
     role: 'Moderator',
     systemInstruction:
-      'Synthesize the discussion, resolve disagreements fairly, and produce a balanced conclusion.',
+      'Synthesize the discussion, resolve disagreements fairly, and produce a balanced conclusion. Base the conclusion only on claims actually made in the discussion — do not introduce new arguments. State plainly any disagreement that remains unresolved instead of glossing over it.',
     characteristics: { cooperation: 80, tone: 'balanced', assertiveness: 50 },
     color: 'green',
     skills: [presetSkill('summarization')],
@@ -303,7 +303,7 @@ const TEMPLATES: Record<TemplateKey, TemplateDef> = {
     label: 'Researcher',
     role: 'Researcher',
     systemInstruction:
-      'Gather relevant considerations and surface the most important facts and open questions.',
+      'Gather relevant considerations and surface the most important facts and open questions. Mark uncertain or unverified points explicitly rather than presenting them as settled. Do not pad the list with restated or redundant considerations.',
     characteristics: { creativity: 60, verbosity: 60, skepticism: 50 },
     color: 'teal',
     skills: [presetSkill('brainstorming')],
@@ -311,7 +311,8 @@ const TEMPLATES: Record<TemplateKey, TemplateDef> = {
   summarizer: {
     label: 'Summarizer',
     role: 'Summarizer',
-    systemInstruction: 'Produce a concise, faithful summary of the conversation so far.',
+    systemInstruction:
+      'Produce a concise, faithful summary of the conversation so far. Include only what was actually said — no added opinions, embellishment, or filler. Omit anything not present in the conversation rather than inferring it.',
     characteristics: { verbosity: 25, tone: 'concise' },
     color: 'violet',
     skills: [presetSkill('summarization')],

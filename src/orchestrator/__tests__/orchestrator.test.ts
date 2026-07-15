@@ -16,7 +16,7 @@ import type { Playground } from '../../domain/schema';
 import { useDomainStore } from '../../store/domainStore';
 import { useProviderStore } from '../../store/providerStore';
 import { useRuntimeStore } from '../../store/runtimeStore';
-import { startRun, stopRun } from '../orchestrator';
+import { continueRun, startRun, stopRun } from '../orchestrator';
 
 function okChat() {
   return new Response(
@@ -347,5 +347,74 @@ describe('orchestrator cancellation', () => {
     expect(useRuntimeStore.getState().status).toBe('completed');
     const transcriptB = useDomainStore.getState().playground!.transcript;
     expect(transcriptB.some((m) => m.status === 'completed')).toBe(true);
+  });
+});
+
+describe('continueRun', () => {
+  it('appends the user message and re-enters the graph, and agents see it as history', async () => {
+    let lastMessages: { role: string; content: string }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+        lastMessages = JSON.parse(init.body as string).messages;
+        return Promise.resolve(okChat());
+      }),
+    );
+    const pg = cyclePlayground(1, 5);
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+    expect(useRuntimeStore.getState().status).toBe('completed');
+
+    continueRun('Please argue against this and give me the facts.');
+    // continueRun() kicks off startRun() but doesn't await it; wait for it to settle.
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+
+    const transcript = useDomainStore.getState().playground!.transcript;
+    const userMsg = transcript.find((m) => m.role === 'user' && m.agentId === null);
+    expect(userMsg).toBeDefined();
+    expect(userMsg!.content).toBe('Please argue against this and give me the facts.');
+
+    // The next agent turn's final task message explicitly surfaces the user's
+    // follow-up as an instruction to address — not just a buried history line.
+    const taskMessage = lastMessages[lastMessages.length - 1];
+    expect(taskMessage.content).toMatch(/must address it/);
+    expect(taskMessage.content).toContain('Please argue against this and give me the facts.');
+    // And it must NOT be treated as "opening a live discussion" (there is prior history).
+    expect(taskMessage.content).not.toMatch(/opening a live discussion/);
+  });
+
+  it('is a no-op while a run is in progress', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(
+        () =>
+          new Promise(() => {
+            /* never resolves */
+          }),
+      ),
+    );
+    const pg = cyclePlayground(10, 5);
+    useDomainStore.setState({ playground: pg });
+
+    void startRun();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(useRuntimeStore.getState().status).toBe('running');
+
+    const before = useDomainStore.getState().playground!.transcript.length;
+    continueRun('ignored while running');
+    expect(useDomainStore.getState().playground!.transcript.length).toBe(before);
+  });
+
+  it('is a no-op for a blank message', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(okChat())));
+    const pg = cyclePlayground(1, 5);
+    useDomainStore.setState({ playground: pg });
+    await startRun();
+
+    const before = useDomainStore.getState().playground!.transcript.length;
+    continueRun('   ');
+    expect(useDomainStore.getState().playground!.transcript.length).toBe(before);
   });
 });

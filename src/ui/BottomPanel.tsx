@@ -1,7 +1,17 @@
-import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useDomainStore } from '../store/domainStore';
+import { useProviderStore } from '../store/providerStore';
 import { useRuntimeStore } from '../store/runtimeStore';
 import { agentColor } from '../graph/colors';
+import { continueRun } from '../orchestrator/orchestrator';
+import { hasBlockingErrors, validateForRun } from '../orchestrator/validate';
 import { Message } from './transcript/Message';
 import { LiveMessage } from './transcript/LiveMessage';
 import styles from './BottomPanel.module.css';
@@ -30,8 +40,25 @@ export function BottomPanel() {
   const activeAgentId = useRuntimeStore((s) => s.activeAgentId);
   const liveText = useRuntimeStore((s) => (s.activeAgentId ? s.streamingText[s.activeAgentId] : undefined));
 
+  const providers = useProviderStore((s) => s.providers);
+
   const [tab, setTab] = useState<Tab>('transcript');
   const transcript = playground?.transcript ?? [];
+
+  // Follow-up input: lets the user steer the conversation ("argue against this",
+  // "give me the facts") after a run has stopped, without reopening Run Dialog.
+  const [followUp, setFollowUp] = useState('');
+  const canContinue =
+    status !== 'running' && transcript.length > 0 && !!playground &&
+    !hasBlockingErrors(validateForRun(playground, providers));
+
+  function handleContinue(e: FormEvent) {
+    e.preventDefault();
+    const text = followUp.trim();
+    if (!text || !canContinue) return;
+    continueRun(text);
+    setFollowUp('');
+  }
 
   // The agent currently active during a run — shown as a live bubble that reads
   // "thinking…" until the first token arrives, then streams.
@@ -222,6 +249,21 @@ export function BottomPanel() {
         >
           ↓ Jump to latest
         </button>
+      )}
+
+      {!collapsed && tab === 'transcript' && status !== 'running' && transcript.length > 0 && (
+        <form className={styles.followUp} onSubmit={handleContinue}>
+          <input
+            type="text"
+            value={followUp}
+            onChange={(e) => setFollowUp(e.target.value)}
+            placeholder="Add your input to continue the conversation (e.g. an opinion, an order, a request for facts or arguments)…"
+            aria-label="Message to continue the conversation"
+          />
+          <button type="submit" className="primary" disabled={!canContinue || !followUp.trim()}>
+            Continue
+          </button>
+        </form>
       )}
     </section>
   );

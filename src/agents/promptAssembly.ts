@@ -31,6 +31,15 @@ export interface PromptContext {
   sourceOutput?: string | null;
   /** True on the very first turn of a run — enables the opening instruction. */
   isFirstTurn?: boolean;
+  /**
+   * The most recent user-authored message in the transcript (see
+   * orchestrator.continueRun), if any. Surfaced explicitly and outside the
+   * `includeHistory`/`historyWindow` gate so a user's follow-up ("argue
+   * against this", "give me the facts") stays an authoritative instruction
+   * for every agent in this run, not just a line that can scroll out of the
+   * bounded history window.
+   */
+  pendingUserDirective?: string | null;
 }
 
 const CONNECTION_RULE: Record<Connection['type'], string> = {
@@ -154,6 +163,11 @@ export function buildTaskPrompt(ctx: PromptContext): string {
     if (conversation.objective) sections.push(`Keep this goal in mind as the discussion unfolds: ${conversation.objective}`);
     if (conversation.initialContext) sections.push(`Relevant background: ${conversation.initialContext}`);
     if (agent.runtime.openingInstruction?.trim()) sections.push(agent.runtime.openingInstruction.trim());
+    if (ctx.pendingUserDirective?.trim()) {
+      sections.push(
+        `The user has interjected with the following — you must address it directly: "${ctx.pendingUserDirective.trim()}"`,
+      );
+    }
     sections.push(
       'Begin the conversation now by speaking directly about the topic, the way a person would when opening a real discussion. Do not restate these instructions, list the fields above, announce that you are an AI, or acknowledge that you were given a prompt — just start talking.',
     );
@@ -163,6 +177,16 @@ export function buildTaskPrompt(ctx: PromptContext): string {
   sections.push(`Subject: ${conversation.subject || '(none)'}`);
   if (conversation.objective) sections.push(`Objective: ${conversation.objective}`);
   if (conversation.initialContext) sections.push(`Context: ${conversation.initialContext}`);
+
+  // The user's latest follow-up (spec extension: "continue the conversation").
+  // Surfaced explicitly, outside the includeHistory/historyWindow gate, so it
+  // stays an authoritative instruction for every agent for the rest of the
+  // run rather than one line that can scroll out of the bounded history.
+  if (ctx.pendingUserDirective?.trim()) {
+    sections.push(
+      `The user has interjected with the following — you must address it directly in your response: "${ctx.pendingUserDirective.trim()}"`,
+    );
+  }
 
   if (ctx.sourceAgentName && ctx.incoming) {
     sections.push(`You are responding after ${ctx.sourceAgentName} via a ${ctx.incoming.type} connection.`);

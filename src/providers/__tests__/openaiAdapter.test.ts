@@ -569,7 +569,74 @@ describe('sendChat', () => {
         { model: 'test-model', messages: [{ role: 'user', content: 'hi' }] },
         { onToken: () => {} },
       ),
-    ).rejects.toMatchObject({ kind: 'server-error', detail: 'context length exceeded' });
+    ).rejects.toMatchObject({
+      kind: 'bad-request',
+      detail: 'context length exceeded',
+      streamed: true,
+    });
+  });
+
+  it('classifies OpenRouter mid-stream errors with metadata.raw as bad-request when upstream is invalid-arg', async () => {
+    const errorChunk = {
+      error: {
+        code: 502,
+        message: 'JSON error injected into SSE stream',
+        metadata: {
+          error_type: 'unmapped',
+          raw: '{"error":{"code":400,"message":"Request contains an invalid argument.","status":"INVALID_ARGUMENT"}}',
+        },
+      },
+      choices: [{ delta: { content: '' }, finish_reason: 'error' }],
+    };
+    const sse = [
+      'data: {"model":"google/gemini-2.5-flash-lite","choices":[{"delta":{"content":"partial"}}]}\n\n',
+      `data: ${JSON.stringify(errorChunk)}\n\n`,
+    ];
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse(sse)));
+    const provider = createProvider({ baseUrl: 'https://openrouter.ai/api', apiKey: 'k' });
+
+    await expect(
+      sendChat(
+        provider,
+        { model: 'google/gemini-2.5-flash-lite', messages: [{ role: 'user', content: 'hi' }] },
+        { onToken: () => {} },
+      ),
+    ).rejects.toMatchObject({
+      kind: 'bad-request',
+      status: 502,
+      streamed: true,
+      errorType: 'unmapped',
+      rawUpstream: expect.stringMatching(/invalid argument/i),
+      detail: 'JSON error injected into SSE stream',
+    });
+  });
+
+  it('preserves structured metadata from HTTP error JSON bodies', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: {
+              code: 400,
+              message: 'Bad Request',
+              metadata: { error_type: 'invalid_request', raw: 'max_tokens out of range' },
+            },
+          }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    );
+    const provider = createProvider({ baseUrl: 'https://api.example.com', apiKey: 'k' });
+
+    await expect(
+      sendChat(provider, { model: 'm', messages: [{ role: 'user', content: 'hi' }] }),
+    ).rejects.toMatchObject({
+      kind: 'bad-request',
+      status: 400,
+      errorType: 'invalid_request',
+      rawUpstream: 'max_tokens out of range',
+    });
   });
 
   it('times out a stream that stalls mid-response instead of hanging forever', async () => {

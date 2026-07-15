@@ -5,10 +5,11 @@ import { useProviderStore } from '../store/providerStore';
 import { useRuntimeStore } from '../store/runtimeStore';
 import { useUiStore } from '../store/uiStore';
 import { useUsageStore } from '../store/usageStore';
-import { ProviderError, retryEligible, summaryFor } from '../providers/errors';
+import { ProviderError, formatProviderErrorDetail, retryEligible, summaryFor } from '../providers/errors';
 import { sendChat } from '../providers/openaiAdapter';
 import { buildEndpoint } from '../providers/url';
 import type { ChatMessage, NormalizedResponse } from '../providers/types';
+import type { RequestSnapshot } from '../store/runtimeStore';
 import { assembleMessages, boundHistory, estimateTokens, visibleAnswerText } from '../agents/promptAssembly';
 import { hasBlockingErrors, validateForRun } from './validate';
 import { beginVersionedRun, finalizeVersionedRun } from './runHistory';
@@ -330,6 +331,8 @@ export async function startRun(): Promise<void> {
           fallback: usedFallback,
         });
       } catch (err) {
+        const partialOutputChars =
+          useRuntimeStore.getState().streamingText[agent.id]?.length ?? 0;
         useRuntimeStore.getState().clearStreaming(agent.id);
         if (controller.signal.aborted) break;
         const pe =
@@ -338,12 +341,11 @@ export async function startRun(): Promise<void> {
             : err instanceof ProviderError
               ? err
               : new ProviderError('unknown', summaryFor('unknown'));
-        const detail = `${pe.message}${pe.detail ? ` (${pe.detail})` : ''}`;
-        useRuntimeStore.getState().recordSnapshot(messageId, {
-          ...snapshotBase,
-          status: pe.status,
-          error: detail,
-        });
+        const detail = formatProviderErrorDetail(pe);
+        useRuntimeStore.getState().recordSnapshot(
+          messageId,
+          buildFailureSnapshot(snapshotBase, pe, messages, partialOutputChars),
+        );
         recordFailure(agent, turnNumber, messageId, item, detail, 'agent', provider.displayName, pe);
         if (pg.conversation.stopOnError) return finish(runId, 'error');
         continue;
@@ -401,6 +403,7 @@ function recordFailure(
     provider: providerName,
     at: Date.now(),
     retryEligible: pe ? retryEligible(pe.kind) : false,
+    errorKind: pe?.kind,
   });
   useDomainStore.getState().appendTranscript({
     id: messageId,
@@ -429,6 +432,33 @@ function safeExcerpt(raw: unknown): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+type SnapshotBase = Pick<
+  RequestSnapshot,
+  'url' | 'providerName' | 'model' | 'messages' | 'params'
+>;
+
+/** Sanitized failure snapshot with prompt size and structured provider error fields. */
+function buildFailureSnapshot(
+  base: SnapshotBase,
+  pe: ProviderError,
+  messages: ChatMessage[],
+  partialOutputChars: number,
+): RequestSnapshot {
+  const promptChars = messages.reduce((sum, m) => sum + m.content.length, 0);
+  return {
+    ...base,
+    status: pe.status,
+    error: formatProviderErrorDetail(pe),
+    errorKind: pe.kind,
+    errorType: pe.errorType,
+    rawUpstream: pe.rawUpstream,
+    streamedError: pe.streamed,
+    promptMessages: messages.length,
+    promptChars,
+    ...(partialOutputChars > 0 ? { partialOutputChars } : {}),
+  };
 }
 
 function finish(runId: string, status: 'completed' | 'error') {
@@ -546,6 +576,8 @@ async function callWithBudgetAndOptionalFallback(opts: {
     });
     return { response, provider: opts.provider, fallback: opts.isFallback };
   } catch (err) {
+    const partialOutputChars =
+      useRuntimeStore.getState().streamingText[opts.agent.id]?.length ?? 0;
     useRuntimeStore.getState().clearStreaming(opts.agent.id);
     if (opts.controller.signal.aborted) throw err;
 
@@ -573,7 +605,7 @@ async function callWithBudgetAndOptionalFallback(opts: {
           agentName: opts.agent.name,
           failedProviderName: opts.provider.displayName,
           failedModel: opts.chatParams.model,
-          errorSummary: `${pe.message}${pe.detail ? ` (${pe.detail})` : ''}`,
+          errorSummary: formatProviderErrorDetail(pe),
           candidates,
           budget,
         });
@@ -625,12 +657,14 @@ async function callWithBudgetAndOptionalFallback(opts: {
                   : retryErr instanceof ProviderError
                     ? retryErr
                     : new ProviderError('unknown', summaryFor('unknown'));
-              const detail = `${rpe.message}${rpe.detail ? ` (${rpe.detail})` : ''}`;
-              useRuntimeStore.getState().recordSnapshot(opts.messageId, {
-                ...fbSnapshotBase,
-                status: rpe.status,
-                error: detail,
-              });
+              const fbPartial =
+                useRuntimeStore.getState().streamingText[opts.agent.id]?.length ?? 0;
+              useRuntimeStore.getState().clearStreaming(opts.agent.id);
+              const detail = formatProviderErrorDetail(rpe);
+              useRuntimeStore.getState().recordSnapshot(
+                opts.messageId,
+                buildFailureSnapshot(fbSnapshotBase, rpe, opts.messages, fbPartial),
+              );
               recordFailure(
                 opts.agent,
                 opts.turnNumber,
@@ -653,17 +687,19 @@ async function callWithBudgetAndOptionalFallback(opts: {
       useRuntimeStore.getState().recordSnapshot(opts.messageId, {
         ...opts.snapshotBase,
         error: detail,
+        errorKind: 'bad-request',
+        promptMessages: opts.messages.length,
+        promptChars: opts.messages.reduce((sum, m) => sum + m.content.length, 0),
       });
       recordFailure(opts.agent, opts.turnNumber, opts.messageId, opts.item, detail, 'run', opts.provider.displayName);
       return null;
     }
 
-    const detail = `${pe.message}${pe.detail ? ` (${pe.detail})` : ''}`;
-    useRuntimeStore.getState().recordSnapshot(opts.messageId, {
-      ...opts.snapshotBase,
-      status: pe.status,
-      error: detail,
-    });
+    const detail = formatProviderErrorDetail(pe);
+    useRuntimeStore.getState().recordSnapshot(
+      opts.messageId,
+      buildFailureSnapshot(opts.snapshotBase, pe, opts.messages, partialOutputChars),
+    );
     recordFailure(
       opts.agent,
       opts.turnNumber,

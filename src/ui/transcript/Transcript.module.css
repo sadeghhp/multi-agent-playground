@@ -75,6 +75,19 @@
 
 .errText { color: var(--danger); font-size: 13px; }
 
+.failureDiag { display: flex; flex-direction: column; gap: 6px; }
+.failureTitle { font-weight: 600; font-size: 13px; color: var(--danger); }
+.failureMeta { font-size: 11px; color: var(--text-muted); font-family: var(--mono); word-break: break-word; }
+.failureHints { font-size: 12px; color: var(--text); }
+.failureHintsLabel { font-weight: 600; margin-bottom: 2px; }
+.failureHints ul { margin: 0; padding-inline-start: 18px; }
+.failureHints li { margin: 2px 0; }
+.failureActions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.failureActions button {
+  font-size: 12px;
+  padding: 3px 8px;
+}
+
 .request {
   margin-top: 8px;
   border-top: 1px dashed var(--border);
@@ -82,7 +95,7 @@
   font-size: 12px;
 }
 .reqRow { display: flex; gap: 8px; padding: 2px 0; }
-.reqRow > span { color: var(--text-subtle); width: 64px; flex-shrink: 0; }
+.reqRow > span { color: var(--text-subtle); width: 72px; flex-shrink: 0; }
 .reqRow > code { font-family: var(--mono); word-break: break-all; }
 .request details { margin-top: 6px; }
 .request summary { cursor: pointer; color: var(--accent); }

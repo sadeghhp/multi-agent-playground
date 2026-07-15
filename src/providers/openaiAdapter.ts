@@ -1,8 +1,8 @@
 import type { Provider } from '../domain/schema';
 import {
   ProviderError,
-  classifyStatus,
-  safeReadErrorBody,
+  providerErrorFromPayload,
+  providerErrorFromResponse,
   summaryFor,
 } from './errors';
 import type {
@@ -270,16 +270,7 @@ async function consumeStream(
     // instead of via the status code. Surface it instead of silently
     // returning a truncated/empty response as if it had succeeded.
     if (json.error !== undefined) {
-      const err = json.error;
-      const message =
-        typeof err === 'string'
-          ? err
-          : typeof (err as { message?: unknown })?.message === 'string'
-            ? (err as { message: string }).message
-            : undefined;
-      throw new ProviderError('server-error', summaryFor('server-error'), {
-        detail: message ?? 'The provider returned an in-stream error.',
-      });
+      throw providerErrorFromPayload(json.error, { streamed: true });
     }
     if (typeof json.model === 'string') model = json.model;
     const choice = (json.choices as Array<Record<string, unknown>> | undefined)?.[0];
@@ -380,9 +371,7 @@ export async function sendChat(
 
   if (!response.ok) {
     clearRequestTimeout();
-    const kind = classifyStatus(response.status);
-    const detail = await safeReadErrorBody(response);
-    throw new ProviderError(kind, summaryFor(kind), { status: response.status, detail });
+    throw await providerErrorFromResponse(response);
   }
 
   // Streaming path: parse SSE when the provider actually streamed. If it ignored

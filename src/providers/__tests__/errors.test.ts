@@ -3,7 +3,12 @@ import {
   ProviderError,
   classifyStatus,
   classifyThrown,
+  formatProviderErrorDetail,
+  parseProviderErrorPayload,
+  providerErrorFromPayload,
   retryEligible,
+  summaryFor,
+  troubleshootingHints,
 } from '../errors';
 
 describe('classifyStatus', () => {
@@ -74,5 +79,88 @@ describe('retryEligible', () => {
   it('is false for auth and cors', () => {
     expect(retryEligible('auth')).toBe(false);
     expect(retryEligible('cors')).toBe(false);
+  });
+});
+
+describe('parseProviderErrorPayload', () => {
+  it('parses a string error', () => {
+    expect(parseProviderErrorPayload('boom')).toEqual({ message: 'boom' });
+  });
+
+  it('parses OpenRouter-shaped metadata including raw upstream', () => {
+    const parsed = parseProviderErrorPayload({
+      code: 502,
+      message: 'JSON error injected into SSE stream',
+      metadata: {
+        error_type: 'unmapped',
+        raw: '{"error":{"code":400,"message":"Request contains an invalid argument.","status":"INVALID_ARGUMENT"}}',
+      },
+    });
+    expect(parsed).toMatchObject({
+      status: 502,
+      message: 'JSON error injected into SSE stream',
+      errorType: 'unmapped',
+    });
+    expect(parsed.rawUpstream).toMatch(/invalid argument/i);
+  });
+});
+
+describe('providerErrorFromPayload', () => {
+  it('classifies in-band 400 as bad-request', () => {
+    const pe = providerErrorFromPayload(
+      { code: 400, message: 'Bad Request', metadata: { raw: 'Request contains an invalid argument.' } },
+      { streamed: true },
+    );
+    expect(pe.kind).toBe('bad-request');
+    expect(pe.status).toBe(400);
+    expect(pe.streamed).toBe(true);
+    expect(pe.rawUpstream).toMatch(/invalid argument/i);
+  });
+
+  it('overrides gateway 502 to bad-request when raw signals client arguments', () => {
+    const pe = providerErrorFromPayload(
+      {
+        code: 502,
+        message: 'JSON error injected into SSE stream',
+        metadata: {
+          raw: '{"error":{"message":"Request contains an invalid argument."}}',
+        },
+      },
+      { streamed: true },
+    );
+    expect(pe.kind).toBe('bad-request');
+    expect(pe.status).toBe(502);
+  });
+});
+
+describe('formatProviderErrorDetail', () => {
+  it('prefers raw upstream over the wrapper message', () => {
+    const pe = new ProviderError('bad-request', summaryFor('bad-request'), {
+      detail: 'JSON error injected into SSE stream',
+      rawUpstream: 'Request contains an invalid argument.',
+      streamed: true,
+    });
+    const detail = formatProviderErrorDetail(pe);
+    expect(detail).toContain('invalid argument');
+    expect(detail).toContain(summaryFor('bad-request'));
+    // Wrapper string is deprioritized when rawUpstream is present.
+    expect(detail).not.toContain('JSON error injected');
+  });
+});
+
+describe('troubleshootingHints', () => {
+  it('suggests history and token cuts for large bad-request prompts', () => {
+    const hints = troubleshootingHints(
+      { kind: 'bad-request', rawUpstream: 'Request contains an invalid argument.' },
+      { promptChars: 18_000, maxOutputTokens: 8192 },
+    );
+    expect(hints.some((h) => /History|Include history/i.test(h))).toBe(true);
+    expect(hints.some((h) => /Max output tokens/i.test(h))).toBe(true);
+    expect(hints.length).toBeLessThanOrEqual(4);
+  });
+
+  it('suggests retry for streamed server-error', () => {
+    const hints = troubleshootingHints({ kind: 'server-error', streamed: true });
+    expect(hints[0]).toMatch(/Retry|switch model/i);
   });
 });

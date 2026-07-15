@@ -5,6 +5,7 @@ import { extractInlineThinking } from '../../providers/openaiAdapter';
 import { useUiStore } from '../../store/uiStore';
 import { useRuntimeStore } from '../../store/runtimeStore';
 import { MessageMarkdown } from './MessageMarkdown';
+import { FailureDiagnostics } from './FailureDiagnostics';
 import { formatDuration } from '../formatDuration';
 import styles from './Transcript.module.css';
 
@@ -14,8 +15,9 @@ import styles from './Transcript.module.css';
  * inject markup (spec §21).
  */
 export function Message({ msg, color }: { msg: TranscriptMessage; color?: string }) {
+  const failed = msg.status === 'failed';
   const [expanded, setExpanded] = useState(true);
-  const [showRequest, setShowRequest] = useState(false);
+  const [showRequest, setShowRequest] = useState(failed);
   const [showReasoning, setShowReasoning] = useState(false);
   const showToast = useUiStore((s) => s.showToast);
   const snapshot = useRuntimeStore((s) => s.requestSnapshots[msg.id]);
@@ -34,7 +36,7 @@ export function Message({ msg, color }: { msg: TranscriptMessage; color?: string
 
   return (
     <div
-      className={`${styles.message} ${msg.status === 'failed' ? styles.failed : ''}`}
+      className={`${styles.message} ${failed ? styles.failed : ''}`}
       dir={dir}
       style={style}
     >
@@ -110,8 +112,13 @@ export function Message({ msg, color }: { msg: TranscriptMessage; color?: string
         // dir="auto" would instead guess from content, which stays LTR until
         // enough RTL script accumulates — wrong for streaming/short replies.
         <div className={styles.msgBody}>
-          {msg.status === 'failed' ? (
-            <span className={styles.errText}>Failed: {msg.error}</span>
+          {failed ? (
+            <FailureDiagnostics
+              snapshot={snapshot}
+              fallbackError={msg.error}
+              showRequest={showRequest}
+              onToggleRequest={() => setShowRequest((v) => !v)}
+            />
           ) : visibleContent ? (
             <MessageMarkdown content={visibleContent} />
           ) : reasoning ? (
@@ -130,8 +137,27 @@ export function Message({ msg, color }: { msg: TranscriptMessage; color?: string
           <div className={styles.reqRow}><span>Model</span><code>{snapshot.model}</code></div>
           <div className={styles.reqRow}>
             <span>Status</span>
-            <code>{snapshot.status ?? '—'}{snapshot.finishReason ? ` · ${snapshot.finishReason}` : ''}</code>
+            <code>{snapshot.status ?? '—'}{snapshot.finishReason ? ` · ${snapshot.finishReason}` : ''}{snapshot.streamedError ? ' · mid-stream' : ''}</code>
           </div>
+          {snapshot.errorKind && (
+            <div className={styles.reqRow}><span>Kind</span><code>{snapshot.errorKind}</code></div>
+          )}
+          {snapshot.errorType && (
+            <div className={styles.reqRow}><span>Type</span><code>{snapshot.errorType}</code></div>
+          )}
+          {snapshot.rawUpstream && (
+            <div className={styles.reqRow}><span>Upstream</span><code>{snapshot.rawUpstream}</code></div>
+          )}
+          {(snapshot.promptMessages != null || snapshot.promptChars != null) && (
+            <div className={styles.reqRow}>
+              <span>Prompt</span>
+              <code>
+                {snapshot.promptMessages ?? '—'} messages
+                {snapshot.promptChars != null ? ` · ~${snapshot.promptChars.toLocaleString()} chars` : ''}
+                {snapshot.partialOutputChars ? ` · ${snapshot.partialOutputChars} streamed before fail` : ''}
+              </code>
+            </div>
+          )}
           <div className={styles.reqRow}><span>Params</span><code>{JSON.stringify(snapshot.params)}</code></div>
           {snapshot.error && <div className={styles.reqRow}><span>Error</span><code>{snapshot.error}</code></div>}
           <details>

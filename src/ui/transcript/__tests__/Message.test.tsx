@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { TranscriptMessage } from '../../../domain/schema';
 import { useUiStore } from '../../../store/uiStore';
+import { useRuntimeStore } from '../../../store/runtimeStore';
 import { Message } from '../Message';
 
 function makeMsg(over: Partial<TranscriptMessage> = {}): TranscriptMessage {
@@ -28,10 +29,12 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+  useRuntimeStore.getState().reset();
 });
 
 beforeEach(() => {
   useUiStore.setState({ toast: null });
+  useRuntimeStore.getState().reset();
 });
 
 describe('Message direction', () => {
@@ -146,5 +149,82 @@ describe('Message thinking chip', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /thinking/i }));
     expect(screen.getByText(/Thinking Process/)).toBeTruthy();
+  });
+});
+
+describe('Message failure diagnostics', () => {
+  it('shows upstream text, hints, and auto-opens the request inspector', () => {
+    useRuntimeStore.getState().recordSnapshot('m1', {
+      url: 'https://openrouter.ai/api/v1/chat/completions',
+      providerName: 'Open Router',
+      model: 'google/gemini-2.5-flash-lite',
+      messages: [
+        { role: 'system', content: 'You are Agent: Truth Seeker.' },
+        { role: 'user', content: 'Respond.' },
+      ],
+      params: { temperature: 0.7, maxOutputTokens: 8192 },
+      status: 502,
+      error: 'The provider rejected the request (check the model and parameters). (Request contains an invalid argument.)',
+      errorKind: 'bad-request',
+      errorType: 'unmapped',
+      rawUpstream: 'Request contains an invalid argument.',
+      streamedError: true,
+      promptMessages: 2,
+      promptChars: 40,
+      partialOutputChars: 7,
+    });
+
+    render(
+      <Message
+        msg={makeMsg({
+          id: 'm1',
+          status: 'failed',
+          content: '',
+          error: 'The provider rejected the request (check the model and parameters). (Request contains an invalid argument.)',
+        })}
+      />,
+    );
+
+    expect(screen.getByText(/Request rejected/i)).toBeTruthy();
+    expect(screen.getAllByText(/Request contains an invalid argument/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/What to try/i)).toBeTruthy();
+    expect(screen.getByText(/Max output tokens/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Copy diagnostics/i })).toBeTruthy();
+    // Inspector auto-opens on failure.
+    expect(screen.getByText('URL')).toBeTruthy();
+    expect(screen.getByText('Upstream')).toBeTruthy();
+  });
+
+  it('copies a redacted diagnostics blob to the clipboard', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+
+    useRuntimeStore.getState().recordSnapshot('m1', {
+      url: 'https://openrouter.ai/api/v1/chat/completions',
+      providerName: 'Open Router',
+      model: 'm',
+      messages: [{ role: 'user', content: 'hi' }],
+      params: { maxOutputTokens: 2048 },
+      status: 502,
+      errorKind: 'server-error',
+      streamedError: true,
+      error: 'server error',
+      promptMessages: 1,
+      promptChars: 2,
+    });
+
+    render(
+      <Message msg={makeMsg({ id: 'm1', status: 'failed', content: '', error: 'server error' })} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Copy diagnostics/i }));
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(writeText).toHaveBeenCalled();
+    const copied = JSON.parse(writeText.mock.calls[0][0] as string);
+    expect(copied.model).toBe('m');
+    expect(copied.errorKind).toBe('server-error');
+    expect(JSON.stringify(copied)).not.toMatch(/authorization|bearer|api[-_]?key/i);
+    expect(useUiStore.getState().toast).toMatchObject({ kind: 'info' });
   });
 });

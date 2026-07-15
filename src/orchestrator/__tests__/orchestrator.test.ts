@@ -175,6 +175,58 @@ describe('orchestrator cycle controls', () => {
     expect(useRuntimeStore.getState().status).toBe('error');
   });
 
+  it('records structured diagnostics on an in-band SSE provider failure', async () => {
+    const errorChunk = {
+      error: {
+        code: 502,
+        message: 'JSON error injected into SSE stream',
+        metadata: {
+          error_type: 'unmapped',
+          raw: '{"error":{"message":"Request contains an invalid argument."}}',
+        },
+      },
+      choices: [{ delta: { content: '' }, finish_reason: 'error' }],
+    };
+    const chunks = [
+      'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n',
+      `data: ${JSON.stringify(errorChunk)}\n\n`,
+      'data: [DONE]\n\n',
+    ];
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const c of chunks) controller.enqueue(encoder.encode(c));
+        controller.close();
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }),
+      ),
+    );
+    const pg = cyclePlayground(1, 5);
+    pg.agents[0].llm.maxOutputTokens = 8192;
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+
+    const transcript = useDomainStore.getState().playground!.transcript;
+    expect(transcript[0].status).toBe('failed');
+    const snap = useRuntimeStore.getState().requestSnapshots[transcript[0].id];
+    expect(snap).toMatchObject({
+      status: 502,
+      errorKind: 'bad-request',
+      errorType: 'unmapped',
+      streamedError: true,
+      partialOutputChars: 7, // "partial"
+    });
+    expect(snap.rawUpstream).toMatch(/invalid argument/i);
+    expect(snap.promptMessages).toBeGreaterThan(0);
+    expect(snap.promptChars).toBeGreaterThan(0);
+    expect(useRuntimeStore.getState().errors[0].errorKind).toBe('bad-request');
+  });
+
   it('records a sanitized request snapshot per message (spec §13.3)', async () => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(okChat())));
     const pg = cyclePlayground(1, 5);

@@ -238,6 +238,7 @@ export function BottomPanel() {
                   <strong>[{err.level}] {err.summary}</strong>
                   {err.provider && <span className="muted"> · {err.provider}</span>}
                   {err.retryEligible && <span className="chip"> retry-eligible</span>}
+                  {err.errorKind && <span className="chip">{err.errorKind}</span>}
                   {err.detail && <div className={styles.errorDetail}>{err.detail}</div>}
                 </div>
               ))

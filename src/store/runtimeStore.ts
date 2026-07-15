@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { RuntimeState } from '../domain/schema';
 import type { ChatMessage } from '../providers/types';
+import type { ProviderErrorKind } from '../providers/errors';
 
 /**
  * Sanitized request/response snapshot for the request inspector (spec §13.3).
@@ -18,6 +19,13 @@ export interface RequestSnapshot {
   finishReason?: string | null;
   error?: string;
   rawExcerpt?: string;
+  errorKind?: ProviderErrorKind;
+  errorType?: string;
+  rawUpstream?: string;
+  streamedError?: boolean;
+  promptMessages?: number;
+  promptChars?: number;
+  partialOutputChars?: number;
 }
 
 /**
@@ -45,6 +53,7 @@ export interface RunError {
   provider?: string;
   at: number;
   retryEligible?: boolean;
+  errorKind?: ProviderErrorKind;
 }
 
 /** Temporary provider/model remap for the current run only (suggest-only fallback). */

@@ -19,22 +19,45 @@ export type ProviderErrorKind =
   | 'aborted'
   | 'unknown';
 
+const RAW_UPSTREAM_MAX = 500;
+
+const CLIENT_ARG_RE = /invalid argument|context(?:\s+length)?|token/i;
+
 export class ProviderError extends Error {
   readonly kind: ProviderErrorKind;
   readonly status?: number;
   /** Human-facing hint about how to resolve (spec §20 "technical details"). */
   readonly detail?: string;
+  /** OpenRouter-style `error.metadata.error_type`, when present. */
+  readonly errorType?: string;
+  /** OpenRouter-style `error.metadata.provider_code`, when present. */
+  readonly providerCode?: string;
+  /** Upstream/provider raw body (`error.metadata.raw`), truncated. */
+  readonly rawUpstream?: string;
+  /** True when the error arrived in-band on an SSE stream after HTTP 200. */
+  readonly streamed?: boolean;
 
   constructor(
     kind: ProviderErrorKind,
     message: string,
-    opts: { status?: number; detail?: string } = {},
+    opts: {
+      status?: number;
+      detail?: string;
+      errorType?: string;
+      providerCode?: string;
+      rawUpstream?: string;
+      streamed?: boolean;
+    } = {},
   ) {
     super(message);
     this.name = 'ProviderError';
     this.kind = kind;
     this.status = opts.status;
     this.detail = opts.detail;
+    this.errorType = opts.errorType;
+    this.providerCode = opts.providerCode;
+    this.rawUpstream = opts.rawUpstream;
+    this.streamed = opts.streamed;
   }
 }
 
@@ -125,6 +148,175 @@ export function retryEligible(kind: ProviderErrorKind): boolean {
   return kind === 'rate-limit' || kind === 'timeout' || kind === 'server-error' || kind === 'network';
 }
 
+/** Normalized fields from an OpenAI/OpenRouter-compatible `error` object. */
+export interface ParsedProviderErrorPayload {
+  message?: string;
+  status?: number;
+  errorType?: string;
+  providerCode?: string;
+  rawUpstream?: string;
+}
+
+function truncateRaw(value: string): string {
+  return value.length > RAW_UPSTREAM_MAX ? value.slice(0, RAW_UPSTREAM_MAX) : value;
+}
+
+function coerceStatusCode(code: unknown): number | undefined {
+  if (typeof code === 'number' && Number.isFinite(code)) return code;
+  if (typeof code === 'string' && /^\d+$/.test(code.trim())) return Number(code.trim());
+  return undefined;
+}
+
+/**
+ * Normalize an OpenAI/OpenRouter `error` field from a JSON body or SSE chunk
+ * into structured fields used for classification and diagnostics.
+ */
+export function parseProviderErrorPayload(error: unknown): ParsedProviderErrorPayload {
+  if (typeof error === 'string') {
+    return { message: error };
+  }
+  if (!error || typeof error !== 'object') {
+    return {};
+  }
+  const obj = error as Record<string, unknown>;
+  const message = typeof obj.message === 'string' ? obj.message : undefined;
+  const status = coerceStatusCode(obj.code) ?? coerceStatusCode(obj.status);
+  const metadata =
+    obj.metadata && typeof obj.metadata === 'object'
+      ? (obj.metadata as Record<string, unknown>)
+      : undefined;
+  const errorType =
+    typeof metadata?.error_type === 'string'
+      ? metadata.error_type
+      : typeof obj.error_type === 'string'
+        ? obj.error_type
+        : undefined;
+  const providerCode =
+    typeof metadata?.provider_code === 'string'
+      ? metadata.provider_code
+      : typeof obj.provider_code === 'string'
+        ? obj.provider_code
+        : undefined;
+  let rawUpstream: string | undefined;
+  if (typeof metadata?.raw === 'string') {
+    rawUpstream = truncateRaw(metadata.raw);
+  } else if (metadata?.raw && typeof metadata.raw === 'object') {
+    try {
+      rawUpstream = truncateRaw(JSON.stringify(metadata.raw));
+    } catch {
+      /* ignore */
+    }
+  }
+  return { message, status, errorType, providerCode, rawUpstream };
+}
+
+/**
+ * Build a ProviderError from a parsed payload (HTTP body or in-band SSE).
+ * Uses `error.code` for classification when present; overrides to `bad-request`
+ * when upstream raw text clearly indicates a client/argument problem wrapped
+ * in a gateway 5xx (common OpenRouter + Gemini pattern).
+ */
+export function providerErrorFromPayload(
+  error: unknown,
+  opts: { streamed?: boolean; fallbackStatus?: number } = {},
+): ProviderError {
+  const parsed = parseProviderErrorPayload(error);
+  const status = parsed.status ?? opts.fallbackStatus;
+  let kind = status !== undefined ? classifyStatus(status) : 'server-error';
+  const signals = [parsed.message, parsed.rawUpstream, parsed.errorType]
+    .filter(Boolean)
+    .join(' ');
+  if (CLIENT_ARG_RE.test(signals) && (kind === 'server-error' || status === undefined)) {
+    kind = 'bad-request';
+  }
+  const detail =
+    parsed.message ??
+    (opts.streamed
+      ? 'The provider returned an in-stream error.'
+      : summaryFor(kind));
+  return new ProviderError(kind, summaryFor(kind), {
+    status,
+    detail,
+    errorType: parsed.errorType,
+    providerCode: parsed.providerCode,
+    rawUpstream: parsed.rawUpstream,
+    streamed: opts.streamed,
+  });
+}
+
+/**
+ * Single string for transcript / Errors tab. Prefer the upstream raw cause when
+ * the gateway wrapped it (e.g. "JSON error injected into SSE stream").
+ */
+export function formatProviderErrorDetail(pe: ProviderError): string {
+  const primary = pe.rawUpstream?.trim() || pe.detail?.trim() || pe.message;
+  const bits = [pe.message];
+  if (primary && primary !== pe.message) bits.push(`(${primary})`);
+  if (pe.streamed && !/in-stream|SSE|stream/i.test(bits.join(' '))) {
+    bits.push('(mid-stream)');
+  }
+  return bits.join(' ');
+}
+
+export interface TroubleshootingContext {
+  promptChars?: number;
+  maxOutputTokens?: number;
+  includeHistory?: boolean;
+}
+
+/** Deterministic, short troubleshooting tips for the failure panel (max 4). */
+export function troubleshootingHints(
+  pe: ProviderError | { kind: ProviderErrorKind; streamed?: boolean; rawUpstream?: string },
+  ctx: TroubleshootingContext = {},
+): string[] {
+  const hints: string[] = [];
+  const kind = pe.kind;
+  const streamed = 'streamed' in pe ? pe.streamed : undefined;
+  const raw = 'rawUpstream' in pe ? pe.rawUpstream : undefined;
+
+  if (kind === 'bad-request') {
+    if ((ctx.promptChars ?? 0) > 12_000) {
+      hints.push('Reduce History window or disable Include history for this agent.');
+    }
+    if ((ctx.maxOutputTokens ?? 0) >= 4096) {
+      hints.push('Lower Max output tokens (try 2048).');
+    }
+    if (CLIENT_ARG_RE.test(raw ?? '')) {
+      hints.push('Check the request params and prompt size against this model\'s limits.');
+    } else if (hints.length === 0) {
+      hints.push('Check the model name and request parameters, then retry with a smaller prompt.');
+    }
+  } else if (kind === 'rate-limit') {
+    hints.push('Wait briefly and retry; check the provider quota.');
+  } else if (kind === 'timeout') {
+    hints.push('Increase the response timeout or retry the turn.');
+  } else if (kind === 'server-error') {
+    if (streamed) {
+      hints.push('Retry this turn, or switch model; check the provider status page.');
+    } else {
+      hints.push('Retry the request; if it keeps failing, switch model or provider.');
+    }
+  } else if (kind === 'auth') {
+    hints.push('Verify the API key in Provider settings.');
+  } else if (kind === 'cors') {
+    hints.push('Use the local dev proxy or a server-side proxy for this provider.');
+  } else if (kind === 'model-not-found') {
+    hints.push('Pick a model this provider lists under Fetch models.');
+  } else if (kind === 'network') {
+    hints.push('Check network/VPN access and the provider base URL.');
+  }
+
+  if (ctx.includeHistory === false && kind === 'bad-request' && (ctx.promptChars ?? 0) > 12_000) {
+    // Already covered by the history hint when includeHistory is unknown/true;
+    // if history is off, the system+task alone is large — still suggest shortening.
+    if (!hints.some((h) => /History|Include history/i.test(h))) {
+      hints.push('Shorten the system instruction, subject, or objective — the prompt is very large.');
+    }
+  }
+
+  return hints.slice(0, 4);
+}
+
 /** Best-effort extraction of a human-readable message from an error response body. */
 export async function safeReadErrorBody(response: Response): Promise<string | undefined> {
   try {
@@ -142,5 +334,34 @@ export async function safeReadErrorBody(response: Response): Promise<string | un
     return text.slice(0, 500);
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * Read an error response body and return both a ProviderError (when JSON) and
+ * the raw text fallback. Prefer this over safeReadErrorBody when structured
+ * metadata should be preserved.
+ */
+export async function providerErrorFromResponse(response: Response): Promise<ProviderError> {
+  const kind = classifyStatus(response.status);
+  try {
+    const text = await response.text();
+    if (!text) {
+      return new ProviderError(kind, summaryFor(kind), { status: response.status });
+    }
+    try {
+      const json = JSON.parse(text) as { error?: unknown };
+      if (json.error !== undefined) {
+        return providerErrorFromPayload(json.error, { fallbackStatus: response.status });
+      }
+    } catch {
+      /* not JSON */
+    }
+    return new ProviderError(kind, summaryFor(kind), {
+      status: response.status,
+      detail: text.slice(0, 500),
+    });
+  } catch {
+    return new ProviderError(kind, summaryFor(kind), { status: response.status });
   }
 }

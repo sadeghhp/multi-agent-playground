@@ -1,12 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // jsdom has no IndexedDB; stub persistence.
-vi.mock('../../persistence/db', () => ({
-  savePlayground: vi.fn().mockResolvedValue(undefined),
-  loadPlayground: vi.fn().mockResolvedValue(undefined),
-  loadAllPlaygrounds: vi.fn().mockResolvedValue([]),
-  deletePlayground: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock('../../persistence/db', () => import('../../test/persistenceDbMock'));
 
 import { createAgent, createPlayground } from '../../domain/factories';
 import { loadAllPlaygrounds, savePlayground } from '../../persistence/db';

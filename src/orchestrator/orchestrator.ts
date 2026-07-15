@@ -9,6 +9,7 @@ import { buildEndpoint } from '../providers/url';
 import type { ChatMessage } from '../providers/types';
 import { assembleMessages, boundHistory } from '../agents/promptAssembly';
 import { hasBlockingErrors, validateForRun } from './validate';
+import { beginVersionedRun, finalizeVersionedRun } from './runHistory';
 
 /**
  * Conversation orchestrator (spec §11). Directed sequential traversal of the
@@ -138,6 +139,7 @@ export async function startRun(): Promise<void> {
   const controller = new AbortController();
   const runId = newRunId();
   runtime.startRun(runId, controller);
+  await beginVersionedRun(pg, runId);
   log('run-started', `Run started on subject: ${pg.conversation.subject || '(none)'}`);
 
   const startId = pg.conversation.startingAgentId!;
@@ -272,13 +274,11 @@ export async function startRun(): Promise<void> {
           language: agent.language,
           model: res.model,
           providerId: provider.id,
-          // Reasoning models sometimes emit their whole reply as
-          // `reasoning_content` deltas and leave `content` empty; fall back
-          // to the reasoning text so the turn isn't rendered blank. When
-          // `text` is present, keep the reasoning separate (spec: thinking
-          // is hidden by default, shown only via an explicit chip).
-          content: res.text || res.reasoning || '',
-          reasoning: res.text ? res.reasoning : undefined,
+          // Keep thinking out of the visible transcript body (spec: thinking is
+          // hidden by default, shown only via an explicit chip). Reasoning-only
+          // turns leave content empty and still surface `reasoning`.
+          content: res.text || '',
+          reasoning: res.reasoning || undefined,
           status: 'completed',
           sourceAgentId: item.sourceAgentId,
           connectionType: connection?.type ?? null,
@@ -338,6 +338,7 @@ export async function startRun(): Promise<void> {
     if (useRuntimeStore.getState().runId === runId) {
       useRuntimeStore.getState().setActive(null, null);
     }
+    await finalizeVersionedRun(runId);
   }
 }
 

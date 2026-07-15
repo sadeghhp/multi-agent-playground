@@ -1,12 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-vi.mock('../../persistence/db', () => ({
-  savePlayground: vi.fn().mockResolvedValue(undefined),
-  loadPlayground: vi.fn().mockResolvedValue(undefined),
-  loadAllPlaygrounds: vi.fn().mockResolvedValue([]),
-  deletePlayground: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock('../../persistence/db', () => import('../../test/persistenceDbMock'));
 
 vi.mock('../../providers/openaiAdapter', () => ({
   sendChat: vi.fn(),

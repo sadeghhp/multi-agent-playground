@@ -1,10 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../persistence/db', () => ({
-  saveLibraryAgent: vi.fn().mockResolvedValue(undefined),
-  loadAllLibraryAgents: vi.fn().mockResolvedValue([]),
-  deleteLibraryAgent: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock('../../persistence/db', () => import('../../test/persistenceDbMock'));
 
 import { createAgent } from '../../domain/factories';
 import { loadAllLibraryAgents, saveLibraryAgent } from '../../persistence/db';

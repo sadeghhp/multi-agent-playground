@@ -3,21 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 // Stores pulled in transitively (domain/provider/library/run-preset) all reach
 // persistence/db; stub it so mounting the dialog never touches IndexedDB.
-vi.mock('../../persistence/db', () => ({
-  savePlayground: vi.fn().mockResolvedValue(undefined),
-  loadPlayground: vi.fn().mockResolvedValue(undefined),
-  loadAllPlaygrounds: vi.fn().mockResolvedValue([]),
-  deletePlayground: vi.fn().mockResolvedValue(undefined),
-  saveProvider: vi.fn().mockResolvedValue(undefined),
-  loadAllProviders: vi.fn().mockResolvedValue([]),
-  deleteProvider: vi.fn().mockResolvedValue(undefined),
-  saveLibraryAgent: vi.fn().mockResolvedValue(undefined),
-  loadAllLibraryAgents: vi.fn().mockResolvedValue([]),
-  deleteLibraryAgent: vi.fn().mockResolvedValue(undefined),
-  saveRunPreset: vi.fn().mockResolvedValue(undefined),
-  loadAllRunPresets: vi.fn().mockResolvedValue([]),
-  deleteRunPreset: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock('../../persistence/db', () => import('../../test/persistenceDbMock'));
 
 import { createAgent, createPlayground } from '../../domain/factories';
 import { useDomainStore } from '../../store/domainStore';

@@ -2,12 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, fireEvent, screen } from '@testing-library/react';
 
 // jsdom has no IndexedDB; stub persistence so the domain store imports cleanly.
-vi.mock('../../persistence/db', () => ({
-  savePlayground: vi.fn().mockResolvedValue(undefined),
-  loadPlayground: vi.fn().mockResolvedValue(undefined),
-  loadAllPlaygrounds: vi.fn().mockResolvedValue([]),
-  deletePlayground: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock('../../persistence/db', () => import('../../test/persistenceDbMock'));
 
 import { createAgent, createPlayground, createProvider } from '../../domain/factories';
 import type { TranscriptMessage } from '../../domain/schema';

@@ -287,3 +287,50 @@ describe('v1 → v2 migration', () => {
     expect(raw.schemaVersion).toBe(2);
   });
 });
+
+describe('conversation runs', () => {
+  function makeRun(playgroundId: string, version: number, id = `run_${version}`) {
+    const pg = createPlayground('Runs');
+    return {
+      id,
+      playgroundId,
+      version,
+      parentRunId: version > 1 ? `run_${version - 1}` : null,
+      startedAt: Date.now() + version,
+      endedAt: Date.now() + version + 1000,
+      status: 'completed' as const,
+      conversation: pg.conversation,
+      transcript: [],
+      events: [],
+      messageCountAtStart: 0,
+    };
+  }
+
+  it('saves, lists by playground in version order, and deletes a run', async () => {
+    const db = await freshDb();
+    const pg = createPlayground('Runs Test');
+    await db.savePlayground(pg);
+
+    const run1 = makeRun(pg.id, 1);
+    const run2 = makeRun(pg.id, 2);
+    await db.saveRun(run1);
+    await db.saveRun(run2);
+
+    const listed = await db.listRuns(pg.id);
+    expect(listed.map((r) => r.version)).toEqual([1, 2]);
+
+    await db.deleteRun(run1.id);
+    expect(await db.getRun(run1.id)).toBeUndefined();
+    expect((await db.listRuns(pg.id)).map((r) => r.version)).toEqual([2]);
+  });
+
+  it('cascades run deletion when a playground is deleted', async () => {
+    const db = await freshDb();
+    const pg = createPlayground('Cascade');
+    await db.savePlayground(pg);
+    await db.saveRun(makeRun(pg.id, 1));
+
+    await db.deletePlayground(pg.id);
+    expect(await db.listRuns(pg.id)).toEqual([]);
+  });
+});

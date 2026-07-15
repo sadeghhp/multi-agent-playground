@@ -12,6 +12,7 @@ import { createPlayground, duplicateAgent } from '../domain/factories';
 import { deletePlayground as dbDelete, loadAllPlaygrounds, savePlayground } from '../persistence/db';
 import { regenerateIds } from '../persistence/serialization';
 import { setSelectedPlaygroundId } from './prefs';
+import { useRunHistoryStore } from './runHistoryStore';
 
 /**
  * Persistent domain state (spec §16). Holds the active playground and every
@@ -125,6 +126,7 @@ export const useDomainStore = create<DomainState>((set, get) => {
     set({ playground: pg, saveStatus: 'unsaved' });
     setSelectedPlaygroundId(pg.id);
     scheduleSave();
+    void useRunHistoryStore.getState().hydrate(pg.id);
   }
 
   return {
@@ -164,6 +166,7 @@ export const useDomainStore = create<DomainState>((set, get) => {
       if (pg) {
         set({ playground: pg, saveStatus: 'saved' });
         setSelectedPlaygroundId(pg.id);
+        void useRunHistoryStore.getState().hydrate(pg.id);
       }
     },
 
@@ -189,6 +192,9 @@ export const useDomainStore = create<DomainState>((set, get) => {
       if (get().playground?.id === id) {
         set({ playground: null });
         setSelectedPlaygroundId(null);
+      }
+      if (useRunHistoryStore.getState().playgroundId === id) {
+        useRunHistoryStore.getState().clear();
       }
     },
 

@@ -310,6 +310,51 @@ describe('sendChat', () => {
     expect(res.reasoning).toBe('weighing options');
   });
 
+  it('strips Qwen-style closer-only </think> (open tag was in the prompt)', async () => {
+    const sse = [
+      'data: {"model":"test-model","choices":[{"delta":{"content":"Thinking Process:\\n1. Analyze"}}]}\n\n',
+      'data: {"choices":[{"delta":{"content":"</think>\\nپاسخ نهایی"}}]}\n\n',
+      'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+      'data: [DONE]\n\n',
+    ];
+    const fetchMock = vi.fn().mockResolvedValue(sseResponse(sse));
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = createProvider({ baseUrl: 'https://api.example.com', apiKey: 'k' });
+
+    const res = await sendChat(
+      provider,
+      { model: 'test-model', messages: [{ role: 'user', content: 'hi' }] },
+      { onToken: () => {} },
+    );
+
+    expect(res.text).toBe('پاسخ نهایی');
+    expect(res.reasoning).toBe('Thinking Process:\n1. Analyze');
+  });
+
+  it('keeps reasoning_content separate from content in a plain JSON response', async () => {
+    const body = {
+      model: 'test-model',
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content: 'the answer',
+            reasoning_content: 'pondering',
+          },
+          finish_reason: 'stop',
+        },
+      ],
+    };
+    const fetchMock = vi.fn().mockResolvedValue(okResponse(body));
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = createProvider({ baseUrl: 'https://api.example.com', apiKey: 'k' });
+
+    const res = await sendChat(provider, { model: 'test-model', messages: [{ role: 'user', content: 'hi' }] });
+
+    expect(res.text).toBe('the answer');
+    expect(res.reasoning).toBe('pondering');
+  });
+
   it('emits the full text once when a streaming request returns plain JSON', async () => {
     const fetchMock = vi.fn().mockResolvedValue(okResponse(sampleBody));
     vi.stubGlobal('fetch', fetchMock);
@@ -355,7 +400,7 @@ describe('sendChat', () => {
     expect(res.text).toBe('hello world');
   });
 
-  it('falls back to reasoning_content when content is null', async () => {
+  it('captures reasoning_content separately when content is null', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
@@ -374,7 +419,8 @@ describe('sendChat', () => {
     );
     const provider = createProvider({ baseUrl: 'https://api.example.com', apiKey: 'k' });
     const res = await sendChat(provider, { model: 'm', messages: [{ role: 'user', content: 'hi' }] });
-    expect(res.text).toBe('ok');
+    expect(res.text).toBe('');
+    expect(res.reasoning).toBe('ok');
   });
 
   it('accepts legacy choices[0].text completion shape', async () => {

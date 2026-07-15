@@ -1,15 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// jsdom has no IndexedDB — stub the persistence layer so autosave is a no-op.
-vi.mock('../../persistence/db', () => ({
-  savePlayground: vi.fn().mockResolvedValue(undefined),
-  loadPlayground: vi.fn().mockResolvedValue(undefined),
-  loadAllPlaygrounds: vi.fn().mockResolvedValue([]),
-  deletePlayground: vi.fn().mockResolvedValue(undefined),
-  saveProvider: vi.fn().mockResolvedValue(undefined),
-  loadAllProviders: vi.fn().mockResolvedValue([]),
-  deleteProvider: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock('../../persistence/db', () => import('../../test/persistenceDbMock'));
+
+import { savedRuns, clearPersistenceMocks } from '../../test/persistenceDbMock';
 
 import { createAgent, createPlayground, createProvider } from '../../domain/factories';
 import type { Playground } from '../../domain/schema';
@@ -106,6 +99,7 @@ function cyclePlayground(maxTurns: number, maxPerAgent: number): Playground {
 beforeEach(() => {
   useRuntimeStore.getState().reset();
   useProviderStore.setState({ providers: [] });
+  clearPersistenceMocks();
 });
 
 afterEach(() => {
@@ -243,7 +237,7 @@ describe('orchestrator streaming', () => {
     expect(transcript[0].content).toBe('streamed reply here');
   });
 
-  it('falls back to reasoning text when a reasoning model emits no visible content', async () => {
+  it('stores reasoning separately and leaves content empty when a model emits no visible answer', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation(() => Promise.resolve(sseReasoningOnlyChat('thinking out loud'))),
@@ -254,7 +248,8 @@ describe('orchestrator streaming', () => {
     await startRun();
 
     const transcript = useDomainStore.getState().playground!.transcript;
-    expect(transcript[0].content).toBe('thinking out loud');
+    expect(transcript[0].content).toBe('');
+    expect(transcript[0].reasoning).toBe('thinking out loud');
     expect(transcript[0].status).toBe('completed');
   });
 });
@@ -416,5 +411,69 @@ describe('continueRun', () => {
     const before = useDomainStore.getState().playground!.transcript.length;
     continueRun('   ');
     expect(useDomainStore.getState().playground!.transcript.length).toBe(before);
+  });
+});
+
+describe('versioned run history', () => {
+  it('creates a new version on each startRun with a final snapshot', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(okChat())));
+    const pg = cyclePlayground(1, 5);
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+
+    const runs = [...savedRuns.values()].sort((a, b) => a.version - b.version);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.version).toBe(1);
+    expect(runs[0]!.status).toBe('completed');
+    expect(runs[0]!.transcript.length).toBeGreaterThan(0);
+    expect(runs[0]!.events.some((e) => e.kind === 'run-started')).toBe(true);
+  });
+
+  it('creates a second version on continueRun', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(okChat())));
+    const pg = cyclePlayground(1, 5);
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+    continueRun('Follow up question.');
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+
+    const runs = [...savedRuns.values()].sort((a, b) => a.version - b.version);
+    expect(runs).toHaveLength(2);
+    expect(runs[1]!.version).toBe(2);
+    expect(runs[1]!.parentRunId).toBe(runs[0]!.id);
+    expect(runs[1]!.messageCountAtStart).toBeGreaterThan(0);
+  });
+
+  it('records stopped status when the user stops a run', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          const signal = init.signal;
+          if (signal?.aborted) {
+            reject(new DOMException('aborted', 'AbortError'));
+            return;
+          }
+          signal?.addEventListener('abort', () => {
+            reject(new DOMException('aborted', 'AbortError'));
+          });
+        }),
+      ),
+    );
+    const pg = cyclePlayground(10, 5);
+    useDomainStore.setState({ playground: pg });
+
+    void startRun();
+    await new Promise((r) => setTimeout(r, 10));
+    stopRun();
+    await vi.waitFor(() => {
+      const run = [...savedRuns.values()][0];
+      expect(run?.status).toBe('stopped');
+    });
+    const run = [...savedRuns.values()][0];
+    expect(run?.endedAt).not.toBeNull();
   });
 });

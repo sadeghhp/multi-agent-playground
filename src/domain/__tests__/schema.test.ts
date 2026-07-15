@@ -1,6 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { Provider } from '../schema';
-import { createProvider } from '../factories';
+import { ConversationRun, Provider } from '../schema';
+import { createPlayground, createProvider } from '../factories';
+
+describe('ConversationRun schema', () => {
+  it('parses a minimal run record', () => {
+    const pg = createPlayground('Test');
+    const result = ConversationRun.safeParse({
+      id: 'run_1',
+      playgroundId: pg.id,
+      version: 1,
+      parentRunId: null,
+      startedAt: Date.now(),
+      endedAt: null,
+      status: 'running',
+      conversation: pg.conversation,
+      transcript: [],
+      events: [],
+      messageCountAtStart: 0,
+    });
+    expect(result.success).toBe(true);
+  });
+});
 
 describe('Provider.baseUrl validation (L-7 regression)', () => {
   it('allows the not-yet-configured empty default', () => {

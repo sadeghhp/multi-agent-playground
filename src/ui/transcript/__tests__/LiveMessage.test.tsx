@@ -29,4 +29,30 @@ describe('LiveMessage direction', () => {
     const dirEls = Array.from(container.querySelectorAll('[dir]'));
     expect(dirEls.map((el) => el.getAttribute('dir'))).toEqual(['rtl']);
   });
+
+  it('hides inline thinking from the live body until answer tokens arrive', () => {
+    const { container, rerender } = render(
+      <LiveMessage
+        agentName="Analyst"
+        role={null}
+        text="Thinking Process:\n1. Analyze</think>"
+        language="en"
+      />,
+    );
+    expect(container.textContent).toContain('thinking…');
+    expect(container.textContent).not.toContain('Thinking Process');
+    expect(container.textContent).not.toContain('Analyze');
+
+    rerender(
+      <LiveMessage
+        agentName="Analyst"
+        role={null}
+        text="Thinking Process:\n1. Analyze</think>\nfinal answer"
+        language="en"
+      />,
+    );
+    expect(container.textContent).toContain('streaming…');
+    expect(container.textContent).toContain('final answer');
+    expect(container.textContent).not.toContain('Thinking Process');
+  });
 });

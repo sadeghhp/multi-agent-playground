@@ -356,6 +356,44 @@ export const RunPreset = z.object({
 export type RunPreset = z.infer<typeof RunPreset>;
 
 // ---------------------------------------------------------------------------
+// Conversation run history — versioned snapshots of each startRun execution.
+// Stored separately from Playground in IndexedDB (see persistence/db.ts).
+// ---------------------------------------------------------------------------
+
+export const RunEventLogEntry = z.object({
+  id: z.string(),
+  at: z.number(),
+  kind: z.string(),
+  message: z.string(),
+  agentId: z.string().nullable().optional(),
+});
+export type RunEventLogEntry = z.infer<typeof RunEventLogEntry>;
+
+export const ConversationRunStatus = z.enum([
+  'running',
+  'completed',
+  'stopped',
+  'error',
+  'interrupted',
+]);
+export type ConversationRunStatus = z.infer<typeof ConversationRunStatus>;
+
+export const ConversationRun = z.object({
+  id: z.string(),
+  playgroundId: z.string(),
+  version: z.number().int().positive(),
+  parentRunId: z.string().nullable(),
+  startedAt: z.number().int(),
+  endedAt: z.number().int().nullable(),
+  status: ConversationRunStatus,
+  conversation: ConversationSettings,
+  transcript: z.array(TranscriptMessage).default([]),
+  events: z.array(RunEventLogEntry).default([]),
+  messageCountAtStart: z.number().int().nonnegative(),
+});
+export type ConversationRun = z.infer<typeof ConversationRun>;
+
+// ---------------------------------------------------------------------------
 // UI layout state persisted with the playground (spec §7.1)
 // ---------------------------------------------------------------------------
 

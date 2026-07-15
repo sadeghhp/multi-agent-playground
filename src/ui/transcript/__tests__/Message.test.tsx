@@ -95,3 +95,42 @@ describe('Message copy button (L-15 regression)', () => {
     expect(useUiStore.getState().toast).toMatchObject({ kind: 'error' });
   });
 });
+
+describe('Message thinking chip', () => {
+  it('hides reasoning by default and reveals it when the thinking chip is clicked', () => {
+    render(
+      <Message
+        msg={makeMsg({
+          content: 'visible answer',
+          reasoning: 'hidden chain of thought',
+        })}
+      />,
+    );
+
+    expect(screen.getByText('visible answer')).toBeTruthy();
+    expect(screen.queryByText('hidden chain of thought')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /thinking/i }));
+    expect(screen.getByText('hidden chain of thought')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /thinking/i }));
+    expect(screen.queryByText('hidden chain of thought')).toBeNull();
+  });
+
+  it('pulls closer-only think blocks out of content into the collapsed chip', () => {
+    render(
+      <Message
+        msg={makeMsg({
+          content: 'Thinking Process:\n1. Analyze</think>\nfinal answer',
+        })}
+      />,
+    );
+
+    expect(screen.getByText('final answer')).toBeTruthy();
+    expect(screen.queryByText(/Thinking Process/)).toBeNull();
+    expect(screen.queryByText(/Analyze/)).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /thinking/i }));
+    expect(screen.getByText(/Thinking Process/)).toBeTruthy();
+  });
+});

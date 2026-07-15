@@ -2,16 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 
 // jsdom has no IndexedDB; stub persistence so the domain store imports cleanly.
-vi.mock('../../../persistence/db', () => ({
-  savePlayground: vi.fn().mockResolvedValue(undefined),
-  loadPlayground: vi.fn().mockResolvedValue(undefined),
-  loadAllPlaygrounds: vi.fn().mockResolvedValue([]),
-  deletePlayground: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock('../../../persistence/db', () => import('../../../test/persistenceDbMock'));
 
 import { createAgent, createPlayground } from '../../../domain/factories';
 import type { TranscriptMessage } from '../../../domain/schema';
 import { useDomainStore } from '../../../store/domainStore';
+import { useRuntimeStore } from '../../../store/runtimeStore';
 import { useUiStore } from '../../../store/uiStore';
 import { TimelinePage } from '../TimelinePage';
 
@@ -29,6 +25,7 @@ afterEach(() => cleanup());
 beforeEach(() => {
   useDomainStore.setState({ playground: null, index: [], saveStatus: 'saved' });
   useUiStore.setState({ openPanel: 'timeline' });
+  useRuntimeStore.getState().reset();
 });
 
 describe('TimelinePage', () => {
@@ -88,5 +85,69 @@ describe('TimelinePage', () => {
     useDomainStore.setState({ playground: createPlayground('Empty') });
     render(<TimelinePage />);
     expect(screen.getByText(/No conversation yet/i)).toBeInTheDocument();
+  });
+
+  it('shows a live streaming card under the current turn while a run is active', () => {
+    const agent = createAgent({ name: 'Researcher', colorCategory: 'teal' });
+    const playground = {
+      ...createPlayground('Demo'),
+      agents: [agent],
+      transcript: [
+        msg({ id: 'a', turn: 1, agentId: agent.id, agentName: 'Researcher', content: 'Done.' }),
+      ],
+    };
+    useDomainStore.setState({ playground });
+    useRuntimeStore.setState({
+      status: 'running',
+      activeAgentId: agent.id,
+      currentTurn: 2,
+      streamingText: { [agent.id]: 'Partial reply' },
+    });
+
+    render(<TimelinePage />);
+
+    expect(screen.getByLabelText('Turn 2')).toBeInTheDocument();
+    expect(screen.getByText('streaming…')).toBeInTheDocument();
+    expect(screen.getByText(/Partial reply/)).toBeInTheDocument();
+  });
+
+  it('shows a live card when the transcript is empty but a run is streaming', () => {
+    const agent = createAgent({ name: 'Opener' });
+    const playground = { ...createPlayground('Demo'), agents: [agent], transcript: [] };
+    useDomainStore.setState({ playground });
+    useRuntimeStore.setState({
+      status: 'running',
+      activeAgentId: agent.id,
+      currentTurn: 1,
+      streamingText: { [agent.id]: '' },
+    });
+
+    render(<TimelinePage />);
+
+    expect(screen.queryByText(/No conversation yet/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Turn 1')).toBeInTheDocument();
+    expect(screen.getByText('thinking…')).toBeInTheDocument();
+  });
+
+  it('removes the live card after streaming clears', () => {
+    const agent = createAgent({ name: 'Researcher' });
+    const playground = {
+      ...createPlayground('Demo'),
+      agents: [agent],
+      transcript: [msg({ id: 'a', turn: 1, agentId: agent.id, agentName: 'Researcher', content: 'Final.' })],
+    };
+    useDomainStore.setState({ playground });
+    useRuntimeStore.setState({
+      status: 'idle',
+      activeAgentId: null,
+      currentTurn: 1,
+      streamingText: {},
+    });
+
+    render(<TimelinePage />);
+
+    expect(screen.queryByText('streaming…')).not.toBeInTheDocument();
+    expect(screen.queryByText('thinking…')).not.toBeInTheDocument();
+    expect(screen.getByText('Final.')).toBeInTheDocument();
   });
 });

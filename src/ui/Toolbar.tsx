@@ -116,6 +116,15 @@ export function Toolbar() {
           <button
             type="button"
             className="secondary"
+            onClick={() => setPanel('runHistory')}
+            disabled={!playground}
+            title="View versioned conversation run history"
+          >
+            Runs
+          </button>
+          <button
+            type="button"
+            className="secondary"
             onClick={() => setPanel('timeline')}
             disabled={!playground}
             title="View the conversation as a timeline"

@@ -2,12 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 // Stub persistence so seeding the store doesn't try to hit IndexedDB.
-vi.mock('../../../persistence/db', () => ({
-  savePlayground: vi.fn().mockResolvedValue(undefined),
-  loadPlayground: vi.fn().mockResolvedValue(undefined),
-  loadAllPlaygrounds: vi.fn().mockResolvedValue([]),
-  deletePlayground: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock('../../../persistence/db', () => import('../../../test/persistenceDbMock'));
 
 // The enhancer calls sendChat under the hood; return a reply wrapped in a code
 // fence to prove the UI lands the *cleaned* text in the field.

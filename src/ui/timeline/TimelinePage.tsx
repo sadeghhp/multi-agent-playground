@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { TranscriptMessage } from '../../domain/schema';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import type { Agent, TranscriptMessage } from '../../domain/schema';
 import { dirForLanguage } from '../../domain/language';
+import { extractInlineThinking } from '../../providers/openaiAdapter';
 import { useDomainStore } from '../../store/domainStore';
+import { useRuntimeStore } from '../../store/runtimeStore';
 import { useUiStore } from '../../store/uiStore';
 import { agentColor } from '../../graph/colors';
 import { MessageMarkdown } from '../transcript/MessageMarkdown';
@@ -41,14 +43,30 @@ export function TimelinePage() {
   const setPanel = useUiStore((s) => s.setPanel);
   const close = () => setPanel('none');
 
+  const status = useRuntimeStore((s) => s.status);
+  const activeAgentId = useRuntimeStore((s) => s.activeAgentId);
+  const currentTurn = useRuntimeStore((s) => s.currentTurn);
+  const liveText = useRuntimeStore((s) => (s.activeAgentId ? s.streamingText[s.activeAgentId] : undefined));
+
   const transcript = playground?.transcript ?? [];
   const groups = useMemo(() => groupByTurn(transcript), [transcript]);
+
+  const liveAgent =
+    status === 'running' && activeAgentId
+      ? playground?.agents.find((a) => a.id === activeAgentId) ?? null
+      : null;
+
+  const lastGroupTurn = groups[groups.length - 1]?.turn;
+  const liveInLastGroup = !!liveAgent && lastGroupTurn === currentTurn;
+  const needsNewLiveGroup = !!liveAgent && !liveInLastGroup;
 
   // Look up a message's live agent color; deleted/unknown agents fall back to slate.
   const colorFor = useMemo(() => {
     const byId = new Map((playground?.agents ?? []).map((a) => [a.id, a.colorCategory]));
     return (msg: TranscriptMessage) => agentColor(msg.agentId ? byId.get(msg.agentId) : null);
   }, [playground?.agents]);
+
+  const liveColor = liveAgent ? agentColor(liveAgent.colorCategory) : '';
 
   // Aggregate stats (mirrors BottomPanel): total tokens + duration across messages.
   const stats = useMemo(() => {
@@ -61,6 +79,31 @@ export function TimelinePage() {
     }
     return { tokens, duration, hasTokens, turns: groups.length, messages: transcript.length };
   }, [transcript, groups.length]);
+
+  // Auto-scroll to the newest content when the reader is already near the bottom.
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [atBottom, setAtBottom] = useState(true);
+
+  function scrollToBottom(behavior: ScrollBehavior = 'auto') {
+    const el = contentRef.current;
+    if (!el) return;
+    if (behavior === 'smooth' && typeof el.scrollTo === 'function') {
+      el.scrollTo({ top: el.scrollHeight, behavior });
+    } else {
+      el.scrollTop = el.scrollHeight;
+    }
+  }
+
+  function handleScroll() {
+    const el = contentRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setAtBottom(distanceFromBottom < 40);
+  }
+
+  useEffect(() => {
+    if (atBottom) scrollToBottom();
+  }, [transcript.length, liveText, atBottom]);
 
   // Escape closes; restore focus to whatever was focused before opening (spec §22).
   const panelRef = useRef<HTMLDivElement>(null);
@@ -77,6 +120,9 @@ export function TimelinePage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const showJumpToLatest = !atBottom && (transcript.length > 0 || !!liveAgent);
+  const hasContent = transcript.length > 0 || !!liveAgent;
 
   return (
     <div
@@ -110,8 +156,12 @@ export function TimelinePage() {
           </div>
         </header>
 
-        <div className={styles.content}>
-          {transcript.length === 0 ? (
+        <div
+          className={styles.content}
+          ref={contentRef}
+          onScroll={handleScroll}
+        >
+          {!hasContent ? (
             <p className={styles.empty}>
               No conversation yet. Configure agents, connect them, and press Run.
             </p>
@@ -125,9 +175,30 @@ export function TimelinePage() {
                   {group.messages.map((msg) => (
                     <TimelineItem key={msg.id} msg={msg} color={colorFor(msg)} />
                   ))}
+                  {liveInLastGroup && gi === groups.length - 1 && liveAgent && (
+                    <TimelineLiveItem agent={liveAgent} text={liveText ?? ''} color={liveColor} />
+                  )}
                 </li>
               ))}
+              {needsNewLiveGroup && liveAgent && (
+                <li className={styles.turnGroup}>
+                  <div className={styles.turnDivider} aria-label={`Turn ${currentTurn}`}>
+                    <span className={styles.turnLabel}>Turn {currentTurn}</span>
+                  </div>
+                  <TimelineLiveItem agent={liveAgent} text={liveText ?? ''} color={liveColor} />
+                </li>
+              )}
             </ol>
+          )}
+
+          {showJumpToLatest && (
+            <button
+              type="button"
+              className={`${styles.jumpBtn} primary`}
+              onClick={() => { scrollToBottom('smooth'); setAtBottom(true); }}
+            >
+              ↓ Jump to latest
+            </button>
           )}
         </div>
       </div>
@@ -141,6 +212,9 @@ function TimelineItem({ msg, color }: { msg: TranscriptMessage; color: string })
   // Mirror the card (header + body) for RTL languages; the spine node stays put.
   const dir = dirForLanguage(msg.language);
   const [showReasoning, setShowReasoning] = useState(false);
+  const split = extractInlineThinking(msg.content);
+  const visibleContent = split.text;
+  const reasoning = [msg.reasoning, split.reasoning].filter(Boolean).join('\n\n') || undefined;
 
   return (
     <div className={`${styles.item} ${failed ? styles.itemFailed : ''}`}>
@@ -153,7 +227,7 @@ function TimelineItem({ msg, color }: { msg: TranscriptMessage; color: string })
           </span>
           {msg.role && <span className="chip">{msg.role}</span>}
           {msg.status === 'stopped' && <span className="chip">stopped</span>}
-          {msg.reasoning && (
+          {reasoning && (
             <button
               type="button"
               className="chip"
@@ -172,9 +246,9 @@ function TimelineItem({ msg, color }: { msg: TranscriptMessage; color: string })
         {msg.sourceAgentId && msg.connectionType && (
           <div className={styles.source}>via {msg.connectionType} connection</div>
         )}
-        {showReasoning && msg.reasoning && (
+        {showReasoning && reasoning && (
           <div className={styles.body} dir="ltr">
-            <pre>{msg.reasoning}</pre>
+            <pre>{reasoning}</pre>
           </div>
         )}
         {/* No explicit dir: inherits the forced direction from the card
@@ -183,8 +257,35 @@ function TimelineItem({ msg, color }: { msg: TranscriptMessage; color: string })
           {failed ? (
             <span className={styles.errText}>Failed: {msg.error}</span>
           ) : (
-            <MessageMarkdown content={msg.content} />
+            <MessageMarkdown content={visibleContent} />
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * In-flight agent response on the timeline spine. Plain text + caret until the
+ * turn finalizes into a transcript entry (spec §13 — live streaming).
+ */
+function TimelineLiveItem({ agent, text, color }: { agent: Agent; text: string; color: string }) {
+  const { text: visible } = extractInlineThinking(text);
+  const thinking = visible.length === 0;
+  const dir = dirForLanguage(agent.language);
+
+  return (
+    <div className={`${styles.item} ${styles.itemLive}`} aria-live="polite">
+      <span className={styles.node} style={{ backgroundColor: color }} aria-hidden="true" />
+      <div className={styles.card} dir={dir} style={{ '--agent-color': color } as CSSProperties}>
+        <div className={styles.cardHeader}>
+          <span className={styles.agent}>{agent.name}</span>
+          {agent.role && <span className="chip">{agent.role}</span>}
+          <span className={styles.liveBadge}>{thinking ? 'thinking…' : 'streaming…'}</span>
+        </div>
+        <div className={`${styles.body} ${styles.liveBody}`}>
+          {visible}
+          <span className={styles.caret} aria-hidden="true" />
         </div>
       </div>
     </div>

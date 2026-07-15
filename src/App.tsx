@@ -13,6 +13,7 @@ import { SkillLibraryManager } from './ui/SkillLibraryManager';
 import { RunDialog } from './ui/RunDialog';
 import { PlaygroundsPanel } from './ui/PlaygroundsPanel';
 import { TimelinePage } from './ui/timeline/TimelinePage';
+import { ConversationRunsPanel } from './ui/runs/ConversationRunsPanel';
 import { AgentLibraryPanel } from './ui/AgentLibraryPanel';
 import { useAgentLibraryStore } from './store/agentLibraryStore';
 import { useRunPresetStore } from './store/runPresetStore';
@@ -79,6 +80,7 @@ export default function App() {
       {openPanel === 'run' && <RunDialog />}
       {openPanel === 'playgrounds' && <PlaygroundsPanel />}
       {openPanel === 'timeline' && <TimelinePage />}
+      {openPanel === 'runHistory' && <ConversationRunsPanel />}
       {openPanel === 'library' && <AgentLibraryPanel />}
       {openPanel === 'createAgentAi' && <CreateAgentWithAiModal />}
       <Toast />

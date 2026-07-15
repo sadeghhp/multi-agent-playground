@@ -1,6 +1,7 @@
 import { type CSSProperties, useState } from 'react';
 import type { TranscriptMessage } from '../../domain/schema';
 import { dirForLanguage } from '../../domain/language';
+import { extractInlineThinking } from '../../providers/openaiAdapter';
 import { useUiStore } from '../../store/uiStore';
 import { useRuntimeStore } from '../../store/runtimeStore';
 import { MessageMarkdown } from './MessageMarkdown';
@@ -17,6 +18,12 @@ export function Message({ msg, color }: { msg: TranscriptMessage; color?: string
   const [showReasoning, setShowReasoning] = useState(false);
   const showToast = useUiStore((s) => s.showToast);
   const snapshot = useRuntimeStore((s) => s.requestSnapshots[msg.id]);
+
+  // Safety net for older turns that stored inline think tags in `content`
+  // before extraction handled Qwen's closer-only form.
+  const split = extractInlineThinking(msg.content);
+  const visibleContent = split.text;
+  const reasoning = [msg.reasoning, split.reasoning].filter(Boolean).join('\n\n') || undefined;
 
   const time = new Date(msg.timestamp).toLocaleTimeString();
   // Mirror the whole message (header, alignment, body) for RTL languages so
@@ -37,7 +44,7 @@ export function Message({ msg, color }: { msg: TranscriptMessage; color?: string
           {msg.agentDeleted && <span className="chip"> deleted</span>}
         </span>
         {msg.role && <span className="chip">{msg.role}</span>}
-        {msg.reasoning && (
+        {reasoning && (
           <button
             type="button"
             className="chip"
@@ -74,7 +81,7 @@ export function Message({ msg, color }: { msg: TranscriptMessage; color?: string
                 showToast('error', 'Clipboard is not available in this context.');
                 return;
               }
-              navigator.clipboard.writeText(msg.content).then(
+              navigator.clipboard.writeText(visibleContent).then(
                 () => showToast('info', 'Copied response.'),
                 () => showToast('error', 'Could not copy the response.'),
               );
@@ -92,9 +99,9 @@ export function Message({ msg, color }: { msg: TranscriptMessage; color?: string
           via {msg.connectionType} connection
         </div>
       )}
-      {showReasoning && msg.reasoning && (
+      {showReasoning && reasoning && (
         <div className={styles.request} dir="ltr">
-          <pre className={styles.reqPre}>{msg.reasoning}</pre>
+          <pre className={styles.reqPre}>{reasoning}</pre>
         </div>
       )}
       {expanded && (
@@ -106,7 +113,7 @@ export function Message({ msg, color }: { msg: TranscriptMessage; color?: string
           {msg.status === 'failed' ? (
             <span className={styles.errText}>Failed: {msg.error}</span>
           ) : (
-            <MessageMarkdown content={msg.content} />
+            <MessageMarkdown content={visibleContent} />
           )}
         </div>
       )}

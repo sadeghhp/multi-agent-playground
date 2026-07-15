@@ -1,9 +1,11 @@
 import { type IDBPDatabase, type IDBPTransaction, openDB } from 'idb';
 import {
+  type ConversationRun,
   type Playground,
   type Provider,
   type RunPreset,
   type SavedAgent,
+  ConversationRun as ConversationRunSchema,
   Playground as PlaygroundSchema,
   Provider as ProviderSchema,
   RunPreset as RunPresetSchema,
@@ -20,6 +22,7 @@ import { clearCredential, loadCredential, saveCredential } from './credentialSto
  *     everywhere.
  *   - `agentLibrary`: the cross-playground agent library ("pool").
  *   - `runPresets`: named, reusable "Run conversation" option bundles.
+ *   - `conversationRuns`: versioned snapshots of each conversation execution.
  *
  * API keys are never written to any store: they're stripped and kept in the
  * credential store instead (spec §8.4), keyed by provider id, so the DB blob
@@ -31,11 +34,12 @@ import { clearCredential, loadCredential, saveCredential } from './credentialSto
  */
 
 const DB_NAME = 'multi-agent-playground';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const STORE = 'playgrounds';
 const PROVIDER_STORE = 'providers';
 const LIBRARY_STORE = 'agentLibrary';
 const RUN_PRESET_STORE = 'runPresets';
+const CONVERSATION_RUN_STORE = 'conversationRuns';
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 let dbInstance: IDBPDatabase | null = null;
@@ -57,6 +61,11 @@ function getDb(): Promise<IDBPDatabase> {
         }
         if (!db.objectStoreNames.contains(RUN_PRESET_STORE)) {
           db.createObjectStore(RUN_PRESET_STORE, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(CONVERSATION_RUN_STORE)) {
+          const runStore = db.createObjectStore(CONVERSATION_RUN_STORE, { keyPath: 'id' });
+          runStore.createIndex('by-playground', 'playgroundId');
+          runStore.createIndex('by-playground-version', ['playgroundId', 'version']);
         }
         // v1 → v2: hoist providers that were embedded in each playground into the
         // global registry, then strip them from the playground record. Runs once.
@@ -160,6 +169,7 @@ export async function deletePlayground(id: string): Promise<void> {
   // Providers are global as of v2, so deleting a playground must NOT touch
   // provider records or their credentials — other playgrounds may still use them.
   await db.delete(STORE, id);
+  await deleteRunsForPlayground(id);
 }
 
 // ---------------------------------------------------------------------------
@@ -230,6 +240,59 @@ export async function loadAllRunPresets(): Promise<RunPreset[]> {
 export async function deleteRunPreset(id: string): Promise<void> {
   const db = await getDb();
   await db.delete(RUN_PRESET_STORE, id);
+}
+
+// ---------------------------------------------------------------------------
+// Conversation runs — versioned execution history per playground.
+// ---------------------------------------------------------------------------
+
+function parseConversationRun(raw: unknown): ConversationRun | undefined {
+  const parsed = ConversationRunSchema.safeParse(raw);
+  if (!parsed.success) {
+    console.warn('Skipping corrupted conversation run record:', parsed.error.issues[0]?.message);
+    return undefined;
+  }
+  return parsed.data;
+}
+
+export async function saveRun(run: ConversationRun): Promise<void> {
+  const db = await getDb();
+  await db.put(CONVERSATION_RUN_STORE, run);
+}
+
+export async function getRun(id: string): Promise<ConversationRun | undefined> {
+  const db = await getDb();
+  const raw = await db.get(CONVERSATION_RUN_STORE, id);
+  if (!raw) return undefined;
+  return parseConversationRun(raw);
+}
+
+export async function listRuns(playgroundId: string): Promise<ConversationRun[]> {
+  const db = await getDb();
+  const index = db.transaction(CONVERSATION_RUN_STORE).store.index('by-playground-version');
+  const all = await index.getAll(IDBKeyRange.bound([playgroundId, 0], [playgroundId, Infinity]));
+  const result: ConversationRun[] = [];
+  for (const raw of all) {
+    const run = parseConversationRun(raw);
+    if (run) result.push(run);
+  }
+  result.sort((a, b) => a.version - b.version);
+  return result;
+}
+
+export async function deleteRun(id: string): Promise<void> {
+  const db = await getDb();
+  await db.delete(CONVERSATION_RUN_STORE, id);
+}
+
+export async function deleteRunsForPlayground(playgroundId: string): Promise<void> {
+  const db = await getDb();
+  const runs = await listRuns(playgroundId);
+  const tx = db.transaction(CONVERSATION_RUN_STORE, 'readwrite');
+  for (const run of runs) {
+    await tx.store.delete(run.id);
+  }
+  await tx.done;
 }
 
 /**

@@ -59,16 +59,25 @@ function normalizeMessageContent(message: Record<string, unknown> | undefined): 
     if (typeof text === 'string' && text.length > 0) return text;
   }
 
-  // Reasoning models and some compat servers put the visible answer elsewhere.
-  for (const key of ['reasoning_content', 'reasoning', 'text']) {
-    const v = message[key];
-    if (typeof v === 'string' && v.length > 0) return v;
-  }
+  // Some compat servers put the visible answer on `text` instead of `content`.
+  // Do NOT fall back to `reasoning_content` here — that is thinking, not the
+  // answer (captured separately via extractMessageReasoning).
+  if (typeof message.text === 'string' && message.text.length > 0) return message.text;
 
   // Allow empty string content when it was explicitly provided.
   if (typeof content === 'string') return content;
 
   return null;
+}
+
+/** Reasoning field on a finished assistant message (non-streaming). */
+function extractMessageReasoning(message: Record<string, unknown> | undefined): string {
+  if (!message) return '';
+  for (const key of ['reasoning_content', 'reasoning']) {
+    const v = message[key];
+    if (typeof v === 'string' && v.length > 0) return v;
+  }
+  return '';
 }
 
 function normalizeDeltaContent(content: unknown): string {
@@ -90,30 +99,53 @@ function normalizeDeltaReasoning(delta: Record<string, unknown>): string {
   return '';
 }
 
+const THINK_TAG = 'think|thinking|reasoning';
+
 /**
- * Some reasoning models (e.g. local DeepSeek-R1/QwQ-style servers) don't use a
- * separate `reasoning_content` field at all — they emit `<think>...</think>`
- * inline inside the normal content string. Strip it out so it never gets
- * treated as (or fed back to other agents as) the agent's visible reply.
- * A dangling unterminated `<think>` (output truncated mid-thought) is also
- * treated as reasoning through to the end of the string.
+ * Some reasoning models (e.g. local DeepSeek-R1/Qwen-style servers) don't use a
+ * separate `reasoning_content` field at all — they emit thinking inline inside
+ * the normal content string. Strip it out so it never gets treated as (or fed
+ * back to other agents as) the agent's visible reply.
+ *
+ * Handles:
+ * - Paired `<think>...</think>` (also `thinking` / `reasoning` tag names)
+ * - Dangling open tag (truncated mid-thought → rest is reasoning)
+ * - Closing tag only (Qwen chat templates pre-fill the open tag in the prompt,
+ *   so the model often emits only `...</think>answer`)
  */
-function extractInlineThinking(raw: string): { text: string; reasoning: string } {
-  if (!/<think>/i.test(raw)) return { text: raw, reasoning: '' };
-  let reasoning = '';
-  let text = raw.replace(/<think>([\s\S]*?)<\/think>/gi, (_, inner: string) => {
-    reasoning += inner;
-    return '';
-  });
-  const openIdx = text.search(/<think>/i);
-  if (openIdx !== -1) {
-    reasoning += text.slice(openIdx).replace(/<think>/i, '');
-    text = text.slice(0, openIdx);
+export function extractInlineThinking(raw: string): { text: string; reasoning: string } {
+  if (!new RegExp(`</?(?:${THINK_TAG})\\b`, 'i').test(raw)) {
+    return { text: raw, reasoning: '' };
   }
+
+  let reasoning = '';
+  let text = raw.replace(
+    new RegExp(`<(${THINK_TAG})\\b[^>]*>([\\s\\S]*?)<\\/\\1>`, 'gi'),
+    (_match, _tag: string, inner: string) => {
+      reasoning += inner;
+      return '';
+    },
+  );
+
+  const openRe = new RegExp(`<(${THINK_TAG})\\b[^>]*>`, 'i');
+  const openMatch = openRe.exec(text);
+  if (openMatch && openMatch.index !== undefined) {
+    reasoning += text.slice(openMatch.index).replace(openRe, '');
+    text = text.slice(0, openMatch.index);
+  }
+
+  // Qwen: open tag was in the prompt; model emits only the closer.
+  const closeRe = new RegExp(`<\\/(?:${THINK_TAG})\\s*>`, 'i');
+  const closeMatch = closeRe.exec(text);
+  if (closeMatch && closeMatch.index !== undefined) {
+    reasoning += text.slice(0, closeMatch.index);
+    text = text.slice(closeMatch.index + closeMatch[0].length);
+  }
+
   return { text: text.trim(), reasoning: reasoning.trim() };
 }
 
-function extractText(data: unknown): { text: string; finishReason: string | null } {
+function extractText(data: unknown): { text: string; reasoning: string; finishReason: string | null } {
   const choices = (data as { choices?: unknown }).choices;
   if (!Array.isArray(choices) || choices.length === 0) {
     throw new ProviderError('unsupported-response', summaryFor('unsupported-response'), {
@@ -130,6 +162,16 @@ function extractText(data: unknown): { text: string; finishReason: string | null
   if (text === null && typeof first.text === 'string') {
     text = first.text;
   }
+  const reasoning = extractMessageReasoning(first.message);
+  // Reasoning-only reply (content null/absent, reasoning_content set): treat as
+  // empty visible text with reasoning captured — same shape as the stream path.
+  if (text === null && reasoning) {
+    return {
+      text: '',
+      reasoning,
+      finishReason: typeof first.finish_reason === 'string' ? first.finish_reason : null,
+    };
+  }
   if (text === null) {
     throw new ProviderError('unsupported-response', summaryFor('unsupported-response'), {
       detail:
@@ -139,6 +181,7 @@ function extractText(data: unknown): { text: string; finishReason: string | null
   }
   return {
     text,
+    reasoning,
     finishReason: typeof first.finish_reason === 'string' ? first.finish_reason : null,
   };
 }
@@ -362,8 +405,9 @@ export async function sendChat(
     clearRequestTimeout();
   }
 
-  const { text: rawText, finishReason } = extractText(data);
+  const { text: rawText, reasoning: messageReasoning, finishReason } = extractText(data);
   const { text, reasoning: inlineReasoning } = extractInlineThinking(rawText);
+  const combinedReasoning = [messageReasoning, inlineReasoning].filter(Boolean).join('\n\n');
   // Non-streaming provider (or one that ignored `stream`): surface the full text
   // once so streaming consumers still get a live update.
   if (options.onToken && text) options.onToken(text);
@@ -375,7 +419,7 @@ export async function sendChat(
 
   return {
     text,
-    ...(inlineReasoning ? { reasoning: inlineReasoning } : {}),
+    ...(combinedReasoning ? { reasoning: combinedReasoning } : {}),
     model,
     finishReason,
     ...usage,

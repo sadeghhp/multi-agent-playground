@@ -14,6 +14,7 @@ export type OpenPanel =
   | 'library'
   | 'settings'
   | 'timeline'
+  | 'runHistory'
   | 'createAgentAi';
 
 export type Selection =

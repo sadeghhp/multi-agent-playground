@@ -1,15 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // jsdom has no IndexedDB; stub persistence so store mutations are no-ops.
-vi.mock('../../persistence/db', () => ({
-  savePlayground: vi.fn().mockResolvedValue(undefined),
-  loadPlayground: vi.fn().mockResolvedValue(undefined),
-  loadAllPlaygrounds: vi.fn().mockResolvedValue([]),
-  deletePlayground: vi.fn().mockResolvedValue(undefined),
-  saveProvider: vi.fn().mockResolvedValue(undefined),
-  loadAllProviders: vi.fn().mockResolvedValue([]),
-  deleteProvider: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock('../../persistence/db', () => import('../../test/persistenceDbMock'));
 
 import { createAgent, createProvider } from '../../domain/factories';
 import { loadAllProviders, saveProvider } from '../../persistence/db';

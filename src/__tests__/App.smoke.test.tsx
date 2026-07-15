@@ -2,21 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 
 // IndexedDB isn't available in jsdom; stub persistence so hydration resolves.
-vi.mock('../persistence/db', () => ({
-  savePlayground: vi.fn().mockResolvedValue(undefined),
-  loadPlayground: vi.fn().mockResolvedValue(undefined),
-  loadAllPlaygrounds: vi.fn().mockResolvedValue([]),
-  deletePlayground: vi.fn().mockResolvedValue(undefined),
-  saveProvider: vi.fn().mockResolvedValue(undefined),
-  loadAllProviders: vi.fn().mockResolvedValue([]),
-  deleteProvider: vi.fn().mockResolvedValue(undefined),
-  saveLibraryAgent: vi.fn().mockResolvedValue(undefined),
-  loadAllLibraryAgents: vi.fn().mockResolvedValue([]),
-  deleteLibraryAgent: vi.fn().mockResolvedValue(undefined),
-  saveRunPreset: vi.fn().mockResolvedValue(undefined),
-  loadAllRunPresets: vi.fn().mockResolvedValue([]),
-  deleteRunPreset: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock('../persistence/db', () => import('../test/persistenceDbMock'));
 
 // React Flow measures real DOM layout that jsdom can't provide; stub the canvas.
 vi.mock('../graph/GraphCanvas', () => ({

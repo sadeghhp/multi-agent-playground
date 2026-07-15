@@ -140,6 +140,21 @@ describe('buildSystemPrompt', () => {
     const prompt = buildSystemPrompt({ agent, conversation: defaultConversationSettings(), history: [] });
     expect(prompt).toContain('in French');
   });
+
+  it('applies a conversation-environment (mode) directive', () => {
+    const agent = createAgent({ name: 'A' });
+    const conversation = { ...defaultConversationSettings(), conversationMode: 'postmortem' as const };
+    const prompt = buildSystemPrompt({ agent, conversation, history: [] });
+    expect(prompt).toContain('blameless postmortem');
+    expect(prompt).toContain('never individual');
+  });
+
+  it('adds no environment directive when conversationMode is open', () => {
+    const agent = createAgent({ name: 'A' });
+    const prompt = buildSystemPrompt({ agent, conversation: defaultConversationSettings(), history: [] });
+    expect(prompt).not.toContain('brainstorming session');
+    expect(prompt).not.toContain('blameless postmortem');
+  });
 });
 
 describe('buildTaskPrompt', () => {

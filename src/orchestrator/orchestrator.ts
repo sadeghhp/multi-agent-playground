@@ -8,6 +8,7 @@ import { sendChat } from '../providers/openaiAdapter';
 import { buildEndpoint } from '../providers/url';
 import type { ChatMessage } from '../providers/types';
 import { assembleMessages, boundHistory } from '../agents/promptAssembly';
+import { hasBlockingErrors, validateForRun } from './validate';
 
 /**
  * Conversation orchestrator (spec §11). Directed sequential traversal of the
@@ -56,6 +57,20 @@ function findLastSourceOutput(
   return null;
 }
 
+/**
+ * Most recent user-authored message (see continueRun), walked backwards in
+ * place. Kept as an explicit, always-surfaced instruction — not just a line
+ * inside the bounded/gated history — so it stays authoritative for every
+ * agent turn for the rest of the conversation, however many turns later.
+ */
+function findLastUserDirective(transcript: TranscriptMessage[]): string | null {
+  for (let i = transcript.length - 1; i >= 0; i--) {
+    const m = transcript[i];
+    if (m.agentId === null && m.role === 'user' && m.content) return m.content;
+  }
+  return null;
+}
+
 export function stopRun(): void {
   const runtime = useRuntimeStore.getState();
   if (runtime.status !== 'running') return;
@@ -63,6 +78,45 @@ export function stopRun(): void {
   runtime.setStatus('stopped');
   runtime.setActive(null, null);
   log('execution-stopped', 'Run stopped by user.');
+}
+
+/**
+ * Continue a finished (or stopped) run with a new user message: appends it to
+ * the transcript as a user turn, then re-enters the graph from the starting
+ * agent so agents pick up the discussion with the user's input in view (spec
+ * §11.6 — the fresh message is just more history, surfaced to every agent via
+ * assembleMessages). No-op while a run is already in progress.
+ */
+export function continueRun(userMessage: string): void {
+  const domain = useDomainStore.getState();
+  const pg = domain.playground;
+  if (!pg) return;
+  if (useRuntimeStore.getState().status === 'running') return;
+
+  const trimmed = userMessage.trim();
+  if (!trimmed) return;
+
+  const providers = useProviderStore.getState().providers;
+  if (hasBlockingErrors(validateForRun(pg, providers))) return;
+
+  domain.appendTranscript({
+    id: newMessageId(),
+    turn: 0,
+    agentId: null,
+    agentName: 'You',
+    agentDeleted: false,
+    role: 'user',
+    language: 'en',
+    model: '',
+    providerId: null,
+    content: trimmed,
+    status: 'completed',
+    sourceAgentId: null,
+    connectionType: null,
+    timestamp: Date.now(),
+  });
+
+  void startRun();
 }
 
 export async function startRun(): Promise<void> {
@@ -143,6 +197,7 @@ export async function startRun(): Promise<void> {
       // in place rather than cloning+reversing the whole transcript every turn
       // (which would be O(n) per turn, O(n²) over a long conversation).
       const sourceOutput = findLastSourceOutput(liveTranscript, item.sourceAgentId);
+      const pendingUserDirective = findLastUserDirective(liveTranscript);
       const messages = assembleMessages({
         agent,
         conversation: pg.conversation,
@@ -150,7 +205,11 @@ export async function startRun(): Promise<void> {
         incoming: connection,
         sourceAgentName: sourceName,
         sourceOutput,
-        isFirstTurn: turnNumber === 1,
+        pendingUserDirective,
+        // "Opening" framing only fits a genuinely empty transcript. Turn 1 of
+        // a run that continues an existing transcript (see continueRun) must
+        // still see itself as replying within an ongoing discussion.
+        isFirstTurn: liveTranscript.length === 0,
       });
 
       // Pre-generate the id so the request snapshot (spec §13.3) and the

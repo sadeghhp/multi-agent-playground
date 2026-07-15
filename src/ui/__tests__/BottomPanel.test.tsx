@@ -9,9 +9,10 @@ vi.mock('../../persistence/db', () => ({
   deletePlayground: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { createPlayground } from '../../domain/factories';
+import { createAgent, createPlayground, createProvider } from '../../domain/factories';
 import type { TranscriptMessage } from '../../domain/schema';
 import { useDomainStore } from '../../store/domainStore';
+import { useProviderStore } from '../../store/providerStore';
 import { useRuntimeStore } from '../../store/runtimeStore';
 import { BottomPanel } from '../BottomPanel';
 
@@ -49,8 +50,31 @@ function stubScrollMetrics(el: HTMLElement, state: ScrollState) {
 afterEach(() => cleanup());
 beforeEach(() => {
   useDomainStore.setState({ playground: null, index: [], saveStatus: 'saved' });
+  useProviderStore.setState({ providers: [] });
   useRuntimeStore.getState().reset();
 });
+
+/** A playground with one runnable agent, ready to pass validateForRun. */
+function runnablePlayground() {
+  const provider = createProvider({
+    displayName: 'Local',
+    baseUrl: 'http://localhost:11434',
+    authMethod: 'none',
+    models: ['test'],
+  });
+  const base = createAgent();
+  const agent = createAgent({
+    name: 'A',
+    role: 'r',
+    systemInstruction: 'do',
+    llm: { ...base.llm, providerId: provider.id, model: 'test' },
+  });
+  useProviderStore.setState({ providers: [provider] });
+  const pg = createPlayground('Demo');
+  pg.agents.push(agent);
+  pg.conversation = { ...pg.conversation, subject: 'topic', startingAgentId: agent.id };
+  return pg;
+}
 
 describe('BottomPanel auto-scroll (M-13 regression)', () => {
   it('does not force scroll-to-bottom when the user has scrolled up to read history', () => {
@@ -125,5 +149,51 @@ describe('BottomPanel tab ARIA wiring (L-17 regression)', () => {
     expect(transcriptTab.tabIndex).toBe(-1);
     const panelAfter = screen.getByRole('tabpanel');
     expect(logTab.id).toBe(panelAfter.getAttribute('aria-labelledby'));
+  });
+});
+
+describe('BottomPanel follow-up (continue conversation)', () => {
+  it('hides the follow-up form when there is no transcript yet', () => {
+    const playground = runnablePlayground();
+    useDomainStore.setState({ playground });
+    render(<BottomPanel />);
+
+    expect(screen.queryByLabelText(/message to continue the conversation/i)).toBeNull();
+  });
+
+  it('hides the follow-up form while a run is in progress', () => {
+    const playground = { ...runnablePlayground(), transcript: [msg('a')] };
+    useDomainStore.setState({ playground });
+    useRuntimeStore.setState({ status: 'running' });
+    render(<BottomPanel />);
+
+    expect(screen.queryByLabelText(/message to continue the conversation/i)).toBeNull();
+  });
+
+  it('shows the follow-up form once a run has finished, disables Continue until text is entered, and appends the message on submit', () => {
+    // fetch is only invoked async by the orchestrator's continuation run; this
+    // test only asserts the synchronous append that happens before that call.
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => new Promise(() => {})));
+    const playground = { ...runnablePlayground(), transcript: [msg('a')] };
+    useDomainStore.setState({ playground });
+    useRuntimeStore.setState({ status: 'completed' });
+    render(<BottomPanel />);
+
+    const input = screen.getByLabelText(/message to continue the conversation/i);
+    const button = screen.getByRole('button', { name: /continue/i });
+    expect(button).toBeDisabled();
+
+    fireEvent.change(input, { target: { value: 'Argue against this and give me the facts.' } });
+    expect(button).not.toBeDisabled();
+
+    act(() => fireEvent.click(button));
+
+    const transcript = useDomainStore.getState().playground!.transcript;
+    const userMsg = transcript.find((m) => m.role === 'user' && m.agentId === null);
+    expect(userMsg?.content).toBe('Argue against this and give me the facts.');
+    // continueRun() synchronously flips status to 'running' (startRun's first
+    // action), so the follow-up form itself unmounts right after submit.
+    expect(useRuntimeStore.getState().status).toBe('running');
+    expect(screen.queryByLabelText(/message to continue the conversation/i)).toBeNull();
   });
 });

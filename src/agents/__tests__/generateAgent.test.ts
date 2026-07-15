@@ -219,6 +219,7 @@ describe('draftToAgentOverrides', () => {
     expect(overrides.skills?.[0].id).toMatch(/^sk_/);
     expect(overrides.skills?.[0].enabled).toBe(true);
     expect(overrides.characteristics?.tone).toBe('direct');
+    expect(overrides.personaMode).toBe('role');
   });
 
   it('applies an llm override when given', () => {
@@ -232,6 +233,27 @@ describe('draftToAgentOverrides', () => {
     const draft = generateAgentDraftFixture();
     const overrides = draftToAgentOverrides(draft);
     expect(overrides.llm).toBeUndefined();
+  });
+
+  it('maps digital-shadow persona fields onto the agent', () => {
+    const draft = {
+      ...VALID_DRAFT,
+      name: 'Thomas Nagel',
+      role: 'Digital shadow of Thomas Nagel',
+      systemInstruction: 'I defend the irreducibility of subjective experience.',
+      personaMode: 'digital-shadow' as const,
+      persona: {
+        realName: 'Thomas Nagel',
+        knownFor: 'Philosophy of mind',
+        stanceNotes: '- Qualia are real',
+        citationStyle: 'in-character' as const,
+      },
+    };
+    const overrides = draftToAgentOverrides(draft);
+    expect(overrides.personaMode).toBe('digital-shadow');
+    expect(overrides.persona?.realName).toBe('Thomas Nagel');
+    expect(overrides.persona?.stanceNotes).toContain('Qualia');
+    expect(overrides.persona?.citationStyle).toBe('in-character');
   });
 });
 

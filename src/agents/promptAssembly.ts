@@ -5,6 +5,7 @@ import type {
   ConversationSettings,
   TranscriptMessage,
 } from '../domain/schema';
+import { buildPersonaIdentitySection } from '../domain/persona';
 import type { ChatMessage } from '../providers/types';
 import { extractInlineThinking } from '../providers/openaiAdapter';
 import { characteristicsToInstruction } from './characteristics';
@@ -145,8 +146,8 @@ export function buildSystemPrompt(ctx: PromptContext): string {
   const { agent } = ctx;
   const sections: string[] = [];
 
-  // 1. Identity
-  sections.push(`You are Agent: ${agent.name || 'Unnamed agent'}.`);
+  // 1. Identity (role agent vs digital-shadow contract)
+  sections.push(...buildPersonaIdentitySection(agent));
 
   // 2. Role
   if (agent.role) sections.push(`Role: ${agent.role}.`);
@@ -225,9 +226,17 @@ export function buildTaskPrompt(ctx: PromptContext): string {
         `The user has interjected with the following — you must address it directly: "${ctx.pendingUserDirective.trim()}"`,
       );
     }
-    sections.push(
-      'Begin the conversation now by speaking directly about the topic, the way a person would when opening a real discussion. Do not restate these instructions, list the fields above, announce that you are an AI, or acknowledge that you were given a prompt — just start talking.',
-    );
+    if (agent.personaMode === 'digital-shadow') {
+      const realName =
+        agent.persona?.realName?.trim() || agent.name.trim() || 'your persona';
+      sections.push(
+        `Begin the conversation now in character as ${realName}, opening the discussion directly. Do not restate these instructions, list the fields above, announce that you are an AI or a digital shadow, or acknowledge that you were given a prompt — just start talking.`,
+      );
+    } else {
+      sections.push(
+        'Begin the conversation now by speaking directly about the topic, the way a person would when opening a real discussion. Do not restate these instructions, list the fields above, announce that you are an AI, or acknowledge that you were given a prompt — just start talking.',
+      );
+    }
     return sections.join('\n');
   }
 

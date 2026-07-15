@@ -68,6 +68,23 @@ export function validateForRun(
     if (!agent.systemInstruction.trim()) {
       issues.push({ level: 'error', message: `Agent "${agent.name}" has no system instruction.`, agentId: agent.id });
     }
+    if (agent.personaMode === 'digital-shadow' && !agent.persona?.realName?.trim()) {
+      issues.push({
+        level: 'warning',
+        message: `Agent "${agent.name}" is a digital shadow but has no real person name.`,
+        agentId: agent.id,
+      });
+    }
+    if (
+      agent.personaMode === 'digital-shadow' &&
+      /\badvocate\b/i.test(agent.name)
+    ) {
+      issues.push({
+        level: 'warning',
+        message: `Agent "${agent.name}" is a digital shadow but its name reads like an advocate — consider using the real person's name.`,
+        agentId: agent.id,
+      });
+    }
     const provider = providers.find((p) => p.id === agent.llm.providerId);
     if (!agent.llm.providerId || !provider) {
       issues.push({ level: 'error', message: `Agent "${agent.name}" has no provider assigned.`, agentId: agent.id });

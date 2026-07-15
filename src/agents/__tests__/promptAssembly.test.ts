@@ -155,6 +155,52 @@ describe('buildSystemPrompt', () => {
     expect(prompt).not.toContain('brainstorming session');
     expect(prompt).not.toContain('blameless postmortem');
   });
+
+  it('injects a first-person digital-shadow contract with stance notes', () => {
+    const agent = createAgent({
+      name: 'Thomas Nagel',
+      role: 'Digital shadow of Thomas Nagel',
+      personaMode: 'digital-shadow',
+      persona: {
+        realName: 'Thomas Nagel',
+        knownFor: 'Philosophy of mind',
+        stanceNotes: '- Subjective experience cannot be reduced to physical description',
+        citationStyle: 'in-character',
+      },
+      systemInstruction: 'Defend the subjective character of experience.',
+    });
+    const prompt = buildSystemPrompt({ agent, conversation: defaultConversationSettings(), history: [] });
+    expect(prompt).toContain('digital shadow of Thomas Nagel');
+    expect(prompt).toContain('Speak in first person');
+    expect(prompt).toContain('Do not refer to yourself in third person');
+    expect(prompt).toContain("Advocate");
+    expect(prompt).toContain('Subjective experience cannot be reduced');
+    expect(prompt).toContain('I argued that');
+    expect(prompt).not.toContain('You are Agent: Thomas Nagel.');
+  });
+
+  it('uses attributed citation language when citationStyle is attributed', () => {
+    const agent = createAgent({
+      name: 'Thomas Nagel',
+      personaMode: 'digital-shadow',
+      persona: {
+        realName: 'Thomas Nagel',
+        knownFor: '',
+        stanceNotes: '',
+        citationStyle: 'attributed',
+      },
+    });
+    const prompt = buildSystemPrompt({ agent, conversation: defaultConversationSettings(), history: [] });
+    expect(prompt).toContain('attribute it clearly');
+    expect(prompt).not.toContain('cite it in first person');
+  });
+
+  it('keeps role-agent identity for personaMode role', () => {
+    const agent = createAgent({ name: "Nagel's Advocate", role: 'Philosophical Explainer' });
+    const prompt = buildSystemPrompt({ agent, conversation: defaultConversationSettings(), history: [] });
+    expect(prompt).toContain("You are Agent: Nagel's Advocate.");
+    expect(prompt).not.toContain('digital shadow of');
+  });
 });
 
 describe('buildTaskPrompt', () => {
@@ -175,6 +221,23 @@ describe('buildTaskPrompt', () => {
     expect(task).toContain('Decide');
     expect(task).not.toContain('Subject: Ship it?');
     expect(task).not.toContain('Provide your response.');
+  });
+
+  it('opens shadow agents in character on the first turn', () => {
+    const agent = createAgent({
+      name: 'Thomas Nagel',
+      personaMode: 'digital-shadow',
+      persona: {
+        realName: 'Thomas Nagel',
+        knownFor: '',
+        stanceNotes: '',
+        citationStyle: 'in-character',
+      },
+    });
+    const conversation = { ...defaultConversationSettings(), subject: 'What is consciousness?' };
+    const task = buildTaskPrompt({ agent, conversation, history: [], isFirstTurn: true });
+    expect(task).toContain('in character as Thomas Nagel');
+    expect(task).not.toContain('the way a person would');
   });
 
   it('embeds the source output for a review connection even without history', () => {

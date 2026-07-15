@@ -1,6 +1,15 @@
 import { z } from 'zod';
-import { ColorCategory, type Agent, type LlmConfig, type Skill } from '../domain/schema';
+import {
+  ColorCategory,
+  PersonaCitationStyle,
+  PersonaMode,
+  type Agent,
+  type LlmConfig,
+  type PersonaConfig,
+  type Skill,
+} from '../domain/schema';
 import { defaultCharacteristics, defaultLlmConfig } from '../domain/factories';
+import { defaultPersonaConfig } from '../domain/persona';
 import { newSkillId } from '../domain/ids';
 import { ProviderError, retryEligible } from '../providers/errors';
 import { sendChat } from '../providers/openaiAdapter';
@@ -21,12 +30,23 @@ const GeneratedSkill = z.object({
   instruction: z.string().min(1).max(600),
 });
 
+const GeneratedPersona = z.object({
+  realName: z.string().max(80).default(''),
+  knownFor: z.string().max(200).default(''),
+  stanceNotes: z.string().max(800).default(''),
+  citationStyle: PersonaCitationStyle.default('in-character'),
+});
+
 export const GeneratedAgentDraft = z.object({
   name: z.string().min(1).max(60),
   description: z.string().max(300).default(''),
   role: z.string().min(1).max(80),
   systemInstruction: z.string().min(1).max(2000),
   language: z.enum(['en', 'fa', 'fr']).default('en'),
+  // Optional (no default): omit ≠ "role", so enrich can preserve an existing
+  // digital-shadow when the model forgets the field.
+  personaMode: PersonaMode.optional(),
+  persona: GeneratedPersona.optional(),
   characteristics: z
     .object({
       tone: z.string().max(40).default('neutral'),
@@ -57,6 +77,13 @@ const GENERATE_SYSTEM_PROMPT = [
   '  "role": string,                // short role label, e.g. "Financial analyst"',
   '  "systemInstruction": string,   // the instruction the agent will act on; be specific and concrete',
   '  "language": "en" | "fa" | "fr",// language the agent converses in; default "en" unless the description implies otherwise',
+  '  "personaMode": "role" | "digital-shadow",',
+  '  "persona": {                   // required when personaMode is "digital-shadow"; omit or empty for role agents',
+  '    "realName": string,          // full name of the real person',
+  '    "knownFor": string,          // one-line public summary',
+  '    "stanceNotes": string,       // short bullets of core public positions',
+  '    "citationStyle": "in-character" | "attributed"  // default "in-character"',
+  '  },',
   '  "characteristics": {',
   '    "tone": string,              // short adjective, e.g. "formal", "direct", "neutral"',
   '    "verbosity": number,         // 0-100: 0-33 concise, 34-66 balanced, 67-100 thorough/detailed',
@@ -71,8 +98,19 @@ const GENERATE_SYSTEM_PROMPT = [
   '  ]',
   '}',
   '',
+  'Persona intent (choose carefully — do not confuse these):',
+  '- DIGITAL SHADOW when the user asks to mimic, be, speak as, digitally shadow, or role-play a',
+  '  named real person ("mimic Thomas Nagel", "as Ada Lovelace", "digital shadow of …").',
+  '  Then: personaMode="digital-shadow"; name = the person\'s real name (NOT "X\'s Advocate");',
+  '  role = "Digital shadow of {realName}"; systemInstruction in first person (I argue…);',
+  '  fill persona.realName, knownFor, stanceNotes; citationStyle "in-character" unless asked otherwise.',
+  '- ROLE / ADVOCATE when the user asks to advocate for, explain, criticise, or summarise a',
+  '  person\'s views from the outside ("Nagel\'s advocate", "philosophical explainer of X").',
+  '  Then: personaMode="role"; third-person commentary is fine; omit persona or leave it empty.',
+  '- Otherwise default personaMode="role".',
+  '',
   'Example, for the description "a skeptical reviewer who challenges claims":',
-  '{"name":"Critic","description":"Skeptically reviews claims and evidence.","role":"Skeptical reviewer","systemInstruction":"Critically evaluate the previous responses. Challenge unsupported claims and identify weaknesses.","language":"en","characteristics":{"tone":"direct","verbosity":50,"creativity":40,"assertiveness":70,"skepticism":85,"cooperation":35},"colorCategory":"red","skills":[{"name":"critique","description":"Critical review","instruction":"Focus on factual weaknesses and logical gaps."}]}',
+  '{"name":"Critic","description":"Skeptically reviews claims and evidence.","role":"Skeptical reviewer","systemInstruction":"Critically evaluate the previous responses. Challenge unsupported claims and identify weaknesses.","language":"en","personaMode":"role","characteristics":{"tone":"direct","verbosity":50,"creativity":40,"assertiveness":70,"skepticism":85,"cooperation":35},"colorCategory":"red","skills":[{"name":"critique","description":"Critical review","instruction":"Focus on factual weaknesses and logical gaps."}]}',
 ].join('\n');
 
 function buildUserMessage(description: string): string {
@@ -296,6 +334,32 @@ export async function generateAgentDraft(
   }
 }
 
+/**
+ * Resolve persona mode for a create-from-draft path. Omitted → role.
+ * Enrich uses a separate path that can preserve the previous agent's mode.
+ */
+export function resolvePersonaMode(
+  draft: GeneratedAgentDraft,
+  fallback: Agent['personaMode'] = 'role',
+): Agent['personaMode'] {
+  return draft.personaMode ?? fallback;
+}
+
+/** Map draft persona fields onto Agent.persona when in digital-shadow mode. */
+export function personaFromDraft(
+  draft: GeneratedAgentDraft,
+  mode: Agent['personaMode'],
+): PersonaConfig | undefined {
+  if (mode !== 'digital-shadow') return undefined;
+  const p = draft.persona;
+  return defaultPersonaConfig({
+    realName: p?.realName?.trim() || draft.name.trim(),
+    knownFor: p?.knownFor ?? '',
+    stanceNotes: p?.stanceNotes ?? '',
+    citationStyle: p?.citationStyle ?? 'in-character',
+  });
+}
+
 /** Map a generated draft onto the overrides createAgent() expects. */
 export function draftToAgentOverrides(
   draft: GeneratedAgentDraft,
@@ -309,12 +373,17 @@ export function draftToAgentOverrides(
     enabled: true,
   }));
 
+  const personaMode = resolvePersonaMode(draft, 'role');
+  const persona = personaFromDraft(draft, personaMode);
+
   return {
     name: draft.name,
     description: draft.description,
     role: draft.role,
     systemInstruction: draft.systemInstruction,
     language: draft.language,
+    personaMode,
+    ...(persona ? { persona } : {}),
     colorCategory: draft.colorCategory,
     characteristics: { ...defaultCharacteristics(), ...draft.characteristics },
     skills,

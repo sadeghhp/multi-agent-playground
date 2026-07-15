@@ -7,7 +7,7 @@ import { z } from 'zod';
  * schema version"). Bump it whenever a breaking shape change lands and add a
  * migration in persistence/migrate.ts.
  */
-export const SCHEMA_VERSION = 2 as const;
+export const SCHEMA_VERSION = 3 as const;
 
 // ---------------------------------------------------------------------------
 // Enums / small value types
@@ -128,6 +128,28 @@ export const RuntimeConfig = z.object({
 export type RuntimeConfig = z.infer<typeof RuntimeConfig>;
 
 // ---------------------------------------------------------------------------
+// Persona — optional "digital shadow of a real person" identity. Default
+// personaMode is 'role' so existing agents parse and behave unchanged.
+// ---------------------------------------------------------------------------
+
+export const PersonaMode = z.enum(['role', 'digital-shadow']);
+export type PersonaMode = z.infer<typeof PersonaMode>;
+
+export const PersonaCitationStyle = z.enum(['in-character', 'attributed']);
+export type PersonaCitationStyle = z.infer<typeof PersonaCitationStyle>;
+
+export const PersonaConfig = z.object({
+  /** Display name of the real person being shadowed, e.g. "Thomas Nagel". */
+  realName: z.string().default(''),
+  /** One-line public summary — what the person is known for. */
+  knownFor: z.string().default(''),
+  /** User-authored bullets of core public positions for grounding. */
+  stanceNotes: z.string().default(''),
+  citationStyle: PersonaCitationStyle.default('in-character'),
+});
+export type PersonaConfig = z.infer<typeof PersonaConfig>;
+
+// ---------------------------------------------------------------------------
 // Agent (spec §7.2). Domain layer only — visual position lives here but the
 // graph library never reads this object directly (spec §5).
 // ---------------------------------------------------------------------------
@@ -142,6 +164,13 @@ export const Agent = z.object({
   // Per-agent conversation language. Defaults to English so existing v1
   // playgrounds without the field parse cleanly (no migration needed).
   language: AgentLanguage.default('en'),
+  /**
+   * Identity stance. 'role' is a generic specialist; 'digital-shadow' speaks
+   * in first person as a simulation of a named real person (see `persona`).
+   */
+  personaMode: PersonaMode.default('role'),
+  /** Present when the agent is (or was configured as) a digital shadow. */
+  persona: PersonaConfig.optional(),
   characteristics: Characteristics,
   skills: z.array(Skill).default([]),
   llm: LlmConfig,

@@ -253,6 +253,14 @@ export function CreateAgentWithAiModal() {
             <div className={styles.readonlyValue}>{draft.role || '—'}</div>
           </div>
           <div className="field">
+            <label>Persona</label>
+            <div className={styles.readonlyValue}>
+              {draft.personaMode === 'digital-shadow'
+                ? `Digital shadow${draft.persona?.realName ? ` of ${draft.persona.realName}` : ''}`
+                : 'Role agent'}
+            </div>
+          </div>
+          <div className="field">
             <label>System instruction</label>
             <pre className={styles.preview}>{draft.systemInstruction}</pre>
           </div>

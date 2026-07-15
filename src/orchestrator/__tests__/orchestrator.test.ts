@@ -819,4 +819,52 @@ describe('orchestrator flow control (failure policy)', () => {
     // The run wasn't killed — it ended by the turn limit / A draining, not error.
     expect(useRuntimeStore.getState().status).not.toBe('error');
   });
+
+  it('stops cleanly (not error) when aborted while a decision prompt is pending', async () => {
+    // Real requestFailureDecision — exercises the abort-resolves-to-stop path.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(errorChat(400)));
+    const pg = cyclePlayground(10, 5);
+    pg.conversation.failurePolicy = {
+      onFailure: 'prompt',
+      maxAutoRetries: 0,
+      backoffMs: 0,
+      autoDisableAfterFailures: 3,
+    };
+    useDomainStore.setState({ playground: pg });
+
+    const runPromise = startRun();
+    await vi.waitFor(() =>
+      expect(useUiStore.getState().failureDecision).not.toBeNull(),
+    );
+    stopRun();
+    await runPromise; // must settle, not hang
+
+    expect(useRuntimeStore.getState().status).toBe('stopped');
+    expect(useUiStore.getState().failureDecision).toBeNull();
+  });
+
+  it('aborting during auto-retry backoff stops without firing the retry', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(errorChat(500));
+    vi.stubGlobal('fetch', fetchMock);
+    const pg = cyclePlayground(10, 5);
+    pg.conversation.failurePolicy = {
+      onFailure: 'stop',
+      maxAutoRetries: 1,
+      backoffMs: 5_000, // long enough that the retry can't fire before we abort
+      autoDisableAfterFailures: 3,
+    };
+    useDomainStore.setState({ playground: pg });
+
+    const runPromise = startRun();
+    await vi.waitFor(() =>
+      expect(
+        useRuntimeStore.getState().events.some((e) => e.kind === 'request-retrying'),
+      ).toBe(true),
+    );
+    stopRun();
+    await runPromise;
+
+    expect(fetchMock).toHaveBeenCalledTimes(1); // backoff was interrupted, retry never sent
+    expect(useRuntimeStore.getState().status).toBe('stopped');
+  });
 });

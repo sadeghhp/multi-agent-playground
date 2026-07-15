@@ -3,7 +3,12 @@ import { newSkillId } from '../domain/ids';
 import { ProviderError, retryEligible } from '../providers/errors';
 import { sendChat } from '../providers/openaiAdapter';
 import type { ChatMessage } from '../providers/types';
-import { GeneratedAgentDraft, parseJsonObject } from './generateAgent';
+import {
+  GeneratedAgentDraft,
+  parseJsonObject,
+  personaFromDraft,
+  resolvePersonaMode,
+} from './generateAgent';
 
 /**
  * Agent enricher. Takes an existing agent plus free-text "here's new
@@ -23,6 +28,11 @@ const ENRICH_SYSTEM_PROMPT = [
   'skills to reflect the agent\'s matured capabilities. Preserve everything the',
   'new information does not touch — do not invent unrelated changes.',
   '',
+  'Preserve personaMode and persona unless the new information explicitly changes',
+  'persona intent (e.g. switching from an advocate/explainer to a digital shadow,',
+  'or the reverse). For digital-shadow agents, keep first-person systemInstruction',
+  'voice and do not rename them to "X\'s Advocate".',
+  '',
   'Return ONLY a single JSON object with exactly these fields — no markdown',
   'fences, no commentary before or after, no trailing text. Keep string values',
   'concise (especially systemInstruction) so the whole object fits in one reply:',
@@ -32,6 +42,13 @@ const ENRICH_SYSTEM_PROMPT = [
   '  "role": string,',
   '  "systemInstruction": string,',
   '  "language": "en" | "fa" | "fr",',
+  '  "personaMode": "role" | "digital-shadow",',
+  '  "persona": {                   // when personaMode is "digital-shadow"',
+  '    "realName": string,',
+  '    "knownFor": string,',
+  '    "stanceNotes": string,',
+  '    "citationStyle": "in-character" | "attributed"',
+  '  },',
   '  "characteristics": {',
   '    "tone": string,',
   '    "verbosity": number,       // 0-100',
@@ -54,6 +71,8 @@ function buildUserMessage(agent: Agent, newInfo: string): string {
     role: agent.role,
     systemInstruction: agent.systemInstruction,
     language: agent.language,
+    personaMode: agent.personaMode,
+    persona: agent.persona,
     characteristics: agent.characteristics,
     colorCategory: agent.colorCategory,
     skills: agent.skills.map((s) => ({ name: s.name, description: s.description, instruction: s.instruction })),
@@ -210,12 +229,27 @@ export function enrichedDraftToAgentOverrides(agent: Agent, draft: GeneratedAgen
     };
   });
 
+  // Preserve existing digital-shadow mode when the model omits personaMode.
+  const personaMode = resolvePersonaMode(draft, agent.personaMode);
+  let persona: Agent['persona'];
+  if (personaMode === 'digital-shadow') {
+    // Only rebuild persona from the draft when the model supplied it; otherwise
+    // keep the agent's existing grounding (stance notes, etc.).
+    persona = draft.persona
+      ? personaFromDraft(draft, personaMode)
+      : agent.persona ?? personaFromDraft(draft, personaMode);
+  } else {
+    persona = undefined;
+  }
+
   return {
     name: draft.name,
     description: draft.description,
     role: draft.role,
     systemInstruction: draft.systemInstruction,
     language: draft.language,
+    personaMode,
+    persona,
     colorCategory: draft.colorCategory,
     characteristics: { ...agent.characteristics, ...draft.characteristics },
     skills,

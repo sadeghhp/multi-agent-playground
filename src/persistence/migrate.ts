@@ -10,6 +10,9 @@ import { SCHEMA_VERSION } from '../domain/schema';
  * providers themselves are handled per caller: the IndexedDB upgrade hoists
  * embedded providers into the global store (persistence/db.ts), and imports read
  * the still-embedded providers off the export schema before merging them.
+ *
+ * v2 → v3: agents gained optional personaMode / persona fields. Zod defaults
+ * fill personaMode: 'role' for records that omit them; we only re-stamp.
  */
 
 export interface MigrationResult {
@@ -37,7 +40,11 @@ export function migrateToCurrent(raw: unknown): MigrationResult {
     // v1 → v2: re-stamp the version. `providers` (if present) is left on the
     // object so import can read it; the DB upgrade strips it from stored records
     // and zod drops it when parsing against the provider-less Playground schema.
-    data = { ...(raw as object), schemaVersion: 2 };
+    data = { ...(data as object), schemaVersion: 2 };
+  }
+  if ((data as { schemaVersion: number }).schemaVersion < 3) {
+    // v2 → v3: persona fields are optional with defaults; re-stamp only.
+    data = { ...(data as object), schemaVersion: 3 };
   }
   return { ok: true, data };
 }

@@ -103,6 +103,7 @@ export function createAgent(overrides: Partial<Agent> = {}): Agent {
     role: '',
     systemInstruction: '',
     language: 'en',
+    personaMode: 'role',
     characteristics: defaultCharacteristics(),
     skills: [],
     llm: defaultLlmConfig(),
@@ -273,6 +274,7 @@ export type TemplateKey =
   | 'moderator'
   | 'researcher'
   | 'summarizer'
+  | 'digital-shadow'
   // Evidence-pipeline roles (opt-in): narrow, structured, non-conversational.
   | 'proposer'
   | 'verifier'
@@ -286,6 +288,8 @@ interface TemplateDef {
   characteristics: Partial<Characteristics>;
   color: Agent['colorCategory'];
   skills: { name: string; description: string; instruction: string }[];
+  personaMode?: Agent['personaMode'];
+  persona?: Agent['persona'];
 }
 
 const TEMPLATES: Record<TemplateKey, TemplateDef> = {
@@ -341,6 +345,23 @@ const TEMPLATES: Record<TemplateKey, TemplateDef> = {
     characteristics: { verbosity: 25, tone: 'concise' },
     color: 'violet',
     skills: [presetSkill('summarization')],
+  },
+  'digital-shadow': {
+    label: 'Digital shadow',
+    role: 'Digital shadow',
+    systemInstruction:
+      'Speak in first person as the real person named in your persona settings. Defend and elaborate their publicly known positions. When citing their work, do so in first person (e.g. "In [title] I argued that…"). Do not invent quotes or private beliefs; say when you are unsure. Never describe yourself in third person or as their advocate/explainer.',
+    characteristics: { assertiveness: 65, creativity: 45, skepticism: 55, tone: 'in-character' },
+    color: 'violet',
+    skills: [],
+    personaMode: 'digital-shadow',
+    persona: {
+      realName: '',
+      knownFor: '',
+      stanceNotes:
+        'Fill in the real person\'s name above, then list 3–6 core public positions or theses here so replies stay grounded.',
+      citationStyle: 'in-character',
+    },
   },
   // Evidence-pipeline roles. Each carries a narrow protocol plus the shared
   // anti-filler conduct (src/domain/conduct.ts). Low verbosity reinforces
@@ -405,6 +426,8 @@ export function createAgentFromTemplate(
       instruction: s.instruction,
       enabled: true,
     })),
+    ...(t.personaMode ? { personaMode: t.personaMode } : {}),
+    ...(t.persona ? { persona: { ...t.persona } } : {}),
     ...overrides,
   });
 }

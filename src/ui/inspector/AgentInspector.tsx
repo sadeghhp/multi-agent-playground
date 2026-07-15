@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import type { Agent, ConnectionType, Skill } from '../../domain/schema';
+import type { Agent, ConnectionType, PersonaCitationStyle, PersonaMode, Skill } from '../../domain/schema';
 import { useDomainStore } from '../../store/domainStore';
 import { useProviderStore } from '../../store/providerStore';
 import { useUiStore } from '../../store/uiStore';
@@ -7,6 +7,7 @@ import { useAgentLibraryStore } from '../../store/agentLibraryStore';
 import { useRuntimeStore } from '../../store/runtimeStore';
 import { newConnectionId, newSkillId } from '../../domain/ids';
 import { SKILL_PRESETS } from '../../domain/factories';
+import { defaultPersonaConfig } from '../../domain/persona';
 import { assembleMessages, boundHistory, buildSystemPrompt, buildTaskPrompt, estimateTokens } from '../../agents/promptAssembly';
 import { enhanceSystemInstruction, type EnhancePromptResult } from '../../agents/enhancePrompt';
 import { enrichAgentDraft, enrichedDraftToAgentOverrides, type EnrichAgentResult } from '../../agents/enrichAgent';
@@ -126,13 +127,48 @@ export function AgentInspector({ agent }: { agent: Agent }) {
     const lines: string[] = [
       `Name: ${draft.name}`,
       `Role: ${draft.role}`,
+      `Persona: ${draft.personaMode}`,
     ];
+    if (draft.personaMode === 'digital-shadow' && draft.persona?.realName) {
+      lines.push(`Shadow of: ${draft.persona.realName}`);
+    }
     if (draft.description) lines.push(`Description: ${draft.description}`);
     lines.push('', 'System instruction:', draft.systemInstruction);
     lines.push('', `Skills (${draft.skills.length}):`);
     if (draft.skills.length === 0) lines.push('(none)');
     for (const s of draft.skills) lines.push(`- ${s.name}${s.description ? `: ${s.description}` : ''}`);
     return lines.join('\n');
+  }
+
+  function patchPersonaMode(mode: PersonaMode) {
+    if (mode === 'digital-shadow') {
+      const persona = agent.persona ?? defaultPersonaConfig();
+      const realName = persona.realName.trim();
+      const roleSuggestion =
+        !agent.role.trim() || /^digital shadow/i.test(agent.role)
+          ? realName
+            ? `Digital shadow of ${realName}`
+            : 'Digital shadow'
+          : agent.role;
+      patch({ personaMode: mode, persona, role: roleSuggestion });
+      return;
+    }
+    patch({ personaMode: mode });
+  }
+
+  function patchPersona(p: Partial<NonNullable<Agent['persona']>>) {
+    const persona = { ...(agent.persona ?? defaultPersonaConfig()), ...p };
+    const next: Partial<Agent> = { persona };
+    // Keep role label aligned when user fills in the real name and role is still the default stub.
+    if (
+      p.realName !== undefined &&
+      (!agent.role.trim() || /^digital shadow(?: of .+)?$/i.test(agent.role))
+    ) {
+      next.role = persona.realName.trim()
+        ? `Digital shadow of ${persona.realName.trim()}`
+        : 'Digital shadow';
+    }
+    patch(next);
   }
 
   // Outgoing connections + which agents are still available as new targets.
@@ -428,6 +464,69 @@ export function AgentInspector({ agent }: { agent: Agent }) {
             ))}
           </div>
         </div>
+      </Section>
+
+      <Section title="Persona" defaultOpen>
+        <p className={styles.hint}>
+          Role agents play a specialist. Digital shadows speak in first person as a
+          named real person, citing their public work in character.
+        </p>
+        <div className="field">
+          <label htmlFor="ag-persona-mode">Persona mode</label>
+          <select
+            id="ag-persona-mode"
+            value={agent.personaMode}
+            onChange={(e) => patchPersonaMode(e.target.value as PersonaMode)}
+          >
+            <option value="role">Role agent</option>
+            <option value="digital-shadow">Digital shadow</option>
+          </select>
+        </div>
+        {agent.personaMode === 'digital-shadow' && (
+          <>
+            <div className="field">
+              <label htmlFor="ag-persona-real">Real person name</label>
+              <input
+                id="ag-persona-real"
+                value={agent.persona?.realName ?? ''}
+                onChange={(e) => patchPersona({ realName: e.target.value })}
+                placeholder="Thomas Nagel"
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="ag-persona-known">Known for</label>
+              <input
+                id="ag-persona-known"
+                value={agent.persona?.knownFor ?? ''}
+                onChange={(e) => patchPersona({ knownFor: e.target.value })}
+                placeholder="Philosophy of mind; the hard problem of experience"
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="ag-persona-stance">Stance notes</label>
+              <textarea
+                id="ag-persona-stance"
+                rows={4}
+                value={agent.persona?.stanceNotes ?? ''}
+                onChange={(e) => patchPersona({ stanceNotes: e.target.value })}
+                placeholder="Core public positions (bullet list)…"
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="ag-persona-cite">Citation style</label>
+              <select
+                id="ag-persona-cite"
+                value={agent.persona?.citationStyle ?? 'in-character'}
+                onChange={(e) =>
+                  patchPersona({ citationStyle: e.target.value as PersonaCitationStyle })
+                }
+              >
+                <option value="in-character">In-character (I argued in…)</option>
+                <option value="attributed">Attributed (X wrote…; as shadow…)</option>
+              </select>
+            </div>
+          </>
+        )}
       </Section>
 
       <Section title="Role & instruction" defaultOpen>

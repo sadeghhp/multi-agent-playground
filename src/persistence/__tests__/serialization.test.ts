@@ -146,4 +146,38 @@ describe('import', () => {
     expect(res.ok).toBe(true);
     expect(res.warnings.join(' ')).toMatch(/provider/i);
   });
+
+  it('migrates a valid v2 export and defaults agents to personaMode role', () => {
+    const { pg, providers } = playgroundWithSecret();
+    const exported = JSON.parse(exportToJson(pg, providers)) as Record<string, unknown>;
+    exported.schemaVersion = 2;
+    for (const agent of exported.agents as Record<string, unknown>[]) {
+      delete agent.personaMode;
+      delete agent.persona;
+    }
+    const res = importFromJson(JSON.stringify(exported), false);
+    expect(res.ok).toBe(true);
+    expect(res.playground!.schemaVersion).toBe(3);
+    expect(res.playground!.agents[0].personaMode).toBe('role');
+  });
+
+  it('round-trips a digital-shadow persona', () => {
+    const { pg, providers } = playgroundWithSecret();
+    pg.agents[0] = {
+      ...pg.agents[0],
+      personaMode: 'digital-shadow',
+      persona: {
+        realName: 'Thomas Nagel',
+        knownFor: 'Philosophy of mind',
+        stanceNotes: '- bats',
+        citationStyle: 'in-character',
+      },
+    };
+    const res = importFromJson(exportToJson(pg, providers), false);
+    expect(res.ok).toBe(true);
+    const agent = res.playground!.agents[0];
+    expect(agent.personaMode).toBe('digital-shadow');
+    expect(agent.persona?.realName).toBe('Thomas Nagel');
+    expect(agent.persona?.stanceNotes).toContain('bats');
+  });
 });

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyRunPreset,
   createAgent,
+  createAgentFromTemplate,
   createLibrarySkill,
   createPlayground,
   createProvider,
@@ -12,6 +13,22 @@ import {
   instantiateFromLibrary,
   SKILL_PRESETS,
 } from '../factories';
+
+describe('createAgent', () => {
+  it('defaults to personaMode role', () => {
+    expect(createAgent().personaMode).toBe('role');
+  });
+});
+
+describe('createAgentFromTemplate', () => {
+  it('creates a digital-shadow template with persona grounding stubs', () => {
+    const agent = createAgentFromTemplate('digital-shadow');
+    expect(agent.personaMode).toBe('digital-shadow');
+    expect(agent.persona?.citationStyle).toBe('in-character');
+    expect(agent.persona?.stanceNotes).toMatch(/real person/i);
+    expect(agent.systemInstruction).toMatch(/first person/i);
+  });
+});
 
 describe('duplicateAgent', () => {
   it('assigns a new id and fresh skill ids, offsetting position (spec §9.3)', () => {

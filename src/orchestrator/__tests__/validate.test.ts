@@ -75,6 +75,35 @@ describe('validateForRun', () => {
     expect(validateForRun(pg, providers).some((i) => i.level === 'error' && /disabled/i.test(i.message))).toBe(true);
   });
 
+  it('warns when a digital-shadow agent has no real person name', () => {
+    const { pg, providers, aId } = readyPlayground();
+    const a = pg.agents.find((x) => x.id === aId)!;
+    a.personaMode = 'digital-shadow';
+    a.persona = { realName: '', knownFor: '', stanceNotes: '', citationStyle: 'in-character' };
+    const issues = validateForRun(pg, providers);
+    expect(
+      issues.some(
+        (i) => i.level === 'warning' && i.agentId === aId && /digital shadow but has no real person name/i.test(i.message),
+      ),
+    ).toBe(true);
+    expect(hasBlockingErrors(issues)).toBe(false);
+  });
+
+  it('warns when a digital-shadow agent is named like an advocate', () => {
+    const { pg, providers, aId } = readyPlayground();
+    const a = pg.agents.find((x) => x.id === aId)!;
+    a.name = "Nagel's Advocate";
+    a.personaMode = 'digital-shadow';
+    a.persona = {
+      realName: 'Thomas Nagel',
+      knownFor: '',
+      stanceNotes: '',
+      citationStyle: 'in-character',
+    };
+    const issues = validateForRun(pg, providers);
+    expect(issues.some((i) => i.level === 'warning' && /reads like an advocate/i.test(i.message))).toBe(true);
+  });
+
   it('errors when the conversation subject is empty (spec §11.1)', () => {
     const { pg, providers } = readyPlayground();
     pg.conversation.subject = '   ';

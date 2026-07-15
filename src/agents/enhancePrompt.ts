@@ -19,6 +19,8 @@ const META_SYSTEM_PROMPT = [
   'and more effective, while preserving its original intent, the agent’s role,',
   'and any concrete constraints already present. Do not invent new capabilities',
   'or tools the agent was not given. Keep it reasonably concise.',
+  'If the agent is a digital shadow of a real person, preserve first-person voice',
+  'and do not rewrite it into a third-person advocate or explainer.',
   '',
   'Return ONLY the rewritten instruction as plain text. Do not add a preamble,',
   'explanation, commentary, headings, quotes, or Markdown code fences.',
@@ -30,6 +32,13 @@ function buildUserMessage(agent: Agent): string {
   lines.push(`Agent name: ${agent.name || '(unnamed)'}`);
   if (agent.role.trim()) lines.push(`Role: ${agent.role.trim()}`);
   if (agent.description.trim()) lines.push(`Description: ${agent.description.trim()}`);
+  lines.push(`Persona mode: ${agent.personaMode}`);
+  if (agent.personaMode === 'digital-shadow' && agent.persona) {
+    if (agent.persona.realName.trim()) lines.push(`Digital shadow of: ${agent.persona.realName.trim()}`);
+    if (agent.persona.knownFor.trim()) lines.push(`Known for: ${agent.persona.knownFor.trim()}`);
+    if (agent.persona.stanceNotes.trim()) lines.push(`Stance notes: ${agent.persona.stanceNotes.trim()}`);
+    lines.push('Preserve first-person digital-shadow voice in the rewritten instruction.');
+  }
   const characteristics = characteristicsToInstruction(agent.characteristics);
   if (characteristics) lines.push(`Behavioural characteristics: ${characteristics}`);
   const skills = agent.skills.filter((s) => s.enabled).map((s) => s.name).filter(Boolean);

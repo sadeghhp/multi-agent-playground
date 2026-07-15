@@ -140,4 +140,41 @@ describe('enrichedDraftToAgentOverrides', () => {
     expect(overrides.characteristics?.tone).toBe('direct');
     expect(overrides.characteristics?.skepticism).toBe(85);
   });
+
+  it('preserves digital-shadow mode and persona when the draft omits them', () => {
+    const shadow = createAgent({
+      name: 'Thomas Nagel',
+      personaMode: 'digital-shadow',
+      persona: {
+        realName: 'Thomas Nagel',
+        knownFor: 'Mind',
+        stanceNotes: '- bats',
+        citationStyle: 'in-character',
+      },
+      systemInstruction: 'I argue from subjective experience.',
+    });
+    const draft = VALID_DRAFT as GeneratedAgentDraft; // no personaMode
+    const overrides = enrichedDraftToAgentOverrides(shadow, draft);
+    expect(overrides.personaMode).toBe('digital-shadow');
+    expect(overrides.persona?.realName).toBe('Thomas Nagel');
+    expect(overrides.persona?.stanceNotes).toContain('bats');
+  });
+
+  it('applies an explicit digital-shadow persona from the draft', () => {
+    const draft = {
+      ...VALID_DRAFT,
+      name: 'Thomas Nagel',
+      role: 'Digital shadow of Thomas Nagel',
+      personaMode: 'digital-shadow' as const,
+      persona: {
+        realName: 'Thomas Nagel',
+        knownFor: 'Philosophy of mind',
+        stanceNotes: '- Qualia',
+        citationStyle: 'in-character' as const,
+      },
+    } as GeneratedAgentDraft;
+    const overrides = enrichedDraftToAgentOverrides(agent, draft);
+    expect(overrides.personaMode).toBe('digital-shadow');
+    expect(overrides.persona?.knownFor).toBe('Philosophy of mind');
+  });
 });

@@ -121,6 +121,20 @@ export function RunDialog() {
 
       <div className="field-row">
         <div className="field">
+          <label htmlFor="run-chitchat">Chit-chat &amp; flattery</label>
+          <select
+            id="run-chitchat"
+            value={conversation.chitchatPolicy}
+            onChange={(e) => updateConversation({ chitchatPolicy: e.target.value as typeof conversation.chitchatPolicy })}
+          >
+            <option value="agent-default">Allow — use each agent's own style</option>
+            <option value="concise-factual">Disallow — concise, strict, and factual only</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="field-row">
+        <div className="field">
           <label htmlFor="run-start">Starting agent</label>
           <select
             id="run-start"

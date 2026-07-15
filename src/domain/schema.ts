@@ -264,6 +264,14 @@ export type TranscriptMessage = z.infer<typeof TranscriptMessage>;
 export const ResponseLength = z.enum(['agent-default', 'short', 'medium', 'long']);
 export type ResponseLength = z.infer<typeof ResponseLength>;
 
+/**
+ * Run-level chit-chat/flattery control (spec extension): 'agent-default'
+ * leaves each agent's own characteristics untouched; 'concise-factual'
+ * instructs every agent to drop pleasantries/flattery/small talk for the run.
+ */
+export const ChitchatPolicy = z.enum(['agent-default', 'concise-factual']);
+export type ChitchatPolicy = z.infer<typeof ChitchatPolicy>;
+
 export const ConversationSettings = z.object({
   subject: z.string().default(''),
   objective: z.string().default(''),
@@ -282,6 +290,7 @@ export const ConversationSettings = z.object({
   // run only. Empty tone / 'agent-default' length means "no override".
   toneOverride: z.string().default(''),
   responseLength: ResponseLength.default('agent-default'),
+  chitchatPolicy: ChitchatPolicy.default('agent-default'),
 });
 export type ConversationSettings = z.infer<typeof ConversationSettings>;
 

@@ -112,6 +112,20 @@ describe('buildSystemPrompt', () => {
     const prompt = buildSystemPrompt({ agent, conversation: defaultConversationSettings(), history: [] });
     expect(prompt).not.toContain('Keep your response');
   });
+
+  it('applies a run-level concise-factual directive that bans small talk and flattery', () => {
+    const agent = createAgent({ name: 'A' });
+    const conversation = { ...defaultConversationSettings(), chitchatPolicy: 'concise-factual' as const };
+    const prompt = buildSystemPrompt({ agent, conversation, history: [] });
+    expect(prompt).toContain('do not compliment, flatter, or praise');
+    expect(prompt).toContain('do not open with greetings, small talk, or transitional filler');
+  });
+
+  it('adds no chit-chat directive when chitchatPolicy is agent-default', () => {
+    const agent = createAgent({ name: 'A' });
+    const prompt = buildSystemPrompt({ agent, conversation: defaultConversationSettings(), history: [] });
+    expect(prompt).not.toContain('do not compliment');
+  });
 });
 
 describe('buildTaskPrompt', () => {

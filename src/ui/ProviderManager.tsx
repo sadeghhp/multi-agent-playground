@@ -6,9 +6,9 @@ import { useUiStore } from '../store/uiStore';
 import { createProvider } from '../domain/factories';
 import { clearCredential, saveCredential } from '../persistence/credentialStore';
 import { validateEndpoint } from '../providers/url';
-import { listModels } from '../providers/listModels';
+import { listModels, type ListedModel } from '../providers/listModels';
 import { testConnection, type TestConnectionResult } from '../providers/testConnection';
-import { DEFAULT_OPENROUTER_PRICES } from '../usage/pricing';
+import { DEFAULT_OPENROUTER_PRICES, formatUsd } from '../usage/pricing';
 import { useUsageStore } from '../store/usageStore';
 import { Modal } from './Modal';
 import styles from './ProviderManager.module.css';
@@ -32,7 +32,7 @@ const PRESETS: Preset[] = [
   {
     label: 'OpenRouter',
     displayName: 'OpenRouter',
-    baseUrl: 'https://openrouter.ai/api',
+    baseUrl: 'https://openrouter.ai/api/v1',
     path: '/v1/chat/completions',
     models: [
       'openai/gpt-4o-mini',
@@ -172,7 +172,7 @@ function ProviderEditor({
   const [testResult, setTestResult] = useState<TestConnectionResult | null>(null);
   const [busy, setBusy] = useState<'test' | 'fetch' | null>(null);
   const [banner, setBanner] = useState<Banner>(null);
-  const [fetchedModels, setFetchedModels] = useState<string[] | null>(null);
+  const [fetchedModels, setFetchedModels] = useState<ListedModel[] | null>(null);
   const [testModel, setTestModel] = useState(provider.defaultModel || provider.models[0] || '');
   const [manualModel, setManualModel] = useState('');
   const [showKey, setShowKey] = useState(false);
@@ -252,8 +252,19 @@ function ProviderEditor({
     if (testModel === model) setTestModel(defaultModel);
   }
 
-  function applyImport(models: string[], defaultModel: string) {
+  function applyImport(selected: ListedModel[], defaultModel: string) {
+    const models = selected.map((m) => m.id);
     onChange({ models, defaultModel });
+    const upsertPrice = useUsageStore.getState().upsertPrice;
+    for (const m of selected) {
+      if (m.inputPer1M === undefined && m.outputPer1M === undefined) continue;
+      upsertPrice({
+        providerId: provider.id,
+        model: m.id,
+        inputPer1M: m.inputPer1M ?? 0,
+        outputPer1M: m.outputPer1M ?? 0,
+      });
+    }
     if (!testModel.trim() || !models.includes(testModel)) setTestModel(defaultModel);
     setFetchedModels(null);
     setBanner({ kind: 'ok', text: `${models.length} model${models.length === 1 ? '' : 's'} configured.` });
@@ -293,7 +304,7 @@ function ProviderEditor({
       const result = await testConnection(provider, testModel.trim() || undefined);
       setTestResult(result);
       if (result.models && result.models.length > 0 && provider.models.length === 0) {
-        setFetchedModels(result.models);
+        setFetchedModels(result.models.map((id) => ({ id })));
       }
     } finally {
       setBusy(null);
@@ -596,6 +607,13 @@ function TestResultView({ result }: { result: TestConnectionResult }) {
   );
 }
 
+function formatModelPriceLabel(m: ListedModel): string | null {
+  if (m.inputPer1M === undefined && m.outputPer1M === undefined) return null;
+  const input = formatUsd(m.inputPer1M ?? 0);
+  const output = formatUsd(m.outputPer1M ?? 0);
+  return `${input} in / ${output} out`;
+}
+
 function ModelImportPanel({
   models,
   existingModels,
@@ -603,48 +621,52 @@ function ModelImportPanel({
   onApply,
   onCancel,
 }: {
-  models: string[];
+  models: ListedModel[];
   existingModels: string[];
   currentDefault: string;
-  onApply: (selected: string[], defaultModel: string) => void;
+  onApply: (selected: ListedModel[], defaultModel: string) => void;
   onCancel: () => void;
 }) {
   const existingSet = new Set(existingModels);
+  const modelIds = useMemo(() => models.map((m) => m.id), [models]);
+  const hasAnyPricing = models.some(
+    (m) => m.inputPer1M !== undefined || m.outputPer1M !== undefined,
+  );
   const [filter, setFilter] = useState('');
   const [selected, setSelected] = useState<Set<string>>(() => {
     if (existingModels.length > 0) {
-      return new Set(models.filter((m) => existingSet.has(m)));
+      return new Set(modelIds.filter((id) => existingSet.has(id)));
     }
-    return new Set(models);
+    return new Set(modelIds);
   });
   const [defaultModel, setDefaultModel] = useState(() => {
-    if (currentDefault && models.includes(currentDefault)) return currentDefault;
+    if (currentDefault && modelIds.includes(currentDefault)) return currentDefault;
     if (existingModels.length > 0) {
-      const kept = models.filter((m) => existingSet.has(m));
+      const kept = modelIds.filter((id) => existingSet.has(id));
       if (kept.length > 0) return kept[0];
     }
-    return models[0] ?? '';
+    return modelIds[0] ?? '';
   });
 
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
     if (!q) return models;
-    return models.filter((m) => m.toLowerCase().includes(q));
+    return models.filter((m) => m.id.toLowerCase().includes(q));
   }, [models, filter]);
 
-  const selectedList = models.filter((m) => selected.has(m));
+  const selectedList = models.filter((m) => selected.has(m.id));
 
   useEffect(() => {
     if (defaultModel && !selected.has(defaultModel)) {
-      setDefaultModel(selectedList[0] ?? '');
+      setDefaultModel(selectedList[0]?.id ?? '');
     }
   }, [selected, defaultModel, selectedList]);
 
-  function toggle(model: string) {
+  function toggle(modelId: string) {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(model)) next.delete(model);
-      else next.add(model);
+      if (next.has(modelId)) next.delete(modelId);
+      else next.add(modelId);
       return next;
     });
   }
@@ -656,10 +678,11 @@ function ModelImportPanel({
           <strong>Import models</strong>
           <p className={styles.importSub}>
             {selectedList.length} of {models.length} selected
+            {hasAnyPricing ? ' · prices USD / 1M tokens' : ''}
           </p>
         </div>
         <div className={styles.importHeaderActions}>
-          <button type="button" onClick={() => setSelected(new Set(models))}>Select all</button>
+          <button type="button" onClick={() => setSelected(new Set(modelIds))}>Select all</button>
           <button type="button" onClick={() => setSelected(new Set())}>Clear</button>
         </div>
       </div>
@@ -676,12 +699,16 @@ function ModelImportPanel({
         {filtered.length === 0 ? (
           <p className="muted" style={{ fontSize: 12, margin: 0 }}>No models match your filter.</p>
         ) : (
-          filtered.map((m) => (
-            <label key={m} className={styles.importItem}>
-              <input type="checkbox" checked={selected.has(m)} onChange={() => toggle(m)} />
-              <span>{m}</span>
-            </label>
-          ))
+          filtered.map((m) => {
+            const priceLabel = formatModelPriceLabel(m);
+            return (
+              <label key={m.id} className={styles.importItem}>
+                <input type="checkbox" checked={selected.has(m.id)} onChange={() => toggle(m.id)} />
+                <span className={styles.importModelId}>{m.id}</span>
+                {priceLabel && <span className={styles.importPrice}>{priceLabel}</span>}
+              </label>
+            );
+          })
         )}
       </div>
 
@@ -694,9 +721,14 @@ function ModelImportPanel({
             disabled={selectedList.length === 0}
             onChange={(e) => setDefaultModel(e.target.value)}
           >
-            {selectedList.map((m) => (
-              <option key={m} value={m}>{m}</option>
-            ))}
+            {selectedList.map((m) => {
+              const price = formatModelPriceLabel(m);
+              return (
+                <option key={m.id} value={m.id}>
+                  {price ? `${m.id} (${price})` : m.id}
+                </option>
+              );
+            })}
           </select>
         </div>
         <div className={styles.importButtons}>

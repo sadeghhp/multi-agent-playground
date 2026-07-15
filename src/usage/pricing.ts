@@ -18,6 +18,11 @@ export function formatUsd(amount: number): string {
   return `$${amount.toFixed(2)}`;
 }
 
+/** Convert OpenRouter-style USD-per-token prices to USD per 1M tokens. */
+export function perTokenToPer1M(perToken: number): number {
+  return perToken * 1_000_000;
+}
+
 /** Seed prices for common OpenRouter model ids (USD per 1M tokens). */
 export const DEFAULT_OPENROUTER_PRICES: Array<
   Omit<ModelPrice, 'id' | 'providerId'> & { model: string }

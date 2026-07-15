@@ -35,4 +35,13 @@ describe('buildEndpoint', () => {
       'http://localhost:11434/v1/chat/completions',
     );
   });
+
+  it('resolves OpenRouter /api/v1 models and chat paths', () => {
+    expect(buildEndpoint('https://openrouter.ai/api/v1', '/models')).toBe(
+      'https://openrouter.ai/api/v1/models',
+    );
+    expect(buildEndpoint('https://openrouter.ai/api/v1', '/v1/chat/completions')).toBe(
+      'https://openrouter.ai/api/v1/chat/completions',
+    );
+  });
 });

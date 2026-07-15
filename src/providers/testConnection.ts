@@ -42,18 +42,19 @@ export async function testConnection(
     };
   }
 
+  const listedIds = modelsResult.models.map((m) => m.id);
   const modelToTest =
-    model?.trim() || provider.defaultModel || provider.models[0] || modelsResult.models[0] || '';
+    model?.trim() || provider.defaultModel || provider.models[0] || listedIds[0] || '';
 
   if (!modelToTest) {
     return {
       ok: true,
       status: modelsResult.status,
       durationMs: modelsResult.durationMs,
-      models: modelsResult.models,
+      models: listedIds,
       responseText:
-        modelsResult.models.length > 0
-          ? `Connected — ${modelsResult.models.length} model(s) listed.`
+        listedIds.length > 0
+          ? `Connected — ${listedIds.length} model(s) listed.`
           : 'Connected — /v1/models responded but listed no models.',
     };
   }
@@ -76,7 +77,7 @@ export async function testConnection(
       ok: true,
       status: res.status,
       durationMs: Date.now() - start,
-      models: modelsResult.models,
+      models: listedIds,
       responseText: res.text,
       model: res.model,
     };
@@ -86,7 +87,7 @@ export async function testConnection(
       ok: false,
       status: pe?.status,
       durationMs: Date.now() - start,
-      models: modelsResult.models,
+      models: listedIds,
       errorKind: pe?.kind ?? 'unknown',
       errorSummary: pe?.message ?? 'Unknown error',
       errorDetail: pe?.detail,

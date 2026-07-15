@@ -466,9 +466,17 @@
 }
 .importItem:hover { background: var(--surface-2); }
 .importItem input { width: auto; flex-shrink: 0; }
-.importItem span {
+.importModelId {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+.importPrice {
+  flex-shrink: 0;
+  font-family: var(--sans, inherit);
+  color: var(--text-muted);
   white-space: nowrap;
 }
 

@@ -126,6 +126,20 @@ describe('buildSystemPrompt', () => {
     const prompt = buildSystemPrompt({ agent, conversation: defaultConversationSettings(), history: [] });
     expect(prompt).not.toContain('do not compliment');
   });
+
+  it('overrides the agent\'s own language with a run-level language override', () => {
+    const agent = createAgent({ name: 'A', language: 'en' });
+    const conversation = { ...defaultConversationSettings(), languageOverride: 'fa' as const };
+    const prompt = buildSystemPrompt({ agent, conversation, history: [] });
+    expect(prompt).toContain('Persian (Farsi)');
+    expect(prompt).not.toContain('Write all of your responses in English.');
+  });
+
+  it('keeps each agent\'s own language when languageOverride is agent-default', () => {
+    const agent = createAgent({ name: 'A', language: 'fr' });
+    const prompt = buildSystemPrompt({ agent, conversation: defaultConversationSettings(), history: [] });
+    expect(prompt).toContain('in French');
+  });
 });
 
 describe('buildTaskPrompt', () => {

@@ -126,7 +126,12 @@ export function buildSystemPrompt(ctx: PromptContext): string {
   }
 
   // 7. Language directive — governs both what the agent asks and answers.
-  sections.push(LANGUAGE_DIRECTIVE[agent.language]);
+  // A run-level override replaces the agent's own language for this run
+  // rather than stacking with it, since two "write in X" directives would
+  // conflict.
+  const effectiveLanguage =
+    ctx.conversation.languageOverride === 'agent-default' ? agent.language : ctx.conversation.languageOverride;
+  sections.push(LANGUAGE_DIRECTIVE[effectiveLanguage]);
 
   // 8. Output constraints (final-response instruction)
   if (agent.runtime.finalResponseInstruction?.trim()) {

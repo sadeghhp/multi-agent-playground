@@ -175,6 +175,33 @@ describe('orchestrator cycle controls', () => {
     expect(JSON.stringify(snap)).not.toMatch(/authorization|bearer|api[-_]?key/i);
   });
 
+  it('applies a run-level temperature override on top of each agent\'s own value', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(okChat())));
+    const pg = cyclePlayground(1, 5);
+    pg.conversation.temperatureOverride = 1.5;
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+
+    const transcript = useDomainStore.getState().playground!.transcript;
+    const snapshots = useRuntimeStore.getState().requestSnapshots;
+    expect(snapshots[transcript[0].id].params.temperature).toBe(1.5);
+  });
+
+  it('caps the effective response timeout at the run-level override', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(okChat())));
+    const setTimeoutSpy = vi.spyOn(global, 'setTimeout');
+    const pg = cyclePlayground(1, 5);
+    pg.agents[0].runtime.responseTimeoutMs = 60_000;
+    pg.conversation.responseTimeoutOverrideMs = 5_000;
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+
+    // Math.min(agent's 60_000, the 5_000 run-level override) = 5_000.
+    expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 5_000);
+  });
+
   it('skips disabled agents', async () => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(okChat())));
     const pg = cyclePlayground(10, 5);

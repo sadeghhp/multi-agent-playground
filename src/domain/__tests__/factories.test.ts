@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applyRunPreset,
   createAgent,
   createLibrarySkill,
   createPlayground,
   createProvider,
+  createRunPreset,
   createSavedAgent,
+  defaultConversationSettings,
   duplicateAgent,
   instantiateFromLibrary,
   SKILL_PRESETS,
@@ -86,6 +89,43 @@ describe('agent library (pool)', () => {
     expect(instance.id).not.toBe(original.id);
     expect(instance.skills[0].id).not.toBe('s1');
     expect(instance.position).toEqual({ x: 200, y: 120 });
+  });
+});
+
+describe('run presets', () => {
+  it('createRunPreset snapshots run-level options but not subject/objective/context/startingAgentId', () => {
+    const conversation = {
+      ...defaultConversationSettings(),
+      subject: 'Ship it?',
+      objective: 'Decide',
+      initialContext: 'bg',
+      startingAgentId: 'ag_1',
+      chitchatPolicy: 'concise-factual' as const,
+      temperatureOverride: 0.2,
+    };
+    const preset = createRunPreset('Terse fact-check', conversation);
+    expect(preset.name).toBe('Terse fact-check');
+    expect(preset.id).toMatch(/^rp_/);
+    expect(preset.settings.chitchatPolicy).toBe('concise-factual');
+    expect(preset.settings.temperatureOverride).toBe(0.2);
+    expect(preset.settings).not.toHaveProperty('subject');
+    expect(preset.settings).not.toHaveProperty('objective');
+    expect(preset.settings).not.toHaveProperty('initialContext');
+    expect(preset.settings).not.toHaveProperty('startingAgentId');
+  });
+
+  it('applyRunPreset overlays a preset\'s options while keeping the conversation\'s own content', () => {
+    const conversation = { ...defaultConversationSettings(), subject: 'Ship it?', startingAgentId: 'ag_1' };
+    const preset = createRunPreset('Terse', {
+      ...defaultConversationSettings(),
+      chitchatPolicy: 'concise-factual' as const,
+      responseLength: 'short' as const,
+    });
+    const applied = applyRunPreset(conversation, preset);
+    expect(applied.subject).toBe('Ship it?');
+    expect(applied.startingAgentId).toBe('ag_1');
+    expect(applied.chitchatPolicy).toBe('concise-factual');
+    expect(applied.responseLength).toBe('short');
   });
 });
 

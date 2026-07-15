@@ -2,21 +2,24 @@ import { type IDBPDatabase, type IDBPTransaction, openDB } from 'idb';
 import {
   type Playground,
   type Provider,
+  type RunPreset,
   type SavedAgent,
   Playground as PlaygroundSchema,
   Provider as ProviderSchema,
+  RunPreset as RunPresetSchema,
   SavedAgent as SavedAgentSchema,
 } from '../domain/schema';
 import { migrateToCurrent } from './migrate';
 import { clearCredential, loadCredential, saveCredential } from './credentialStore';
 
 /**
- * IndexedDB persistence (spec §15.1). Three object stores:
+ * IndexedDB persistence (spec §15.1). Four object stores:
  *   - `playgrounds`: full playground records (no providers as of schema v2).
  *   - `providers`: the application-global provider registry (schema v2). Any
  *     playground can reference these by id, so providers created once are reused
  *     everywhere.
  *   - `agentLibrary`: the cross-playground agent library ("pool").
+ *   - `runPresets`: named, reusable "Run conversation" option bundles.
  *
  * API keys are never written to any store: they're stripped and kept in the
  * credential store instead (spec §8.4), keyed by provider id, so the DB blob
@@ -28,10 +31,11 @@ import { clearCredential, loadCredential, saveCredential } from './credentialSto
  */
 
 const DB_NAME = 'multi-agent-playground';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE = 'playgrounds';
 const PROVIDER_STORE = 'providers';
 const LIBRARY_STORE = 'agentLibrary';
+const RUN_PRESET_STORE = 'runPresets';
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 let dbInstance: IDBPDatabase | null = null;
@@ -50,6 +54,9 @@ function getDb(): Promise<IDBPDatabase> {
         }
         if (!db.objectStoreNames.contains(LIBRARY_STORE)) {
           db.createObjectStore(LIBRARY_STORE, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(RUN_PRESET_STORE)) {
+          db.createObjectStore(RUN_PRESET_STORE, { keyPath: 'id' });
         }
         // v1 → v2: hoist providers that were embedded in each playground into the
         // global registry, then strip them from the playground record. Runs once.
@@ -191,6 +198,38 @@ export async function loadAllLibraryAgents(): Promise<SavedAgent[]> {
 export async function deleteLibraryAgent(id: string): Promise<void> {
   const db = await getDb();
   await db.delete(LIBRARY_STORE, id);
+}
+
+// ---------------------------------------------------------------------------
+// Run presets — named, reusable "Run conversation" option bundles. Like
+// library agents, self-contained (no credentials), so no stripping/rehydration.
+// ---------------------------------------------------------------------------
+
+export async function saveRunPreset(preset: RunPreset): Promise<void> {
+  const db = await getDb();
+  await db.put(RUN_PRESET_STORE, preset);
+}
+
+export async function loadAllRunPresets(): Promise<RunPreset[]> {
+  const db = await getDb();
+  const all = await db.getAll(RUN_PRESET_STORE);
+  const result: RunPreset[] = [];
+  for (const raw of all) {
+    const migrated = migrateToCurrent(raw);
+    if (!migrated.ok) {
+      console.warn('Skipping unreadable run preset record:', migrated.reason);
+      continue;
+    }
+    const parsed = RunPresetSchema.safeParse(migrated.data);
+    if (parsed.success) result.push(parsed.data);
+    else console.warn('Skipping corrupted run preset record:', parsed.error.issues[0]?.message);
+  }
+  return result;
+}
+
+export async function deleteRunPreset(id: string): Promise<void> {
+  const db = await getDb();
+  await db.delete(RUN_PRESET_STORE, id);
 }
 
 /**

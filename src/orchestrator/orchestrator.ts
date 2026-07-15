@@ -156,10 +156,13 @@ export async function startRun(): Promise<void> {
       // Pre-generate the id so the request snapshot (spec §13.3) and the
       // transcript message share a key. The snapshot carries NO credentials.
       const messageId = newMessageId();
+      // Run-level override: takes precedence over the agent's own sampling
+      // temperature for this conversation only (null means "no override").
+      const effectiveTemperature = pg.conversation.temperatureOverride ?? agent.llm.temperature;
       const chatParams = {
         model: agent.llm.model,
         messages,
-        temperature: agent.llm.temperature,
+        temperature: effectiveTemperature,
         maxOutputTokens: agent.llm.maxOutputTokens,
         topP: agent.llm.topP,
         seed: agent.llm.seed,
@@ -171,7 +174,7 @@ export async function startRun(): Promise<void> {
         model: agent.llm.model,
         messages: messages as ChatMessage[],
         params: {
-          temperature: agent.llm.temperature,
+          temperature: effectiveTemperature,
           maxOutputTokens: agent.llm.maxOutputTokens,
           topP: agent.llm.topP,
           seed: agent.llm.seed,
@@ -180,9 +183,16 @@ export async function startRun(): Promise<void> {
       };
 
       try {
+        // A run-level timeout override caps (never raises) the agent's own
+        // configured timeout, so tightening it for one run (e.g. to keep a
+        // demo snappy) can't be defeated by a slower per-agent setting.
+        const effectiveTimeoutMs =
+          pg.conversation.responseTimeoutOverrideMs != null
+            ? Math.min(agent.runtime.responseTimeoutMs, pg.conversation.responseTimeoutOverrideMs)
+            : agent.runtime.responseTimeoutMs;
         const res = await sendChat(provider, chatParams, {
           signal: controller.signal,
-          timeoutMs: agent.runtime.responseTimeoutMs,
+          timeoutMs: effectiveTimeoutMs,
           onToken: (chunk) => useRuntimeStore.getState().appendToken(agent.id, chunk),
         });
 

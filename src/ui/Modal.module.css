@@ -48,3 +48,19 @@
   padding: 12px 18px;
   border-top: 1px solid var(--border);
 }
+
+/* On phones, dialogs (and the mobile detail sheets that reuse Modal) go full-screen
+   so forms have room and controls stay thumb-sized. Overrides the inline `width`. */
+@media (max-width: 768px) {
+  .backdrop { padding: 0; }
+  .modal {
+    width: 100vw !important;
+    max-width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    border: none;
+    border-radius: 0;
+  }
+  .header { padding-top: max(14px, env(safe-area-inset-top)); }
+  .footer { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+}

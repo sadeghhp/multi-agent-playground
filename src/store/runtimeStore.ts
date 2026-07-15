@@ -72,6 +72,12 @@ interface RuntimeStoreState {
    * Memory-only; cleared when the agent's turn finalizes into the transcript.
    */
   streamingText: Record<string, string>;
+  /**
+   * Per-agent live reasoning/thinking buffer for the in-flight response.
+   * Separate from `streamingText` so the UI can show a thinking indicator
+   * while answer tokens stream into the body (ChatGPT/DeepSeek-style).
+   */
+  streamingReasoning: Record<string, string>;
   /** Run-scoped provider overrides from accepted fallback suggestions. */
   providerOverrides: Record<string, ProviderOverride>;
   /** Tokens recorded for the active run (for budget gating). */
@@ -83,6 +89,7 @@ interface RuntimeStoreState {
   startRun: (runId: string, controller: AbortController) => void;
   recordSnapshot: (messageId: string, snapshot: RequestSnapshot) => void;
   appendToken: (agentId: string, chunk: string) => void;
+  appendReasoningToken: (agentId: string, chunk: string) => void;
   clearStreaming: (agentId: string) => void;
   setProviderOverride: (agentId: string, override: ProviderOverride) => void;
   addRunTokens: (tokens: number, fallback: boolean) => void;
@@ -129,6 +136,7 @@ const initial = {
   errors: [],
   requestSnapshots: {},
   streamingText: {},
+  streamingReasoning: {},
   providerOverrides: {} as Record<string, ProviderOverride>,
   runTokens: 0,
   runFallbackTokens: 0,
@@ -157,12 +165,23 @@ export const useRuntimeStore = create<RuntimeStoreState>((set, get) => ({
     set((s) => ({
       streamingText: { ...s.streamingText, [agentId]: (s.streamingText[agentId] ?? '') + chunk },
     })),
+  appendReasoningToken: (agentId, chunk) =>
+    set((s) => ({
+      streamingReasoning: {
+        ...s.streamingReasoning,
+        [agentId]: (s.streamingReasoning[agentId] ?? '') + chunk,
+      },
+    })),
   clearStreaming: (agentId) =>
     set((s) => {
-      if (!(agentId in s.streamingText)) return s;
-      const next = { ...s.streamingText };
-      delete next[agentId];
-      return { streamingText: next };
+      const hasText = agentId in s.streamingText;
+      const hasReasoning = agentId in s.streamingReasoning;
+      if (!hasText && !hasReasoning) return s;
+      const nextText = { ...s.streamingText };
+      const nextReasoning = { ...s.streamingReasoning };
+      delete nextText[agentId];
+      delete nextReasoning[agentId];
+      return { streamingText: nextText, streamingReasoning: nextReasoning };
     }),
   setProviderOverride: (agentId, override) =>
     set((s) => ({

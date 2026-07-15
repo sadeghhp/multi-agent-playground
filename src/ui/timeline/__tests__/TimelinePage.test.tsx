@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 // jsdom has no IndexedDB; stub persistence so the domain store imports cleanly.
 vi.mock('../../../persistence/db', () => import('../../../test/persistenceDbMock'));
@@ -127,6 +127,28 @@ describe('TimelinePage', () => {
     expect(screen.queryByText(/No conversation yet/i)).not.toBeInTheDocument();
     expect(screen.getByLabelText('Turn 1')).toBeInTheDocument();
     expect(screen.getByText('thinking…')).toBeInTheDocument();
+  });
+
+  it('keeps live reasoning behind a thinking chip while the answer streams', () => {
+    const agent = createAgent({ name: 'Reasoner' });
+    const playground = { ...createPlayground('Demo'), agents: [agent], transcript: [] };
+    useDomainStore.setState({ playground });
+    useRuntimeStore.setState({
+      status: 'running',
+      activeAgentId: agent.id,
+      currentTurn: 1,
+      streamingText: { [agent.id]: 'visible answer' },
+      streamingReasoning: { [agent.id]: 'hidden chain of thought' },
+    });
+
+    render(<TimelinePage />);
+
+    expect(screen.getByText('streaming…')).toBeInTheDocument();
+    expect(screen.getByText(/visible answer/)).toBeInTheDocument();
+    expect(screen.queryByText(/hidden chain of thought/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /thinking/i }));
+    expect(screen.getByText(/hidden chain of thought/)).toBeInTheDocument();
   });
 
   it('removes the live card after streaming clears', () => {

@@ -295,6 +295,8 @@ export async function startRun(): Promise<void> {
           language: agent.language,
           model: res.response.model,
           providerId: usedProvider.id,
+          // Keep thinking out of the visible transcript body (thinking is hidden
+          // by default behind the chip). Reasoning-only turns leave content empty.
           content: res.response.text || '',
           reasoning: res.response.reasoning || undefined,
           status: 'completed',
@@ -531,6 +533,8 @@ async function callWithBudgetAndOptionalFallback(opts: {
       signal: opts.controller.signal,
       timeoutMs: opts.effectiveTimeoutMs,
       onToken: (chunk) => useRuntimeStore.getState().appendToken(opts.agent.id, chunk),
+      onReasoningToken: (chunk) =>
+        useRuntimeStore.getState().appendReasoningToken(opts.agent.id, chunk),
     });
     useRuntimeStore.getState().recordSnapshot(opts.messageId, {
       ...opts.snapshotBase,
@@ -601,6 +605,8 @@ async function callWithBudgetAndOptionalFallback(opts: {
                 signal: opts.controller.signal,
                 timeoutMs: opts.effectiveTimeoutMs,
                 onToken: (chunk) => useRuntimeStore.getState().appendToken(opts.agent.id, chunk),
+                onReasoningToken: (chunk) =>
+                  useRuntimeStore.getState().appendReasoningToken(opts.agent.id, chunk),
               });
               useRuntimeStore.getState().recordSnapshot(opts.messageId, {
                 ...fbSnapshotBase,

@@ -47,6 +47,9 @@ export function TimelinePage() {
   const activeAgentId = useRuntimeStore((s) => s.activeAgentId);
   const currentTurn = useRuntimeStore((s) => s.currentTurn);
   const liveText = useRuntimeStore((s) => (s.activeAgentId ? s.streamingText[s.activeAgentId] : undefined));
+  const liveReasoning = useRuntimeStore((s) =>
+    s.activeAgentId ? s.streamingReasoning[s.activeAgentId] : undefined,
+  );
 
   const transcript = playground?.transcript ?? [];
   const groups = useMemo(() => groupByTurn(transcript), [transcript]);
@@ -103,7 +106,7 @@ export function TimelinePage() {
 
   useEffect(() => {
     if (atBottom) scrollToBottom();
-  }, [transcript.length, liveText, atBottom]);
+  }, [transcript.length, liveText, liveReasoning, atBottom]);
 
   // Escape closes; restore focus to whatever was focused before opening (spec §22).
   const panelRef = useRef<HTMLDivElement>(null);
@@ -176,7 +179,12 @@ export function TimelinePage() {
                     <TimelineItem key={msg.id} msg={msg} color={colorFor(msg)} />
                   ))}
                   {liveInLastGroup && gi === groups.length - 1 && liveAgent && (
-                    <TimelineLiveItem agent={liveAgent} text={liveText ?? ''} color={liveColor} />
+                    <TimelineLiveItem
+                      agent={liveAgent}
+                      text={liveText ?? ''}
+                      reasoning={liveReasoning ?? ''}
+                      color={liveColor}
+                    />
                   )}
                 </li>
               ))}
@@ -185,7 +193,12 @@ export function TimelinePage() {
                   <div className={styles.turnDivider} aria-label={`Turn ${currentTurn}`}>
                     <span className={styles.turnLabel}>Turn {currentTurn}</span>
                   </div>
-                  <TimelineLiveItem agent={liveAgent} text={liveText ?? ''} color={liveColor} />
+                  <TimelineLiveItem
+                    agent={liveAgent}
+                    text={liveText ?? ''}
+                    reasoning={liveReasoning ?? ''}
+                    color={liveColor}
+                  />
                 </li>
               )}
             </ol>
@@ -266,11 +279,25 @@ function TimelineItem({ msg, color }: { msg: TranscriptMessage; color: string })
 }
 
 /**
- * In-flight agent response on the timeline spine. Plain text + caret until the
- * turn finalizes into a transcript entry (spec §13 — live streaming).
+ * In-flight agent response on the timeline spine. Reasoning stays behind a
+ * collapsed thinking chip; only answer tokens stream in the body.
  */
-function TimelineLiveItem({ agent, text, color }: { agent: Agent; text: string; color: string }) {
-  const { text: visible } = extractInlineThinking(text);
+function TimelineLiveItem({
+  agent,
+  text,
+  reasoning: reasoningProp = '',
+  color,
+}: {
+  agent: Agent;
+  text: string;
+  reasoning?: string;
+  color: string;
+}) {
+  const [showReasoning, setShowReasoning] = useState(false);
+  const split = extractInlineThinking(text);
+  const visible = split.text;
+  const reasoning =
+    [reasoningProp, split.reasoning].filter((s) => s && s.length > 0).join('\n\n') || undefined;
   const thinking = visible.length === 0;
   const dir = dirForLanguage(agent.language);
 
@@ -281,8 +308,23 @@ function TimelineLiveItem({ agent, text, color }: { agent: Agent; text: string; 
         <div className={styles.cardHeader}>
           <span className={styles.agent}>{agent.name}</span>
           {agent.role && <span className="chip">{agent.role}</span>}
+          {reasoning && (
+            <button
+              type="button"
+              className="chip"
+              aria-expanded={showReasoning}
+              onClick={() => setShowReasoning((v) => !v)}
+            >
+              thinking {showReasoning ? '▾' : '▸'}
+            </button>
+          )}
           <span className={styles.liveBadge}>{thinking ? 'thinking…' : 'streaming…'}</span>
         </div>
+        {showReasoning && reasoning && (
+          <div className={styles.body} dir="ltr">
+            <pre>{reasoning}</pre>
+          </div>
+        )}
         <div className={`${styles.body} ${styles.liveBody}`}>
           {visible}
           <span className={styles.caret} aria-hidden="true" />

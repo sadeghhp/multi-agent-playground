@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render } from '@testing-library/react';
+import { cleanup, fireEvent, render } from '@testing-library/react';
 import { LiveMessage } from '../LiveMessage';
 
 afterEach(() => cleanup());
@@ -40,6 +40,7 @@ describe('LiveMessage direction', () => {
       />,
     );
     expect(container.textContent).toContain('thinking…');
+    expect(container.textContent).toContain('thinking');
     expect(container.textContent).not.toContain('Thinking Process');
     expect(container.textContent).not.toContain('Analyze');
 
@@ -54,5 +55,37 @@ describe('LiveMessage direction', () => {
     expect(container.textContent).toContain('streaming…');
     expect(container.textContent).toContain('final answer');
     expect(container.textContent).not.toContain('Thinking Process');
+  });
+
+  it('shows a collapsed thinking chip for API reasoning while answer streams separately', () => {
+    const { container, getByRole } = render(
+      <LiveMessage
+        agentName="Analyst"
+        role={null}
+        text="final answer"
+        reasoning="chain of thought"
+        language="en"
+      />,
+    );
+    expect(container.textContent).toContain('streaming…');
+    expect(container.textContent).toContain('final answer');
+    expect(container.textContent).not.toContain('chain of thought');
+
+    fireEvent.click(getByRole('button', { name: /thinking/i }));
+    expect(container.textContent).toContain('chain of thought');
+  });
+
+  it('keeps thinking… badge when only reasoning tokens have arrived', () => {
+    const { container } = render(
+      <LiveMessage
+        agentName="Analyst"
+        role={null}
+        text=""
+        reasoning="still thinking"
+        language="en"
+      />,
+    );
+    expect(container.textContent).toContain('thinking…');
+    expect(container.textContent).not.toContain('still thinking');
   });
 });

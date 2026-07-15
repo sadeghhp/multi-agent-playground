@@ -39,6 +39,9 @@ export function BottomPanel() {
   const errors = useRuntimeStore((s) => s.errors);
   const activeAgentId = useRuntimeStore((s) => s.activeAgentId);
   const liveText = useRuntimeStore((s) => (s.activeAgentId ? s.streamingText[s.activeAgentId] : undefined));
+  const liveReasoning = useRuntimeStore((s) =>
+    s.activeAgentId ? s.streamingReasoning[s.activeAgentId] : undefined,
+  );
 
   const providers = useProviderStore((s) => s.providers);
 
@@ -112,7 +115,7 @@ export function BottomPanel() {
 
   useEffect(() => {
     if (tab === 'transcript' && !collapsed && atBottom) scrollToBottom();
-  }, [transcript.length, tab, collapsed, liveText, atBottom]);
+  }, [transcript.length, tab, collapsed, liveText, liveReasoning, atBottom]);
 
   const showJumpToLatest = tab === 'transcript' && !collapsed && !atBottom && (transcript.length > 0 || !!liveAgent);
 
@@ -200,6 +203,7 @@ export function BottomPanel() {
                     agentName={liveAgent.name}
                     role={liveAgent.role}
                     text={liveText ?? ''}
+                    reasoning={liveReasoning ?? ''}
                     color={agentColor(liveAgent.colorCategory)}
                     language={liveAgent.language}
                   />

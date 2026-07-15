@@ -56,6 +56,31 @@ function sseReasoningOnlyChat(text: string) {
   return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
 }
 
+/** An SSE chat response that emits both `reasoning_content` and `content` deltas. */
+function sseReasoningAndContentChat(reasoning: string, content: string) {
+  const reasoningWords = reasoning.split(' ');
+  const contentWords = content.split(' ');
+  const chunks = [
+    ...reasoningWords.map(
+      (w, i) =>
+        `data: {"choices":[{"delta":{"reasoning_content":${JSON.stringify((i ? ' ' : '') + w)}}}]}\n\n`,
+    ),
+    ...contentWords.map(
+      (w, i) => `data: {"choices":[{"delta":{"content":${JSON.stringify((i ? ' ' : '') + w)}}}]}\n\n`,
+    ),
+    'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+    'data: [DONE]\n\n',
+  ];
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const c of chunks) controller.enqueue(encoder.encode(c));
+      controller.close();
+    },
+  });
+  return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+}
+
 /** Two agents A<->B in a cycle, both using a localhost provider. */
 function cyclePlayground(maxTurns: number, maxPerAgent: number): Playground {
   const pg = createPlayground('Test');
@@ -249,6 +274,60 @@ describe('orchestrator streaming', () => {
 
     const transcript = useDomainStore.getState().playground!.transcript;
     expect(transcript[0].content).toBe('');
+    expect(transcript[0].reasoning).toBe('thinking out loud');
+    expect(transcript[0].status).toBe('completed');
+  });
+
+  it('streams reasoning into streamingReasoning and content into streamingText separately', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() =>
+        Promise.resolve(sseReasoningAndContentChat('thinking out loud', 'final answer here')),
+      ),
+    );
+    const pg = cyclePlayground(1, 5);
+    useDomainStore.setState({ playground: pg });
+    const agentId = pg.agents[0].id;
+
+    const seenReasoning: string[] = [];
+    const seenText: string[] = [];
+    const unsub = useRuntimeStore.subscribe((s) => {
+      const r = s.streamingReasoning[agentId];
+      const t = s.streamingText[agentId];
+      if (r) seenReasoning.push(r);
+      if (t) seenText.push(t);
+    });
+
+    await startRun();
+    unsub();
+
+    expect(seenReasoning.length).toBeGreaterThan(0);
+    expect(seenReasoning[seenReasoning.length - 1]).toBe('thinking out loud');
+    expect(seenText.length).toBeGreaterThan(0);
+    expect(seenText[seenText.length - 1]).toBe('final answer here');
+    expect(useRuntimeStore.getState().streamingText).toEqual({});
+    expect(useRuntimeStore.getState().streamingReasoning).toEqual({});
+
+    const transcript = useDomainStore.getState().playground!.transcript;
+    expect(transcript[0].content).toBe('final answer here');
+    expect(transcript[0].reasoning).toBe('thinking out loud');
+    expect(transcript[0].status).toBe('completed');
+  });
+
+  it('stores reasoning separately when both reasoning and visible answer are present', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() =>
+        Promise.resolve(sseReasoningAndContentChat('thinking out loud', 'final answer here')),
+      ),
+    );
+    const pg = cyclePlayground(1, 5);
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+
+    const transcript = useDomainStore.getState().playground!.transcript;
+    expect(transcript[0].content).toBe('final answer here');
     expect(transcript[0].reasoning).toBe('thinking out loud');
     expect(transcript[0].status).toBe('completed');
   });

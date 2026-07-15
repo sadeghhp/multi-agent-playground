@@ -46,3 +46,35 @@ describe('unbounded growth caps (regression)', () => {
     expect(snapshots['m0']).toBeUndefined();
   });
 });
+
+describe('flow control: run-scoped disable + failure streaks', () => {
+  it('removes an agent from the circuit for the run', () => {
+    const store = useRuntimeStore.getState();
+    expect(store.isAgentDisabledForRun('a')).toBe(false);
+    store.disableAgentForRun('a');
+    expect(useRuntimeStore.getState().isAgentDisabledForRun('a')).toBe(true);
+    expect(useRuntimeStore.getState().isAgentDisabledForRun('b')).toBe(false);
+  });
+
+  it('counts consecutive failures and resets them on success', () => {
+    const store = useRuntimeStore.getState();
+    expect(store.bumpConsecutiveFailures('a')).toBe(1);
+    expect(store.bumpConsecutiveFailures('a')).toBe(2);
+    // Independent per agent.
+    expect(store.bumpConsecutiveFailures('b')).toBe(1);
+    store.resetConsecutiveFailures('a');
+    expect(useRuntimeStore.getState().consecutiveFailures['a']).toBeUndefined();
+    // Streak restarts from 1 after a reset.
+    expect(store.bumpConsecutiveFailures('a')).toBe(1);
+    expect(useRuntimeStore.getState().consecutiveFailures['b']).toBe(1);
+  });
+
+  it('clears the disabled set and streaks when a new run starts', () => {
+    const store = useRuntimeStore.getState();
+    store.disableAgentForRun('a');
+    store.bumpConsecutiveFailures('a');
+    store.startRun('run-1', new AbortController());
+    expect(useRuntimeStore.getState().isAgentDisabledForRun('a')).toBe(false);
+    expect(useRuntimeStore.getState().consecutiveFailures).toEqual({});
+  });
+});

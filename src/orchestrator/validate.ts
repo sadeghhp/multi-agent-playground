@@ -85,7 +85,10 @@ export function validateForRun(
       });
     } else if (!reachabilityChecked.has(provider.id)) {
       reachabilityChecked.add(provider.id);
-      const reach = assessProviderReachability(provider.baseUrl, appOrigin);
+      const reach =
+        appOrigin === undefined
+          ? assessProviderReachability(provider.baseUrl)
+          : assessProviderReachability(provider.baseUrl, appOrigin);
       if (!reach.ok) {
         issues.push({
           level: 'error',

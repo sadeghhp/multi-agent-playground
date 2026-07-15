@@ -146,14 +146,15 @@ describe('sendChat', () => {
     expect(headers['user-agent']).toBeUndefined();
   });
 
-  it('allows http for remote endpoints', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(okResponse(sampleBody));
+  it('rejects http for remote endpoints (spec §21)', async () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const provider = createProvider({ baseUrl: 'http://api.example.com', apiKey: 'k' });
 
-    const res = await sendChat(provider, { model: 'm', messages: [{ role: 'user', content: 'hi' }] });
-    expect(res.text).toBe('hello world');
-    expect(fetchMock).toHaveBeenCalled();
+    await expect(
+      sendChat(provider, { model: 'm', messages: [{ role: 'user', content: 'hi' }] }),
+    ).rejects.toMatchObject({ kind: 'insecure-remote' });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('allows http for localhost', async () => {

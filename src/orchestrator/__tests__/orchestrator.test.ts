@@ -9,7 +9,21 @@ import type { Playground } from '../../domain/schema';
 import { useDomainStore } from '../../store/domainStore';
 import { useProviderStore } from '../../store/providerStore';
 import { useRuntimeStore } from '../../store/runtimeStore';
+import { useUiStore } from '../../store/uiStore';
 import { continueRun, startRun, stopRun } from '../orchestrator';
+
+/** Error chat response with the given HTTP status (500 = retryable, 400 = not). */
+function errorChat(status: number) {
+  return new Response(JSON.stringify({ error: { message: 'boom', code: status } }), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+// The uiStore is a singleton; its prompt methods are replaced in some tests.
+// Capture the originals once so afterEach can restore them.
+const uiRequestFailureDecision = useUiStore.getState().requestFailureDecision;
+const uiRequestFallbackSuggestion = useUiStore.getState().requestFallbackSuggestion;
 
 function okChat() {
   return new Response(
@@ -129,6 +143,11 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  // Restore any uiStore prompt methods a test replaced.
+  useUiStore.setState({
+    requestFailureDecision: uiRequestFailureDecision,
+    requestFallbackSuggestion: uiRequestFallbackSuggestion,
+  });
 });
 
 describe('orchestrator cycle controls', () => {
@@ -606,5 +625,198 @@ describe('versioned run history', () => {
     });
     const run = [...savedRuns.values()][0];
     expect(run?.endedAt).not.toBeNull();
+  });
+});
+
+describe('orchestrator flow control (failure policy)', () => {
+  it('auto-retries a transient failure, then succeeds without recording a failure', async () => {
+    let n = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() => {
+        n += 1;
+        return Promise.resolve(n === 1 ? errorChat(500) : okChat());
+      }),
+    );
+    const pg = cyclePlayground(1, 5);
+    pg.conversation.failurePolicy = {
+      onFailure: 'stop',
+      maxAutoRetries: 2,
+      backoffMs: 0,
+      autoDisableAfterFailures: 3,
+    };
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+
+    const transcript = useDomainStore.getState().playground!.transcript;
+    expect(transcript[0].status).toBe('completed');
+    expect(n).toBe(2); // one transient failure, then a successful retry
+    expect(useRuntimeStore.getState().errors).toHaveLength(0);
+  });
+
+  it('stops the run once auto-retries are exhausted in stop mode', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(errorChat(500));
+    vi.stubGlobal('fetch', fetchMock);
+    const pg = cyclePlayground(10, 5);
+    pg.conversation.failurePolicy = {
+      onFailure: 'stop',
+      maxAutoRetries: 1,
+      backoffMs: 0,
+      autoDisableAfterFailures: 3,
+    };
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+
+    expect(useRuntimeStore.getState().status).toBe('error');
+    const failed = useDomainStore
+      .getState()
+      .playground!.transcript.filter((m) => m.status === 'failed');
+    expect(failed).toHaveLength(1); // stopped after the first agent
+    expect(fetchMock).toHaveBeenCalledTimes(2); // initial + 1 auto-retry
+  });
+
+  it('keeps the run alive (not error) when a turn fails in skip mode', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(errorChat(400)));
+    const pg = cyclePlayground(10, 5);
+    pg.conversation.failurePolicy = {
+      onFailure: 'skip',
+      maxAutoRetries: 0,
+      backoffMs: 0,
+      autoDisableAfterFailures: 0,
+    };
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+
+    // The starting agent fails and is skipped; with nothing left to run the
+    // run simply ends — completed, never 'error'.
+    expect(useRuntimeStore.getState().status).toBe('completed');
+    const failed = useDomainStore
+      .getState()
+      .playground!.transcript.filter((m) => m.status === 'failed');
+    expect(failed).toHaveLength(1);
+  });
+
+  it('never prompts for a decision in a non-interactive (stop/skip) mode', async () => {
+    const decide = vi.fn();
+    useUiStore.setState({ requestFailureDecision: decide });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(errorChat(400)));
+    const pg = cyclePlayground(10, 5);
+    pg.conversation.failurePolicy = {
+      onFailure: 'stop',
+      maxAutoRetries: 0,
+      backoffMs: 0,
+      autoDisableAfterFailures: 3,
+    };
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+
+    expect(decide).not.toHaveBeenCalled();
+  });
+
+  it('prompt mode: a "disable" decision removes the agent from the circuit', async () => {
+    const decide = vi.fn().mockResolvedValue('disable');
+    useUiStore.setState({ requestFailureDecision: decide });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(errorChat(400)));
+    const pg = cyclePlayground(10, 5);
+    pg.conversation.failurePolicy = {
+      onFailure: 'prompt',
+      maxAutoRetries: 0,
+      backoffMs: 0,
+      autoDisableAfterFailures: 3,
+    };
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+
+    const startId = pg.agents[0].id;
+    expect(decide).toHaveBeenCalledTimes(1);
+    expect(useRuntimeStore.getState().isAgentDisabledForRun(startId)).toBe(true);
+  });
+
+  it('prompt mode: a "retry" decision re-runs the same turn', async () => {
+    const decide = vi
+      .fn()
+      .mockResolvedValueOnce('retry')
+      .mockResolvedValueOnce('retry')
+      .mockResolvedValue('skip');
+    useUiStore.setState({ requestFailureDecision: decide });
+    const fetchMock = vi.fn().mockResolvedValue(errorChat(400));
+    vi.stubGlobal('fetch', fetchMock);
+    const pg = cyclePlayground(10, 5);
+    pg.conversation.failurePolicy = {
+      onFailure: 'prompt',
+      maxAutoRetries: 0,
+      backoffMs: 0,
+      autoDisableAfterFailures: 5,
+    };
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+
+    // retry, retry, skip → the same turn was attempted three times.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(decide).toHaveBeenCalledTimes(3);
+  });
+
+  it('auto-disables an agent from the circuit after repeated failures (skip mode)', async () => {
+    // A self-loops and also feeds B; A always succeeds, B always fails. A keeps
+    // re-queuing B until B's consecutive failures hit the auto-disable threshold.
+    const provider = createProvider({
+      displayName: 'Local',
+      baseUrl: 'http://localhost:11434',
+      authMethod: 'none',
+      models: ['test'],
+    });
+    useProviderStore.setState({ providers: [provider] });
+    const base = createAgent();
+    const a = createAgent({
+      name: 'A',
+      role: 'r',
+      systemInstruction: 'A-ok',
+      llm: { ...base.llm, providerId: provider.id, model: 'test' },
+    });
+    const b = createAgent({
+      name: 'B',
+      role: 'r',
+      systemInstruction: 'FAIL_ME_B',
+      llm: { ...base.llm, providerId: provider.id, model: 'test' },
+    });
+    const pg = createPlayground('AutoDisable');
+    pg.agents.push(a, b);
+    pg.connections.push(
+      { id: 'self', source: a.id, target: a.id, enabled: true, type: 'conversation', priority: 1 },
+      { id: 'toB', source: a.id, target: b.id, enabled: true, type: 'conversation', priority: 0 },
+    );
+    pg.conversation = {
+      ...pg.conversation,
+      subject: 'topic',
+      startingAgentId: a.id,
+      maxTotalTurns: 8,
+      maxResponsesPerAgent: 50,
+      failurePolicy: {
+        onFailure: 'skip',
+        maxAutoRetries: 0,
+        backoffMs: 0,
+        autoDisableAfterFailures: 2,
+      },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+        const body = String(init?.body ?? '');
+        return Promise.resolve(body.includes('FAIL_ME_B') ? errorChat(400) : okChat());
+      }),
+    );
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+
+    expect(useRuntimeStore.getState().isAgentDisabledForRun(b.id)).toBe(true);
+    // The run wasn't killed — it ended by the turn limit / A draining, not error.
+    expect(useRuntimeStore.getState().status).not.toBe('error');
   });
 });

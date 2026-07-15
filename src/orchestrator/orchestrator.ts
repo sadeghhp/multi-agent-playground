@@ -1,4 +1,12 @@
-import type { Agent, Connection, Playground, Provider, TranscriptMessage } from '../domain/schema';
+import type {
+  Agent,
+  Connection,
+  FailurePolicy,
+  Playground,
+  Provider,
+  TranscriptMessage,
+} from '../domain/schema';
+import { resolveFailurePolicy } from '../domain/schema';
 import { newErrorId, newLogId, newMessageId, newRunId } from '../domain/ids';
 import { useDomainStore } from '../store/domainStore';
 import { useProviderStore } from '../store/providerStore';
@@ -52,6 +60,69 @@ function outgoing(pg: Playground, agentId: string): Connection[] {
 
 function responseLimitFor(agent: Agent, pg: Playground): number {
   return Math.min(agent.runtime.maxResponsesPerRun, pg.conversation.maxResponsesPerAgent);
+}
+
+/**
+ * Sleep that rejects with the abort reason if the signal fires first (spec §14).
+ * Used for auto-retry backoff so a Stop during the wait breaks the loop promptly
+ * instead of stalling for the full delay.
+ */
+function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/**
+ * Run `attempt` (a single provider call) with automatic re-attempts for
+ * transient, retry-eligible failures (rate-limit/timeout/server-error/network)
+ * up to `maxAutoRetries`, backing off exponentially from `backoffMs`. Silent by
+ * design — no transcript/error rows per attempt, only an event-log line — so a
+ * blip that resolves on retry never surfaces as a user-visible failure. The
+ * caller's catch handles the final, non-retryable error. Aborts propagate
+ * immediately (never retried).
+ */
+async function withAutoRetry<T>(
+  attempt: () => Promise<T>,
+  opts: {
+    policy: FailurePolicy;
+    signal: AbortSignal;
+    agentId: string;
+    agentName: string;
+    onBeforeRetry?: () => void;
+  },
+): Promise<T> {
+  let tries = 0;
+  for (;;) {
+    try {
+      return await attempt();
+    } catch (err) {
+      if (opts.signal.aborted) throw err;
+      const kind = err instanceof ProviderError ? err.kind : 'unknown';
+      if (tries >= opts.policy.maxAutoRetries || !retryEligible(kind)) throw err;
+      tries += 1;
+      opts.onBeforeRetry?.();
+      const delay = opts.policy.backoffMs * 2 ** (tries - 1);
+      log(
+        'request-retrying',
+        `Retrying "${opts.agentName}" (attempt ${tries}/${opts.policy.maxAutoRetries}) after ${kind} — waiting ${delay}ms.`,
+        opts.agentId,
+      );
+      await abortableDelay(delay, opts.signal); // rejects on abort → loop exits
+    }
+  }
 }
 
 /** Most recent non-empty *answer* from `sourceAgentId` (never reasoning). */
@@ -163,6 +234,28 @@ export async function startRun(): Promise<void> {
   runtime.setAgentState(startId, 'queued');
 
   const maxTurns = pg.conversation.maxTotalTurns;
+  const policy = resolveFailurePolicy(pg.conversation);
+
+  // Turn a recorded failure into a control-flow outcome for the loop: 'abort'
+  // (a Stop landed mid-decision → break), 'stop' (end the run with error),
+  // or 'continue' (skip/disable/retry already applied — keep going). A 'retry'
+  // decision re-queues the same turn at the front.
+  const applyFailure = async (
+    failedItem: QueueItem,
+    failedAgent: Agent,
+    detail: string,
+  ): Promise<'abort' | 'stop' | 'continue'> => {
+    const outcome = await handleFailedTurn(failedAgent, policy, detail, controller.signal);
+    if (controller.signal.aborted) return 'abort';
+    if (outcome === 'retry') {
+      queue.unshift(failedItem);
+      queued.add(failedItem.agentId);
+      runtime.setAgentState(failedItem.agentId, 'queued');
+      log('agent-queued', `Retrying "${failedAgent.name}" at the user's request.`, failedAgent.id);
+      return 'continue';
+    }
+    return outcome === 'stop' ? 'stop' : 'continue';
+  };
 
   try {
     while (queue.length > 0) {
@@ -177,6 +270,11 @@ export async function startRun(): Promise<void> {
       const agent = agentsById.get(item.agentId);
       if (!agent || !agent.runtime.enabled) {
         log('agent-skipped', `Agent skipped (missing or disabled).`, item.agentId);
+        continue;
+      }
+      // Removed from the circuit for this run (flow control) after it was queued.
+      if (useRuntimeStore.getState().isAgentDisabledForRun(agent.id)) {
+        log('agent-skipped', `Agent "${agent.name}" was removed from this run.`, agent.id);
         continue;
       }
 
@@ -206,8 +304,11 @@ export async function startRun(): Promise<void> {
       const turnNumber = useRuntimeStore.getState().currentTurn;
 
       if (!provider) {
-        recordFailure(agent, turnNumber, newMessageId(), item, 'No provider configured for this agent.', 'run');
-        if (pg.conversation.stopOnError) return finish(runId, 'error');
+        const detail = 'No provider configured for this agent.';
+        recordFailure(agent, turnNumber, newMessageId(), item, detail, 'run');
+        const fo = await applyFailure(item, agent, detail);
+        if (fo === 'abort') break;
+        if (fo === 'stop') return finish(runId, 'error');
         continue;
       }
 
@@ -283,10 +384,15 @@ export async function startRun(): Promise<void> {
           snapshotBase,
           item,
           turnNumber,
+          policy,
         });
         if (!res) {
-          // Failure already recorded; stop or continue based on stopOnError.
-          if (pg.conversation.stopOnError) return finish(runId, 'error');
+          // Failure already recorded inside the call; escalate + apply policy.
+          if (controller.signal.aborted) break;
+          const detail = useRuntimeStore.getState().errors.at(-1)?.detail ?? 'Request failed.';
+          const fo = await applyFailure(item, agent, detail);
+          if (fo === 'abort') break;
+          if (fo === 'stop') return finish(runId, 'error');
           continue;
         }
 
@@ -318,6 +424,8 @@ export async function startRun(): Promise<void> {
         useDomainStore.getState().appendTranscript(message);
         useRuntimeStore.getState().clearStreaming(agent.id);
         useRuntimeStore.getState().incAgentResponses(agent.id);
+        // Any success clears the consecutive-failure streak (defines "consecutive").
+        useRuntimeStore.getState().resetConsecutiveFailures(agent.id);
         runtime.setAgentState(agent.id, 'completed');
         log(
           'request-completed',
@@ -351,7 +459,9 @@ export async function startRun(): Promise<void> {
           buildFailureSnapshot(snapshotBase, pe, messages, partialOutputChars),
         );
         recordFailure(agent, turnNumber, messageId, item, detail, 'agent', provider.displayName, pe);
-        if (pg.conversation.stopOnError) return finish(runId, 'error');
+        const fo = await applyFailure(item, agent, detail);
+        if (fo === 'abort') break;
+        if (fo === 'stop') return finish(runId, 'error');
         continue;
       }
 
@@ -359,6 +469,7 @@ export async function startRun(): Promise<void> {
       for (const conn of outgoing(pg, agent.id)) {
         const target = agentsById.get(conn.target);
         if (!target) continue;
+        if (useRuntimeStore.getState().isAgentDisabledForRun(target.id)) continue; // removed this run
         const targetResponses = useRuntimeStore.getState().responsesPerAgent[target.id] ?? 0;
         if (targetResponses >= responseLimitFor(target, pg)) continue; // can't produce anyway
         if (queued.has(target.id)) continue; // duplicate-queue protection (spec §11.4)
@@ -427,6 +538,78 @@ function recordFailure(
     error: detail,
   });
   log('request-failed', `"${agent.name}" failed: ${detail}`, agent.id);
+}
+
+type FailureOutcome = 'stop' | 'skip' | 'retry';
+
+/**
+ * Decide what happens after an agent's turn failed (the failure was already
+ * recorded). Escalates on repeated failures and applies the run's failure
+ * policy (spec extension: flow control):
+ *
+ *  1. Count the agent's consecutive post-retry failures (reset on any success).
+ *  2. If the auto-disable threshold is reached, remove the agent from the
+ *     circuit for the rest of this run — the headline "kept-failing agent gets
+ *     pulled out" case — and keep the run going (returns 'skip').
+ *  3. Otherwise apply `onFailure`: 'prompt' pauses for a user decision
+ *     (abort-safe — a Stop resolves it to 'stop'); 'skip' drops the turn;
+ *     'stop' ends the run.
+ *
+ * Returning 'skip' when a disable drains the queue simply lets the run end
+ * naturally (`completed`).
+ */
+async function handleFailedTurn(
+  agent: Agent,
+  policy: FailurePolicy,
+  detail: string,
+  signal: AbortSignal,
+): Promise<FailureOutcome> {
+  const runtime = useRuntimeStore.getState();
+  const streak = runtime.bumpConsecutiveFailures(agent.id);
+  const thresholdReached =
+    policy.autoDisableAfterFailures > 0 && streak >= policy.autoDisableAfterFailures;
+
+  const autoDisable = () => {
+    runtime.disableAgentForRun(agent.id);
+    log(
+      'agent-auto-disabled',
+      `Removed "${agent.name}" from the circuit after ${streak} consecutive failures.`,
+      agent.id,
+    );
+    useUiStore
+      .getState()
+      .showToast('warn', `"${agent.name}" removed from the run after repeated failures.`);
+  };
+
+  if (policy.onFailure === 'prompt') {
+    const decision = await useUiStore.getState().requestFailureDecision(
+      {
+        agentName: agent.name,
+        errorSummary: detail,
+        consecutiveFailures: streak,
+        suggestDisable: thresholdReached,
+      },
+      signal,
+    );
+    switch (decision) {
+      case 'disable':
+        autoDisable();
+        return 'skip';
+      case 'retry':
+        return 'retry';
+      case 'skip':
+        return 'skip';
+      case 'stop':
+      default:
+        return 'stop';
+    }
+  }
+
+  if (thresholdReached) {
+    autoDisable();
+    return 'skip';
+  }
+  return policy.onFailure === 'skip' ? 'skip' : 'stop';
 }
 
 /** Truncated JSON of the raw provider response for the inspector (spec §13.3). */
@@ -550,6 +733,7 @@ async function callWithBudgetAndOptionalFallback(opts: {
   };
   item: QueueItem;
   turnNumber: number;
+  policy: FailurePolicy;
 }): Promise<{ response: NormalizedResponse; provider: Provider; fallback: boolean } | null> {
   const usage = useUsageStore.getState();
   const runtime = useRuntimeStore.getState();
@@ -565,13 +749,25 @@ async function callWithBudgetAndOptionalFallback(opts: {
   });
 
   try {
-    const response = await sendChat(opts.provider, opts.chatParams, {
-      signal: opts.controller.signal,
-      timeoutMs: opts.effectiveTimeoutMs,
-      onToken: (chunk) => useRuntimeStore.getState().appendToken(opts.agent.id, chunk),
-      onReasoningToken: (chunk) =>
-        useRuntimeStore.getState().appendReasoningToken(opts.agent.id, chunk),
-    });
+    // Auto-retry transient failures silently before surfacing anything. Each
+    // re-attempt clears the partial stream buffer so retried tokens don't stack.
+    const response = await withAutoRetry(
+      () =>
+        sendChat(opts.provider, opts.chatParams, {
+          signal: opts.controller.signal,
+          timeoutMs: opts.effectiveTimeoutMs,
+          onToken: (chunk) => useRuntimeStore.getState().appendToken(opts.agent.id, chunk),
+          onReasoningToken: (chunk) =>
+            useRuntimeStore.getState().appendReasoningToken(opts.agent.id, chunk),
+        }),
+      {
+        policy: opts.policy,
+        signal: opts.controller.signal,
+        agentId: opts.agent.id,
+        agentName: opts.agent.name,
+        onBeforeRetry: () => useRuntimeStore.getState().clearStreaming(opts.agent.id),
+      },
+    );
     useRuntimeStore.getState().recordSnapshot(opts.messageId, {
       ...opts.snapshotBase,
       status: response.status,
@@ -605,14 +801,17 @@ async function callWithBudgetAndOptionalFallback(opts: {
           `Suggesting temporary provider switch after "${opts.provider.displayName}" failed.`,
           opts.agent.id,
         );
-        const choice = await useUiStore.getState().requestFallbackSuggestion({
-          agentName: opts.agent.name,
-          failedProviderName: opts.provider.displayName,
-          failedModel: opts.chatParams.model,
-          errorSummary: formatProviderErrorDetail(pe),
-          candidates,
-          budget,
-        });
+        const choice = await useUiStore.getState().requestFallbackSuggestion(
+          {
+            agentName: opts.agent.name,
+            failedProviderName: opts.provider.displayName,
+            failedModel: opts.chatParams.model,
+            errorSummary: formatProviderErrorDetail(pe),
+            candidates,
+            budget,
+          },
+          opts.controller.signal,
+        );
         if (choice) {
           const fbProvider = opts.providersById.get(choice.providerId);
           if (fbProvider) {

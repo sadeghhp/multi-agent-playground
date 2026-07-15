@@ -89,6 +89,18 @@ interface RuntimeStoreState {
   streamingReasoning: Record<string, string>;
   /** Run-scoped provider overrides from accepted fallback suggestions. */
   providerOverrides: Record<string, ProviderOverride>;
+  /**
+   * Agents removed from the circuit for THIS run only (flow control). The
+   * domain model is never touched — the graph is locked during a run
+   * (spec §10.3) — so removal lives here and is consulted at both enqueue
+   * (outgoing) and dequeue. Cleared when a new run starts.
+   */
+  runDisabledAgents: Record<string, true>;
+  /**
+   * Per-agent count of consecutive post-retry failures; reset to 0 on any
+   * success by the same agent. Drives auto-disable escalation.
+   */
+  consecutiveFailures: Record<string, number>;
   /** Tokens recorded for the active run (for budget gating). */
   runTokens: number;
   runFallbackTokens: number;
@@ -101,6 +113,14 @@ interface RuntimeStoreState {
   appendReasoningToken: (agentId: string, chunk: string) => void;
   clearStreaming: (agentId: string) => void;
   setProviderOverride: (agentId: string, override: ProviderOverride) => void;
+  /** Remove an agent from the circuit for the rest of this run. */
+  disableAgentForRun: (agentId: string) => void;
+  /** True if the agent has been removed from the circuit this run. */
+  isAgentDisabledForRun: (agentId: string) => boolean;
+  /** Increment and return the agent's consecutive-failure streak. */
+  bumpConsecutiveFailures: (agentId: string) => number;
+  /** Reset the agent's consecutive-failure streak (call on success). */
+  resetConsecutiveFailures: (agentId: string) => void;
   addRunTokens: (tokens: number, fallback: boolean) => void;
   setStatus: (status: RunStatus) => void;
   setActive: (agentId: string | null, connectionId: string | null) => void;
@@ -147,6 +167,8 @@ const initial = {
   streamingText: {},
   streamingReasoning: {},
   providerOverrides: {} as Record<string, ProviderOverride>,
+  runDisabledAgents: {} as Record<string, true>,
+  consecutiveFailures: {} as Record<string, number>,
   runTokens: 0,
   runFallbackTokens: 0,
   abortController: null,
@@ -196,6 +218,25 @@ export const useRuntimeStore = create<RuntimeStoreState>((set, get) => ({
     set((s) => ({
       providerOverrides: { ...s.providerOverrides, [agentId]: override },
     })),
+  disableAgentForRun: (agentId) =>
+    set((s) => ({
+      runDisabledAgents: { ...s.runDisabledAgents, [agentId]: true },
+    })),
+  isAgentDisabledForRun: (agentId) => Boolean(get().runDisabledAgents[agentId]),
+  bumpConsecutiveFailures: (agentId) => {
+    const next = (get().consecutiveFailures[agentId] ?? 0) + 1;
+    set((s) => ({
+      consecutiveFailures: { ...s.consecutiveFailures, [agentId]: next },
+    }));
+    return next;
+  },
+  resetConsecutiveFailures: (agentId) =>
+    set((s) => {
+      if (!(agentId in s.consecutiveFailures)) return s;
+      const next = { ...s.consecutiveFailures };
+      delete next[agentId];
+      return { consecutiveFailures: next };
+    }),
   addRunTokens: (tokens, fallback) =>
     set((s) => ({
       runTokens: s.runTokens + tokens,

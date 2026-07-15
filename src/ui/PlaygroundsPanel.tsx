@@ -7,6 +7,7 @@ import {
   getPlaygroundSample,
   type SampleDomain,
 } from '../domain/samples';
+import { isAppOnLocalhost } from '../providers/url';
 import { Modal } from './Modal';
 import styles from './PlaygroundsPanel.module.css';
 
@@ -60,6 +61,13 @@ export function PlaygroundsPanel() {
         <p className={styles.sectionHint}>
           Pre-built graphs that show how multi-agent conversations work. Confirm Local
           (Ollama) under Providers, then press Run.
+          {!isAppOnLocalhost(window.location.origin) && (
+            <>
+              {' '}
+              Samples default to Ollama on localhost — run the app with{' '}
+              <code>npm run dev</code>, or switch agents to a public HTTPS provider.
+            </>
+          )}
         </p>
         {samplesByDomain.map(({ domain, samples }) => (
           <div key={domain} className={styles.domainGroup}>

@@ -303,6 +303,33 @@ export const ConversationMode = z.enum([
 ]);
 export type ConversationMode = z.infer<typeof ConversationMode>;
 
+/**
+ * What happens when an agent's request fails (spec extension: flow control).
+ * Additive over the legacy `stopOnError` boolean — every field is defaulted so
+ * old playgrounds parse unchanged, and `onFailure` defaults to preserve today's
+ * behaviour (see defaultFailurePolicy / factories). Auto-retry and auto-disable
+ * run under ALL modes, before the onFailure decision, so even a 'stop' run now
+ * survives a transient blip.
+ */
+export const FailureAction = z.enum(['stop', 'skip', 'prompt']);
+export type FailureAction = z.infer<typeof FailureAction>;
+
+export const FailurePolicy = z.object({
+  // How to handle a failure that survives auto-retry. 'prompt' pauses the run
+  // for a user decision (only meaningful in an interactive session; automated
+  // runs should use 'stop'/'skip' so they never hang).
+  onFailure: FailureAction.default('stop'),
+  // Automatic re-attempts for retry-eligible kinds (rate-limit/timeout/
+  // server-error/network) before escalating. 0 disables auto-retry.
+  maxAutoRetries: z.number().int().min(0).max(10).default(2),
+  // Base backoff between auto-retries; grows exponentially per attempt.
+  backoffMs: z.number().int().min(0).default(800),
+  // Consecutive post-retry failures for one agent before it is removed from the
+  // circuit for the rest of the run. 0 never auto-disables.
+  autoDisableAfterFailures: z.number().int().min(0).default(3),
+});
+export type FailurePolicy = z.infer<typeof FailurePolicy>;
+
 export const ConversationSettings = z.object({
   subject: z.string().default(''),
   objective: z.string().default(''),
@@ -315,6 +342,11 @@ export const ConversationSettings = z.object({
   maxTotalTurns: z.number().int().positive().default(12),
   maxResponsesPerAgent: z.number().int().positive().default(3),
   stopOnError: z.boolean().default(true),
+  // Flow control on failure (spec extension). Optional, NOT defaulted: legacy
+  // playgrounds omit it and resolveFailurePolicy() derives the effective policy
+  // from `stopOnError` so their behaviour is unchanged. New/edited playgrounds
+  // write it explicitly (and keep stopOnError synced for legacy readers).
+  failurePolicy: FailurePolicy.optional(),
   // Run-level overrides (additive, defaulted so old playgrounds parse
   // unchanged): applied on top of each agent's own characteristics for this
   // run only. Empty/null/'agent-default' means "no override".
@@ -329,6 +361,22 @@ export const ConversationSettings = z.object({
   responseTimeoutOverrideMs: z.number().int().positive().nullable().default(null),
 });
 export type ConversationSettings = z.infer<typeof ConversationSettings>;
+
+/**
+ * Effective failure policy for a conversation. When `failurePolicy` is absent
+ * (legacy playgrounds) `onFailure` is derived from the legacy `stopOnError`
+ * boolean (`true → 'stop'`, `false → 'skip'`) so old runs behave identically.
+ * An explicit `failurePolicy.onFailure` always wins.
+ */
+export function resolveFailurePolicy(c: {
+  stopOnError: boolean;
+  failurePolicy?: FailurePolicy;
+}): FailurePolicy {
+  return FailurePolicy.parse({
+    onFailure: c.stopOnError ? 'stop' : 'skip',
+    ...(c.failurePolicy ?? {}),
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Run presets — named, reusable bundles of the run-level *options* (tone,

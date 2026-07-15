@@ -7,10 +7,11 @@
 
 import { isAppOnLocalhost, isPrivateNetworkHost, isRemoteHttp } from './url';
 
+/** public app → loopback/LAN | remote http | remote https CORS warning | bad URL */
 export type ReachabilityIssue =
-  | 'private-network' // public app → loopback/LAN
-  | 'insecure-remote' // remote http:// (spec §21)
-  | 'cors-required'; // remote https — may work if provider allows CORS
+  | 'private-network'
+  | 'insecure-remote'
+  | 'cors-required'
   | 'invalid-url';
 
 export interface ReachabilityResult {

@@ -153,11 +153,32 @@ GITHUB_PAGES=true npm run build
 
 ## ⚠️ Known browser-only constraint
 
-Not every "OpenAI-compatible" endpoint is reachable from a browser: providers that
-don't send permissive CORS headers, or that forbid client-side credentials, will
-fail with a **CORS** error (distinguished from auth/network errors in diagnostics).
-This is a provider compatibility limitation, not an app defect (spec §28). The
-long-term fix is a server-side proxy, which is out of MVP scope.
+This app is a **static browser SPA** (including on GitHub Pages). There is no
+server-side proxy in production. A provider works only when the **browser itself**
+can call it from the current page origin (spec §28).
+
+| App origin | Provider | Result |
+| --- | --- | --- |
+| `http://localhost:5173` (`npm run dev`) | `http://localhost:11434` (Ollama / LM Studio) | Works |
+| GitHub Pages (`https://…github.io/…`) | Public HTTPS API with CORS (OpenAI, OpenRouter, Groq, …) | Works |
+| GitHub Pages | `localhost` / `127.0.0.1` / LAN IP | **Blocked** (Private Network Access) |
+| Any | Remote `http://…` (non-localhost) | **Blocked** (HTTPS required — spec §21) |
+| Any | HTTPS API without CORS headers | **Fails** (classic CORS — use a different provider or local `npm run dev`) |
+
+**Static deployment cannot call localhost on the user’s machine.** The live GitHub
+Pages site cannot reach Ollama running on your laptop. Use:
+
+```bash
+ollama serve
+npm run dev   # http://localhost:5173 — not the github.io URL
+```
+
+Advanced workaround: expose a local model via a **public HTTPS tunnel** you control
+that sends CORS headers, and set that URL as a custom provider base URL (not
+`localhost`). You own tunnel security and CORS.
+
+The app detects impossible combinations (e.g. github.io + localhost) and **blocks
+Run** with actionable guidance before the request is sent.
 
 ### Dev proxy (and when to turn it off)
 
@@ -169,10 +190,10 @@ browser — makes the request in dev. If a provider is reachable **only** from t
 proxying it hangs and surfaces as `Failed (timeout): The request timed out.`
 
 For that case, each provider has a **"Send requests directly from the browser (bypass
-dev proxy)"** toggle in the Provider editor (shown in dev only). Enable it to send that
-provider's requests straight from the browser even under `vite dev`. The provider must
-then allow browser-origin (CORS) requests. Production builds are always browser-direct
-regardless of this setting — the proxy exists only under `vite dev`.
+dev proxy)"** toggle in the Provider editor (shown in Advanced, **dev only**). Enable it
+to send that provider's requests straight from the browser even under `vite dev`. The
+provider must then allow browser-origin (CORS) requests. Production builds are always
+browser-direct regardless of this setting — the proxy exists only under `vite dev`.
 
 ## 📄 License
 

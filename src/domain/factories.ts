@@ -18,6 +18,7 @@ import {
   newProviderId,
   newSkillId,
 } from './ids';
+import { evidenceRoleInstruction } from './conduct';
 
 const now = () => Date.now();
 
@@ -246,7 +247,12 @@ export type TemplateKey =
   | 'critic'
   | 'moderator'
   | 'researcher'
-  | 'summarizer';
+  | 'summarizer'
+  // Evidence-pipeline roles (opt-in): narrow, structured, non-conversational.
+  | 'proposer'
+  | 'verifier'
+  | 'comparator'
+  | 'finalizer';
 
 interface TemplateDef {
   label: string;
@@ -309,6 +315,41 @@ const TEMPLATES: Record<TemplateKey, TemplateDef> = {
     characteristics: { verbosity: 25, tone: 'concise' },
     color: 'violet',
     skills: [presetSkill('summarization')],
+  },
+  // Evidence-pipeline roles. Each carries a narrow protocol plus the shared
+  // anti-filler conduct (src/domain/conduct.ts). Low verbosity reinforces
+  // conciseness; the instruction text does the structural work.
+  proposer: {
+    label: 'Proposer',
+    role: 'Candidate generator',
+    systemInstruction: evidenceRoleInstruction('proposer'),
+    characteristics: { verbosity: 30, assertiveness: 55, cooperation: 40 },
+    color: 'blue',
+    skills: [],
+  },
+  verifier: {
+    label: 'Verifier',
+    role: 'Claim verifier',
+    systemInstruction: evidenceRoleInstruction('verifier'),
+    characteristics: { verbosity: 30, skepticism: 80, cooperation: 40 },
+    color: 'teal',
+    skills: [],
+  },
+  comparator: {
+    label: 'Comparator',
+    role: 'Candidate judge',
+    systemInstruction: evidenceRoleInstruction('comparator'),
+    characteristics: { verbosity: 30, assertiveness: 60, cooperation: 40 },
+    color: 'amber',
+    skills: [],
+  },
+  finalizer: {
+    label: 'Finalizer',
+    role: 'Final answer synthesizer',
+    systemInstruction: evidenceRoleInstruction('finalizer'),
+    characteristics: { verbosity: 30, tone: 'concise', assertiveness: 55 },
+    color: 'green',
+    skills: [],
   },
 };
 

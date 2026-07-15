@@ -2,6 +2,8 @@ import { useDomainStore } from '../store/domainStore';
 import { useProviderStore } from '../store/providerStore';
 import { useUiStore } from '../store/uiStore';
 import { createExamplePlayground } from '../domain/example';
+import { createEvidencePipelinePlayground } from '../domain/evidencePipeline';
+import type { Playground, Provider } from '../domain/schema';
 import { Modal } from './Modal';
 import styles from './PlaygroundsPanel.module.css';
 
@@ -17,10 +19,10 @@ export function PlaygroundsPanel() {
   const setPanel = useUiStore((s) => s.setPanel);
   const requestConfirm = useUiStore((s) => s.requestConfirm);
 
-  // Register the example's provider globally (reusing an equivalent one if it
+  // Register the preset's provider globally (reusing an equivalent one if it
   // already exists), then load the playground wired to whatever id came back.
-  function loadExample() {
-    const { playground, provider } = createExamplePlayground();
+  function loadPreset(build: () => { playground: Playground; provider: Provider }) {
+    const { playground, provider } = build();
     const pid = ensureProvider(provider);
     const wired =
       pid === provider.id
@@ -43,8 +45,11 @@ export function PlaygroundsPanel() {
         <button type="button" className="primary" onClick={() => { newPlayground('Untitled Playground'); setPanel('none'); }}>
           + New playground
         </button>
-        <button type="button" onClick={loadExample}>
+        <button type="button" onClick={() => loadPreset(createExamplePlayground)}>
           Load example
+        </button>
+        <button type="button" onClick={() => loadPreset(createEvidencePipelinePlayground)}>
+          Load evidence pipeline
         </button>
         {current && <button type="button" onClick={() => duplicatePlayground()}>Duplicate current</button>}
       </div>

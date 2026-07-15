@@ -12,6 +12,8 @@ export interface ChatMessage {
 /** The one internal response structure every adapter must return (spec §17). */
 export interface NormalizedResponse {
   text: string;
+  /** Reasoning/thinking tokens the model streamed separately from `text`, if any. */
+  reasoning?: string;
   model: string;
   finishReason: string | null;
   promptTokens?: number;

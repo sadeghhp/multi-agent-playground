@@ -223,6 +223,52 @@ describe('sendChat', () => {
     expect(body.stream).toBe(true);
   });
 
+  it('streams reasoning deltas via onReasoningToken, separate from content', async () => {
+    const sse = [
+      'data: {"model":"test-model","choices":[{"delta":{"reasoning_content":"pondering "}}]}\n\n',
+      'data: {"choices":[{"delta":{"reasoning_content":"deeply"}}]}\n\n',
+      'data: {"choices":[{"delta":{"content":"answer"}}]}\n\n',
+      'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+      'data: [DONE]\n\n',
+    ];
+    const fetchMock = vi.fn().mockResolvedValue(sseResponse(sse));
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = createProvider({ baseUrl: 'https://api.example.com', apiKey: 'k' });
+
+    const tokens: string[] = [];
+    const reasoningTokens: string[] = [];
+    const res = await sendChat(
+      provider,
+      { model: 'test-model', messages: [{ role: 'user', content: 'hi' }] },
+      { onToken: (c) => tokens.push(c), onReasoningToken: (c) => reasoningTokens.push(c) },
+    );
+
+    expect(reasoningTokens).toEqual(['pondering ', 'deeply']);
+    expect(tokens).toEqual(['answer']);
+    expect(res.reasoning).toBe('pondering deeply');
+    expect(res.text).toBe('answer');
+  });
+
+  it('reports empty text with reasoning captured when a reasoning model never emits content', async () => {
+    const sse = [
+      'data: {"model":"test-model","choices":[{"delta":{"reasoning_content":"thinking a lot"}}]}\n\n',
+      'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n',
+      'data: [DONE]\n\n',
+    ];
+    const fetchMock = vi.fn().mockResolvedValue(sseResponse(sse));
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = createProvider({ baseUrl: 'https://api.example.com', apiKey: 'k' });
+
+    const res = await sendChat(
+      provider,
+      { model: 'test-model', messages: [{ role: 'user', content: 'hi' }] },
+      { onToken: () => {}, onReasoningToken: () => {} },
+    );
+
+    expect(res.text).toBe('');
+    expect(res.reasoning).toBe('thinking a lot');
+  });
+
   it('emits the full text once when a streaming request returns plain JSON', async () => {
     const fetchMock = vi.fn().mockResolvedValue(okResponse(sampleBody));
     vi.stubGlobal('fetch', fetchMock);

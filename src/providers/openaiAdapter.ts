@@ -81,6 +81,15 @@ function normalizeDeltaContent(content: unknown): string {
   return '';
 }
 
+/** Reasoning models stream thinking tokens under one of these delta keys, separate from `content`. */
+function normalizeDeltaReasoning(delta: Record<string, unknown>): string {
+  for (const key of ['reasoning_content', 'reasoning']) {
+    const v = delta[key];
+    if (typeof v === 'string' && v.length > 0) return v;
+  }
+  return '';
+}
+
 function extractText(data: unknown): { text: string; finishReason: string | null } {
   const choices = (data as { choices?: unknown }).choices;
   if (!Array.isArray(choices) || choices.length === 0) {
@@ -132,6 +141,13 @@ export interface SendOptions {
    * JSON body still work — the full text is emitted once (spec §17).
    */
   onToken?: (chunk: string) => void;
+  /**
+   * When provided, invoked for each reasoning/thinking delta a reasoning model
+   * streams separately from its visible `content` (e.g. `delta.reasoning_content`).
+   * Reasoning models can spend their entire token budget here before emitting
+   * any content, so callers that only watch onToken see nothing arrive.
+   */
+  onReasoningToken?: (chunk: string) => void;
 }
 
 /** Parse an OpenAI-compatible SSE stream, emitting each content delta via onToken. */
@@ -139,7 +155,8 @@ async function consumeStream(
   response: Response,
   onToken: (chunk: string) => void,
   resetTimeout: () => void,
-): Promise<{ text: string; finishReason: string | null; model?: string; usage: ReturnType<typeof extractUsage> }> {
+  onReasoningToken?: (chunk: string) => void,
+): Promise<{ text: string; reasoning: string; finishReason: string | null; model?: string; usage: ReturnType<typeof extractUsage> }> {
   const reader = response.body?.getReader();
   if (!reader) {
     throw new ProviderError('malformed-response', summaryFor('malformed-response'), {
@@ -149,6 +166,7 @@ async function consumeStream(
   const decoder = new TextDecoder();
   let buffer = '';
   let text = '';
+  let reasoning = '';
   let finishReason: string | null = null;
   let model: string | undefined;
   let usage: ReturnType<typeof extractUsage> = {};
@@ -180,11 +198,16 @@ async function consumeStream(
     if (typeof json.model === 'string') model = json.model;
     const choice = (json.choices as Array<Record<string, unknown>> | undefined)?.[0];
     if (choice) {
-      const delta = (choice.delta as { content?: unknown } | undefined)?.content;
-      const chunk = normalizeDeltaContent(delta);
+      const delta = (choice.delta as Record<string, unknown> | undefined) ?? {};
+      const chunk = normalizeDeltaContent(delta.content);
       if (chunk.length > 0) {
         text += chunk;
         onToken(chunk);
+      }
+      const reasoningChunk = normalizeDeltaReasoning(delta);
+      if (reasoningChunk.length > 0) {
+        reasoning += reasoningChunk;
+        onReasoningToken?.(reasoningChunk);
       }
       if (typeof choice.finish_reason === 'string') finishReason = choice.finish_reason;
     }
@@ -215,7 +238,7 @@ async function consumeStream(
   const tail = buffer.trim();
   if (tail.startsWith('data:')) handleData(tail.slice(5).trim());
 
-  return { text, finishReason, model, usage };
+  return { text, reasoning, finishReason, model, usage };
 }
 
 /**
@@ -262,7 +285,7 @@ export async function sendChat(
     const streamStart = Date.now();
     let streamed: Awaited<ReturnType<typeof consumeStream>>;
     try {
-      streamed = await consumeStream(response, options.onToken, resetTimeout);
+      streamed = await consumeStream(response, options.onToken, resetTimeout, options.onReasoningToken);
     } catch (err) {
       // The idle timeout aborts the same signal that fed the original fetch —
       // classify a mid-stream stall the same way providerRequest classifies a
@@ -282,6 +305,7 @@ export async function sendChat(
     const model = streamed.model ?? params.model;
     return {
       text: streamed.text,
+      ...(streamed.reasoning ? { reasoning: streamed.reasoning } : {}),
       model,
       finishReason: streamed.finishReason,
       ...streamed.usage,

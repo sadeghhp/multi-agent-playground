@@ -23,11 +23,14 @@ import { ConfirmDialog } from './ui/ConfirmDialog';
 import { FallbackSuggestModal } from './ui/FallbackSuggestModal';
 import { UsagePanel } from './ui/UsagePanel';
 import { useUsageStore } from './store/usageStore';
+import { useIsMobile } from './ui/useIsMobile';
+import { MobileApp } from './ui/mobile/MobileApp';
 import styles from './App.module.css';
 
 export default function App() {
   const theme = useUiStore((s) => s.theme);
   const openPanel = useUiStore((s) => s.openPanel);
+  const isMobile = useIsMobile();
   const playground = useDomainStore((s) => s.playground);
   const hydrate = useDomainStore((s) => s.hydrate);
   const hydrateProviders = useProviderStore((s) => s.hydrate);
@@ -69,16 +72,25 @@ export default function App() {
 
   return (
     <div className={styles.app}>
-      <a href="#main" className="skip-link">Skip to canvas</a>
-      <Toolbar />
-      <div className={styles.body}>
-        <Palette />
-        <main id="main" tabIndex={-1} className={styles.center} aria-label="Graph canvas">
-          {playground ? <GraphCanvas /> : <div className={styles.loading}>Loading…</div>}
-        </main>
-        <Inspector />
-      </div>
-      <BottomPanel />
+      {/* Below the mobile breakpoint we swap the desktop three-column editor for a
+          purpose-built touch shell. The openPanel modals and global overlays below
+          are shared by both layouts (they already render full-screen). */}
+      {isMobile ? (
+        <MobileApp />
+      ) : (
+        <>
+          <a href="#main" className="skip-link">Skip to canvas</a>
+          <Toolbar />
+          <div className={styles.body}>
+            <Palette />
+            <main id="main" tabIndex={-1} className={styles.center} aria-label="Graph canvas">
+              {playground ? <GraphCanvas /> : <div className={styles.loading}>Loading…</div>}
+            </main>
+            <Inspector />
+          </div>
+          <BottomPanel />
+        </>
+      )}
 
       {openPanel === 'providers' && <ProviderManager />}
       {openPanel === 'skills' && <SkillLibraryManager />}

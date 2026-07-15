@@ -9,7 +9,7 @@ import { ProviderError, retryEligible, summaryFor } from '../providers/errors';
 import { sendChat } from '../providers/openaiAdapter';
 import { buildEndpoint } from '../providers/url';
 import type { ChatMessage, NormalizedResponse } from '../providers/types';
-import { assembleMessages, boundHistory, estimateTokens } from '../agents/promptAssembly';
+import { assembleMessages, boundHistory, estimateTokens, visibleAnswerText } from '../agents/promptAssembly';
 import { hasBlockingErrors, validateForRun } from './validate';
 import { beginVersionedRun, finalizeVersionedRun } from './runHistory';
 import {
@@ -53,7 +53,7 @@ function responseLimitFor(agent: Agent, pg: Playground): number {
   return Math.min(agent.runtime.maxResponsesPerRun, pg.conversation.maxResponsesPerAgent);
 }
 
-/** Most recent non-empty message from `sourceAgentId`, walked backwards in place. */
+/** Most recent non-empty *answer* from `sourceAgentId` (never reasoning). */
 function findLastSourceOutput(
   transcript: TranscriptMessage[],
   sourceAgentId: string | null,
@@ -61,7 +61,9 @@ function findLastSourceOutput(
   if (!sourceAgentId) return null;
   for (let i = transcript.length - 1; i >= 0; i--) {
     const m = transcript[i];
-    if (m.agentId === sourceAgentId && m.content) return m.content;
+    if (m.agentId !== sourceAgentId) continue;
+    const answer = visibleAnswerText(m);
+    if (answer) return answer;
   }
   return null;
 }

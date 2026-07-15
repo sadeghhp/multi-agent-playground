@@ -6,6 +6,7 @@ import type {
   TranscriptMessage,
 } from '../domain/schema';
 import type { ChatMessage } from '../providers/types';
+import { extractInlineThinking } from '../providers/openaiAdapter';
 import { characteristicsToInstruction } from './characteristics';
 
 /**
@@ -13,6 +14,15 @@ import { characteristicsToInstruction } from './characteristics';
  * ordered sections. The same builder powers the read-only "effective prompt"
  * preview and the live orchestrator so what the user sees is what is sent.
  */
+
+/**
+ * Visible answer text for another agent to read. Strips any residual inline
+ * think tags from `content` and never includes `reasoning` — peers must only
+ * see the clear answer, not chain-of-thought.
+ */
+export function visibleAnswerText(msg: TranscriptMessage): string {
+  return extractInlineThinking(msg.content).text.trim();
+}
 
 export interface PromptContext {
   agent: Agent;
@@ -264,11 +274,13 @@ export function assembleMessages(ctx: PromptContext): ChatMessage[] {
 
   if (ctx.agent.runtime.includeHistory) {
     for (const msg of ctx.history) {
-      if (!msg.content) continue;
+      // Answer only — never feed thinking/reasoning to peer agents.
+      const answer = visibleAnswerText(msg);
+      if (!answer) continue;
       // Prefix so each contribution is attributable inside the flattened history.
       messages.push({
         role: msg.agentId === ctx.agent.id ? 'assistant' : 'user',
-        content: `[${msg.agentName}]: ${msg.content}`,
+        content: `[${msg.agentName}]: ${answer}`,
       });
     }
   }
@@ -290,7 +302,7 @@ export function boundHistory(
   const result: TranscriptMessage[] = [];
   let chars = 0;
   for (let i = recent.length - 1; i >= 0; i--) {
-    const len = recent[i].content.length;
+    const len = visibleAnswerText(recent[i]).length;
     if (chars + len > charBudget && result.length > 0) break;
     chars += len;
     result.unshift(recent[i]);

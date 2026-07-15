@@ -125,8 +125,8 @@ export async function enhanceSystemInstruction(
         model,
         messages,
         temperature: 0.4,
-        // Give the rewrite room — the agent's own maxOutputTokens (default 1024)
-        // can truncate a longer instruction mid-sentence (finishReason: 'length').
+        // Give the rewrite room — the agent's own maxOutputTokens (default 8192)
+        // can still truncate a longer instruction mid-sentence (finishReason: 'length').
         maxOutputTokens: Math.max(agent.llm.maxOutputTokens, 2048),
       },
       { signal: options.signal, timeoutMs: options.timeoutMs },

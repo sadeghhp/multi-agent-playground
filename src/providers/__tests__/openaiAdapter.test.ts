@@ -463,6 +463,84 @@ describe('sendChat', () => {
     expect(res.reasoning).toBe('ok');
   });
 
+  it('promotes a tagged answer out of the reasoning channel when content is empty', async () => {
+    const sse = [
+      'data: {"model":"test-model","choices":[{"delta":{"reasoning_content":"<think>ponder"}}]}\n\n',
+      'data: {"choices":[{"delta":{"reasoning_content":"</think>the answer is 4"}}]}\n\n',
+      'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+      'data: [DONE]\n\n',
+    ];
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse(sse)));
+    const provider = createProvider({ baseUrl: 'https://api.example.com', apiKey: 'k' });
+
+    const res = await sendChat(
+      provider,
+      { model: 'test-model', messages: [{ role: 'user', content: 'hi' }] },
+      { onToken: () => {} },
+    );
+
+    expect(res.text).toBe('the answer is 4');
+    expect(res.reasoning).toBe('ponder');
+  });
+
+  it('does not dump untagged reasoning into the answer body', async () => {
+    const sse = [
+      'data: {"model":"test-model","choices":[{"delta":{"reasoning_content":"pure chain of thought"}}]}\n\n',
+      'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+      'data: [DONE]\n\n',
+    ];
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse(sse)));
+    const provider = createProvider({ baseUrl: 'https://api.example.com', apiKey: 'k' });
+
+    const res = await sendChat(
+      provider,
+      { model: 'test-model', messages: [{ role: 'user', content: 'hi' }] },
+      { onToken: () => {} },
+    );
+
+    expect(res.text).toBe('');
+    expect(res.reasoning).toBe('pure chain of thought');
+  });
+
+  it('reads streamed answer from delta.text when content is absent', async () => {
+    const sse = [
+      'data: {"model":"test-model","choices":[{"delta":{"reasoning_content":"thinking"}}]}\n\n',
+      'data: {"choices":[{"delta":{"text":"final answer"}}]}\n\n',
+      'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+      'data: [DONE]\n\n',
+    ];
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse(sse)));
+    const provider = createProvider({ baseUrl: 'https://api.example.com', apiKey: 'k' });
+
+    const res = await sendChat(
+      provider,
+      { model: 'test-model', messages: [{ role: 'user', content: 'hi' }] },
+      { onToken: () => {} },
+    );
+
+    expect(res.text).toBe('final answer');
+    expect(res.reasoning).toBe('thinking');
+  });
+
+  it('reads a final choice.message when deltas left content empty', async () => {
+    const sse = [
+      'data: {"model":"test-model","choices":[{"delta":{"reasoning_content":"thinking"}}]}\n\n',
+      'data: {"choices":[{"message":{"role":"assistant","content":"final answer"},"finish_reason":"stop"}]}\n\n',
+      'data: [DONE]\n\n',
+    ];
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse(sse)));
+    const provider = createProvider({ baseUrl: 'https://api.example.com', apiKey: 'k' });
+
+    const res = await sendChat(
+      provider,
+      { model: 'test-model', messages: [{ role: 'user', content: 'hi' }] },
+      { onToken: () => {} },
+    );
+
+    expect(res.text).toBe('final answer');
+    expect(res.reasoning).toBe('thinking');
+  });
+
   it('accepts legacy choices[0].text completion shape', async () => {
     vi.stubGlobal(
       'fetch',

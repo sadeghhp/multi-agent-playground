@@ -106,7 +106,7 @@ export const LlmConfig = z.object({
   // No upper bound: providers' context/output limits vary too widely (and change
   // over time) to encode a single safe cap here; the provider API itself rejects
   // out-of-range values.
-  maxOutputTokens: z.number().int().positive().default(1024),
+  maxOutputTokens: z.number().int().positive().default(8192),
   topP: z.number().min(0).max(1).optional(),
   seed: z.number().int().optional(),
   stopSequences: z.array(z.string()).optional(),
@@ -244,8 +244,8 @@ export const TranscriptMessage = z.object({
   model: z.string().default(''),
   providerId: z.string().nullable().default(null),
   content: z.string().default(''),
-  /** Reasoning/thinking text streamed separately from `content`, when the
-   * provider emitted a visible reply too. Hidden by default in the UI. */
+  /** Reasoning/thinking text streamed separately from `content`. Hidden by
+   * default in the UI; never fed back to other agents as conversation history. */
   reasoning: z.string().optional(),
   status: z.enum(['completed', 'failed', 'stopped']).default('completed'),
   sourceAgentId: z.string().nullable().default(null),

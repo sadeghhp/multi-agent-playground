@@ -117,6 +117,20 @@ describe('Message thinking chip', () => {
     expect(screen.queryByText('hidden chain of thought')).toBeNull();
   });
 
+  it('shows a hint when the turn has thinking but no visible answer', () => {
+    render(
+      <Message
+        msg={makeMsg({
+          content: '',
+          reasoning: 'only chain of thought',
+        })}
+      />,
+    );
+
+    expect(screen.getByText(/No visible answer/i)).toBeTruthy();
+    expect(screen.queryByText('only chain of thought')).toBeNull();
+  });
+
   it('pulls closer-only think blocks out of content into the collapsed chip', () => {
     render(
       <Message

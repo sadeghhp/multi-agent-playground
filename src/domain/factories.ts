@@ -40,7 +40,7 @@ export function defaultLlmConfig(): LlmConfig {
     providerId: null,
     model: '',
     temperature: 0.7,
-    maxOutputTokens: 1024,
+    maxOutputTokens: 8192,
   };
 }
 

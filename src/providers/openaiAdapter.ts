@@ -146,6 +146,25 @@ export function extractInlineThinking(raw: string): { text: string; reasoning: s
   return { text: text.trim(), reasoning: reasoning.trim() };
 }
 
+/**
+ * Some gateways put the whole tagged reply (`<think>…</think>answer`) into the
+ * reasoning channel and leave `content` empty. When that happens, promote the
+ * post-tag answer into `text` so the UI body is not blank. Pure untagged CoT is
+ * left in `reasoning` (never dumped into the answer body).
+ */
+export function promoteTaggedAnswerFromReasoning(
+  text: string,
+  reasoning: string,
+): { text: string; reasoning: string } {
+  if (text.trim() || !reasoning) return { text, reasoning };
+  if (!new RegExp(`</?(?:${THINK_TAG})\\b`, 'i').test(reasoning)) {
+    return { text, reasoning };
+  }
+  const split = extractInlineThinking(reasoning);
+  if (!split.text) return { text, reasoning };
+  return { text: split.text, reasoning: split.reasoning };
+}
+
 function extractText(data: unknown): { text: string; reasoning: string; finishReason: string | null } {
   const choices = (data as { choices?: unknown }).choices;
   if (!Array.isArray(choices) || choices.length === 0) {
@@ -266,7 +285,9 @@ async function consumeStream(
     const choice = (json.choices as Array<Record<string, unknown>> | undefined)?.[0];
     if (choice) {
       const delta = (choice.delta as Record<string, unknown> | undefined) ?? {};
-      const chunk = normalizeDeltaContent(delta.content);
+      // Prefer `content`; some compat servers stream the answer on `text`.
+      let chunk = normalizeDeltaContent(delta.content);
+      if (!chunk && typeof delta.text === 'string') chunk = delta.text;
       if (chunk.length > 0) {
         text += chunk;
         onToken(chunk);
@@ -275,6 +296,20 @@ async function consumeStream(
       if (reasoningChunk.length > 0) {
         reasoning += reasoningChunk;
         onReasoningToken?.(reasoningChunk);
+      }
+      // Final/non-delta message form used by some gateways after reasoning deltas.
+      const message = choice.message as Record<string, unknown> | undefined;
+      if (message) {
+        const msgText = normalizeMessageContent(message);
+        if (msgText && !text) {
+          text = msgText;
+          onToken(msgText);
+        }
+        const msgReasoning = extractMessageReasoning(message);
+        if (msgReasoning && !reasoning) {
+          reasoning = msgReasoning;
+          onReasoningToken?.(msgReasoning);
+        }
       }
       if (typeof choice.finish_reason === 'string') finishReason = choice.finish_reason;
     }
@@ -377,9 +412,10 @@ export async function sendChat(
     const model = streamed.model ?? params.model;
     const { text: cleanedText, reasoning: inlineReasoning } = extractInlineThinking(streamed.text);
     const combinedReasoning = [streamed.reasoning, inlineReasoning].filter(Boolean).join('\n\n');
+    const promoted = promoteTaggedAnswerFromReasoning(cleanedText, combinedReasoning);
     return {
-      text: cleanedText,
-      ...(combinedReasoning ? { reasoning: combinedReasoning } : {}),
+      text: promoted.text,
+      ...(promoted.reasoning ? { reasoning: promoted.reasoning } : {}),
       model,
       finishReason: streamed.finishReason,
       ...streamed.usage,
@@ -412,11 +448,13 @@ export async function sendChat(
   }
 
   const { text: rawText, reasoning: messageReasoning, finishReason } = extractText(data);
-  const { text, reasoning: inlineReasoning } = extractInlineThinking(rawText);
+  const { text: cleanedText, reasoning: inlineReasoning } = extractInlineThinking(rawText);
   const combinedReasoning = [messageReasoning, inlineReasoning].filter(Boolean).join('\n\n');
+  const { text, reasoning } = promoteTaggedAnswerFromReasoning(cleanedText, combinedReasoning);
   // Non-streaming provider (or one that ignored `stream`): surface the full text
   // once so streaming consumers still get a live update.
   if (options.onToken && text) options.onToken(text);
+  if (options.onReasoningToken && reasoning) options.onReasoningToken(reasoning);
   const usage = extractUsage(data);
   const model =
     (data as { model?: unknown }).model && typeof (data as { model?: unknown }).model === 'string'
@@ -425,7 +463,7 @@ export async function sendChat(
 
   return {
     text,
-    ...(combinedReasoning ? { reasoning: combinedReasoning } : {}),
+    ...(reasoning ? { reasoning } : {}),
     model,
     finishReason,
     ...usage,

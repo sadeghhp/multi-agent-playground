@@ -224,6 +224,27 @@ describe('assembleMessages', () => {
     const messages = assembleMessages({ agent, conversation: defaultConversationSettings(), history });
     expect(messages.some((m) => m.content.includes('hello'))).toBe(false);
   });
+
+  it('feeds peers only the answer text, never reasoning or think tags', () => {
+    const agent = createAgent({ name: 'A', systemInstruction: 'x' });
+    const history: TranscriptMessage[] = [
+      {
+        ...msg('other', 'B', '<think>secret CoT</think>public answer', 1),
+        reasoning: 'API reasoning that must stay private',
+      },
+      {
+        ...msg('other', 'C', '', 2),
+        reasoning: 'reasoning-only turn with no answer',
+      },
+    ];
+    const messages = assembleMessages({ agent, conversation: defaultConversationSettings(), history });
+    const flat = messages.map((m) => m.content).join('\n');
+    expect(flat).toContain('[B]: public answer');
+    expect(flat).not.toContain('secret CoT');
+    expect(flat).not.toContain('API reasoning');
+    expect(flat).not.toContain('reasoning-only');
+    expect(flat).not.toContain('[C]:');
+  });
 });
 
 describe('boundHistory', () => {

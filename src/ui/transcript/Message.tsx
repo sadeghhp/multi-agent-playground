@@ -112,9 +112,14 @@ export function Message({ msg, color }: { msg: TranscriptMessage; color?: string
         <div className={styles.msgBody}>
           {msg.status === 'failed' ? (
             <span className={styles.errText}>Failed: {msg.error}</span>
-          ) : (
+          ) : visibleContent ? (
             <MessageMarkdown content={visibleContent} />
-          )}
+          ) : reasoning ? (
+            <span className={styles.msgSource}>
+              No visible answer — the model only produced thinking. Expand “thinking” or raise Max
+              output tokens.
+            </span>
+          ) : null}
         </div>
       )}
 

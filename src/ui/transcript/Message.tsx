@@ -14,6 +14,7 @@ import styles from './Transcript.module.css';
 export function Message({ msg, color }: { msg: TranscriptMessage; color?: string }) {
   const [expanded, setExpanded] = useState(true);
   const [showRequest, setShowRequest] = useState(false);
+  const [showReasoning, setShowReasoning] = useState(false);
   const showToast = useUiStore((s) => s.showToast);
   const snapshot = useRuntimeStore((s) => s.requestSnapshots[msg.id]);
 
@@ -36,6 +37,16 @@ export function Message({ msg, color }: { msg: TranscriptMessage; color?: string
           {msg.agentDeleted && <span className="chip"> deleted</span>}
         </span>
         {msg.role && <span className="chip">{msg.role}</span>}
+        {msg.reasoning && (
+          <button
+            type="button"
+            className="chip"
+            aria-expanded={showReasoning}
+            onClick={() => setShowReasoning((v) => !v)}
+          >
+            thinking {showReasoning ? '▾' : '▸'}
+          </button>
+        )}
         <span className={styles.msgMeta}>
           turn {msg.turn} · {msg.model || '—'} · {time}
           {msg.durationMs != null &&
@@ -79,6 +90,11 @@ export function Message({ msg, color }: { msg: TranscriptMessage; color?: string
       {msg.sourceAgentId && msg.connectionType && (
         <div className={styles.msgSource}>
           via {msg.connectionType} connection
+        </div>
+      )}
+      {showReasoning && msg.reasoning && (
+        <div className={styles.request} dir="ltr">
+          <pre className={styles.reqPre}>{msg.reasoning}</pre>
         </div>
       )}
       {expanded && (

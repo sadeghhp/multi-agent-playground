@@ -244,6 +244,9 @@ export const TranscriptMessage = z.object({
   model: z.string().default(''),
   providerId: z.string().nullable().default(null),
   content: z.string().default(''),
+  /** Reasoning/thinking text streamed separately from `content`, when the
+   * provider emitted a visible reply too. Hidden by default in the UI. */
+  reasoning: z.string().optional(),
   status: z.enum(['completed', 'failed', 'stopped']).default('completed'),
   sourceAgentId: z.string().nullable().default(null),
   connectionType: ConnectionType.nullable().default(null),

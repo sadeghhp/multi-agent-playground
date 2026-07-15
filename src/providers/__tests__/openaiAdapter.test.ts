@@ -269,6 +269,47 @@ describe('sendChat', () => {
     expect(res.reasoning).toBe('thinking a lot');
   });
 
+  it('strips inline <think> tags from streamed content into reasoning', async () => {
+    const sse = [
+      'data: {"model":"test-model","choices":[{"delta":{"content":"<think>weighing options"}}]}\n\n',
+      'data: {"choices":[{"delta":{"content":"</think>the answer is 4"}}]}\n\n',
+      'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+      'data: [DONE]\n\n',
+    ];
+    const fetchMock = vi.fn().mockResolvedValue(sseResponse(sse));
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = createProvider({ baseUrl: 'https://api.example.com', apiKey: 'k' });
+
+    const res = await sendChat(
+      provider,
+      { model: 'test-model', messages: [{ role: 'user', content: 'hi' }] },
+      { onToken: () => {} },
+    );
+
+    expect(res.text).toBe('the answer is 4');
+    expect(res.reasoning).toBe('weighing options');
+  });
+
+  it('strips inline <think> tags from a plain JSON response into reasoning', async () => {
+    const body = {
+      model: 'test-model',
+      choices: [
+        {
+          message: { role: 'assistant', content: '<think>weighing options</think>the answer is 4' },
+          finish_reason: 'stop',
+        },
+      ],
+    };
+    const fetchMock = vi.fn().mockResolvedValue(okResponse(body));
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = createProvider({ baseUrl: 'https://api.example.com', apiKey: 'k' });
+
+    const res = await sendChat(provider, { model: 'test-model', messages: [{ role: 'user', content: 'hi' }] });
+
+    expect(res.text).toBe('the answer is 4');
+    expect(res.reasoning).toBe('weighing options');
+  });
+
   it('emits the full text once when a streaming request returns plain JSON', async () => {
     const fetchMock = vi.fn().mockResolvedValue(okResponse(sampleBody));
     vi.stubGlobal('fetch', fetchMock);

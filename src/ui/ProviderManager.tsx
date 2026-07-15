@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import type { CredentialStorage, Provider } from '../domain/schema';
+import { useEffect, useMemo, useState } from 'react';
+import type { Provider } from '../domain/schema';
 import { deriveAuthMethod } from './providerAuth';
 import { useProviderStore } from '../store/providerStore';
 import { useUiStore } from '../store/uiStore';
@@ -10,6 +10,27 @@ import { listModels } from '../providers/listModels';
 import { testConnection, type TestConnectionResult } from '../providers/testConnection';
 import { Modal } from './Modal';
 import styles from './ProviderManager.module.css';
+
+/**
+ * Quick-start presets for common OpenAI-compatible endpoints. Selecting one only
+ * prefills the connection fields — the user still supplies the key and picks
+ * models — so no preset locks the provider into a fixed shape.
+ */
+interface Preset {
+  label: string;
+  displayName: string;
+  baseUrl: string;
+  path: string;
+}
+
+const PRESETS: Preset[] = [
+  { label: 'OpenAI', displayName: 'OpenAI', baseUrl: 'https://api.openai.com', path: '/v1/chat/completions' },
+  { label: 'OpenRouter', displayName: 'OpenRouter', baseUrl: 'https://openrouter.ai/api', path: '/v1/chat/completions' },
+  { label: 'Groq', displayName: 'Groq', baseUrl: 'https://api.groq.com/openai', path: '/v1/chat/completions' },
+  { label: 'Together', displayName: 'Together AI', baseUrl: 'https://api.together.xyz', path: '/v1/chat/completions' },
+  { label: 'Ollama', displayName: 'Ollama (local)', baseUrl: 'http://localhost:11434', path: '/v1/chat/completions' },
+  { label: 'LM Studio', displayName: 'LM Studio (local)', baseUrl: 'http://localhost:1234', path: '/v1/chat/completions' },
+];
 
 export function ProviderManager() {
   const addProvider = useProviderStore((s) => s.addProvider);
@@ -23,20 +44,14 @@ export function ProviderManager() {
   const selected = providers.find((p) => p.id === selectedId) ?? null;
 
   function handleAdd() {
-    const p = createProvider({
-      displayName: 'Local (Ollama)',
-      baseUrl: 'http://localhost:11434',
-      path: '/v1/chat/completions',
-      authMethod: 'none',
-      models: [],
-    });
+    const p = createProvider({ displayName: 'New provider', models: [] });
     addProvider(p);
     setSelectedId(p.id);
   }
 
   function handleDuplicate(p: Provider) {
     const { id: _id, apiKey: _key, ...rest } = p;
-    const copy = createProvider({ ...rest, authMethod: 'none', displayName: `${p.displayName} (copy)` });
+    const copy = createProvider({ ...rest, displayName: `${p.displayName} (copy)` });
     addProvider(copy);
     setSelectedId(copy.id);
   }
@@ -55,10 +70,10 @@ export function ProviderManager() {
   }
 
   return (
-    <Modal title="LLM providers" onClose={() => setPanel('none')} width={920}>
+    <Modal title="LLM providers" onClose={() => setPanel('none')} width={900}>
       <p className={styles.intro}>
-        Configure OpenAI-compatible endpoints shared across all playgrounds in this browser.
-        Keys are stored locally — do not use unrestricted production credentials.
+        Connect any OpenAI-compatible endpoint. Providers are shared across every playground in this
+        browser. API keys are stored locally on this device — never use unrestricted production keys.
       </p>
 
       <div className={styles.layout}>
@@ -126,6 +141,8 @@ function providerHost(baseUrl: string): string {
   }
 }
 
+type Banner = { kind: 'ok' | 'err' | 'info'; text: string } | null;
+
 function ProviderEditor({
   provider,
   onChange,
@@ -138,18 +155,34 @@ function ProviderEditor({
   onDelete: () => void;
 }) {
   const [testResult, setTestResult] = useState<TestConnectionResult | null>(null);
-  const [testing, setTesting] = useState(false);
-  const [fetchingModels, setFetchingModels] = useState(false);
-  const [fetchStatus, setFetchStatus] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  const [busy, setBusy] = useState<'test' | 'fetch' | null>(null);
+  const [banner, setBanner] = useState<Banner>(null);
   const [fetchedModels, setFetchedModels] = useState<string[] | null>(null);
   const [testModel, setTestModel] = useState(provider.defaultModel || provider.models[0] || '');
   const [manualModel, setManualModel] = useState('');
   const [showKey, setShowKey] = useState(false);
 
   const urlValidation = validateEndpoint(provider.baseUrl);
-  const canQueryProvider = Boolean(provider.baseUrl) && urlValidation.ok;
+  const hasUrl = Boolean(provider.baseUrl.trim());
+  const canQuery = hasUrl && urlValidation.ok;
+
+  function applyPreset(preset: Preset) {
+    onChange({
+      displayName:
+        !provider.displayName || provider.displayName === 'New provider'
+          ? preset.displayName
+          : provider.displayName,
+      baseUrl: preset.baseUrl,
+      path: preset.path,
+    });
+    setBanner(null);
+    setTestResult(null);
+    setFetchedModels(null);
+  }
 
   function setKey(apiKey: string) {
+    // The form exposes a single API-key credential: a non-empty key means bearer
+    // auth, empty means none. Header/prefix stay at their canonical defaults.
     onChange({
       apiKey,
       authMethod: deriveAuthMethod(apiKey),
@@ -164,7 +197,8 @@ function ProviderEditor({
     clearCredential(provider.id);
   }
 
-  function setStorage(mode: CredentialStorage) {
+  function setRemember(remember: boolean) {
+    const mode = remember ? 'local' : 'session';
     onChange({ credentialStorage: mode });
     if (provider.apiKey) saveCredential(provider.id, provider.apiKey, mode);
   }
@@ -185,60 +219,55 @@ function ProviderEditor({
     if (testModel === model) setTestModel(defaultModel);
   }
 
-  function applyModels(models: string[], defaultModel: string) {
+  function applyImport(models: string[], defaultModel: string) {
     onChange({ models, defaultModel });
     if (!testModel.trim() || !models.includes(testModel)) setTestModel(defaultModel);
     setFetchedModels(null);
-    setFetchStatus({ kind: 'ok', text: `${models.length} model${models.length === 1 ? '' : 's'} configured.` });
-  }
-
-  function showImportPanel(models: string[]) {
-    setFetchedModels(models);
-    setFetchStatus({
-      kind: 'ok',
-      text: `${models.length} model${models.length === 1 ? '' : 's'} found — choose which to add below.`,
-    });
+    setBanner({ kind: 'ok', text: `${models.length} model${models.length === 1 ? '' : 's'} configured.` });
   }
 
   async function handleFetchModels() {
-    if (!canQueryProvider) return;
-    setFetchingModels(true);
-    setFetchStatus(null);
+    if (!canQuery) return;
+    setBusy('fetch');
+    setBanner(null);
     setFetchedModels(null);
     try {
       const result = await listModels(provider);
-      if (result.ok) {
-        if (result.models.length > 0) {
-          showImportPanel(result.models);
-        } else {
-          setFetchStatus({
-            kind: 'err',
-            text: `Connected in ${result.durationMs}ms, but /v1/models returned no models.`,
-          });
-        }
+      if (result.ok && result.models.length > 0) {
+        setFetchedModels(result.models);
+        setBanner({
+          kind: 'info',
+          text: `${result.models.length} model${result.models.length === 1 ? '' : 's'} found — choose which to add.`,
+        });
+      } else if (result.ok) {
+        setBanner({ kind: 'err', text: `Connected in ${result.durationMs}ms, but the server listed no models.` });
       } else {
-        setFetchStatus({
+        setBanner({
           kind: 'err',
           text: `Failed (${result.errorKind ?? 'error'}): ${result.errorSummary ?? 'Could not list models.'}`,
         });
       }
     } finally {
-      setFetchingModels(false);
+      setBusy(null);
     }
   }
 
   async function handleTest() {
-    if (!canQueryProvider) return;
-    setTesting(true);
+    if (!canQuery) return;
+    setBusy('test');
     setTestResult(null);
     try {
       const result = await testConnection(provider, testModel.trim() || undefined);
       setTestResult(result);
-      if (result.models && result.models.length > 0) showImportPanel(result.models);
+      if (result.models && result.models.length > 0 && provider.models.length === 0) {
+        setFetchedModels(result.models);
+      }
     } finally {
-      setTesting(false);
+      setBusy(null);
     }
   }
+
+  const showPresets = !hasUrl;
 
   return (
     <div className={styles.editorInner}>
@@ -250,6 +279,7 @@ function ProviderEditor({
             value={provider.displayName}
             onChange={(e) => onChange({ displayName: e.target.value })}
             aria-label="Display name"
+            placeholder="Provider name"
           />
           <label className={styles.enableToggle}>
             <input
@@ -266,50 +296,39 @@ function ProviderEditor({
         </div>
       </header>
 
-      <EditorSection title="Connection" defaultOpen>
-        <div className={styles.fieldGrid}>
-          <div className="field">
-            <label htmlFor="pv-url">Base URL</label>
-            <input
-              id="pv-url"
-              value={provider.baseUrl}
-              onChange={(e) => onChange({ baseUrl: e.target.value })}
-              placeholder="https://api.example.com/v1"
-            />
-            {!urlValidation.ok && provider.baseUrl && (
-              <p className={styles.err}>{urlValidation.reason}</p>
-            )}
-          </div>
-          <div className="field">
-            <label htmlFor="pv-path">Chat path</label>
-            <input
-              id="pv-path"
-              value={provider.path}
-              onChange={(e) => onChange({ path: e.target.value })}
-              placeholder="/v1/chat/completions"
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="pv-timeout">Timeout (ms)</label>
-            <input
-              id="pv-timeout"
-              type="number"
-              min={1000}
-              step={1000}
-              value={provider.timeoutMs}
-              onChange={(e) => {
-                const next = Number(e.target.value);
-                if (Number.isFinite(next) && next >= 1000) onChange({ timeoutMs: next });
-              }}
-            />
+      {showPresets && (
+        <div className={styles.presets} role="group" aria-label="Quick start">
+          <span className={styles.presetsLabel}>Quick start</span>
+          <div className={styles.presetChips}>
+            {PRESETS.map((preset) => (
+              <button
+                key={preset.label}
+                type="button"
+                className={styles.presetChip}
+                onClick={() => applyPreset(preset)}
+              >
+                {preset.label}
+              </button>
+            ))}
           </div>
         </div>
-        <p className={styles.hint}>
-          OpenAI-compatible servers only. Leave the path at the default unless your host uses a custom route.
-        </p>
-      </EditorSection>
+      )}
 
-      <EditorSection title="Authentication">
+      {/* ── Connection ── */}
+      <section className={styles.group}>
+        <h3 className={styles.groupTitle}>Connection</h3>
+        <div className="field">
+          <label htmlFor="pv-url">Base URL</label>
+          <input
+            id="pv-url"
+            value={provider.baseUrl}
+            onChange={(e) => onChange({ baseUrl: e.target.value })}
+            placeholder="https://api.example.com"
+            spellCheck={false}
+          />
+          {!urlValidation.ok && hasUrl && <p className={styles.err}>{urlValidation.reason}</p>}
+        </div>
+
         <div className="field">
           <label htmlFor="pv-key">API key</label>
           <div className={styles.keyRow}>
@@ -318,238 +337,227 @@ function ProviderEditor({
               type={showKey ? 'text' : 'password'}
               value={provider.apiKey ?? ''}
               onChange={(e) => setKey(e.target.value)}
-              placeholder="Leave empty for local servers (Ollama, LM Studio)"
+              placeholder="sk-…  (leave empty for local servers)"
               autoComplete="off"
+              spellCheck={false}
             />
             <button type="button" onClick={() => setShowKey((v) => !v)}>
               {showKey ? 'Hide' : 'Show'}
             </button>
-            <button type="button" onClick={clearKey}>Clear</button>
+            {provider.apiKey ? <button type="button" onClick={clearKey}>Clear</button> : null}
           </div>
-        </div>
-
-        <div className="field">
-          <span className={styles.fieldLabel}>Credential storage</span>
-          <div className={styles.segmented} role="radiogroup" aria-label="Credential storage">
-            <button
-              type="button"
-              role="radio"
-              aria-checked={provider.credentialStorage === 'session'}
-              className={provider.credentialStorage === 'session' ? styles.segmentActive : ''}
-              onClick={() => setStorage('session')}
-            >
-              Session only
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={provider.credentialStorage === 'local'}
-              className={provider.credentialStorage === 'local' ? styles.segmentActive : ''}
-              onClick={() => setStorage('local')}
-            >
-              Remember in browser
-            </button>
-          </div>
-          <p className={styles.hint}>
-            {provider.credentialStorage === 'session'
-              ? 'Cleared when this tab closes.'
-              : 'Persists in local storage until you clear it. Not a secure vault.'}
-          </p>
-        </div>
-      </EditorSection>
-
-      <EditorSection title="Models" defaultOpen badge={provider.models.length || undefined}>
-        <ModelsSection
-          provider={provider}
-          manualModel={manualModel}
-          onManualModelChange={setManualModel}
-          onAddModel={addModel}
-          onRemoveModel={removeModel}
-          onDefaultChange={(defaultModel) => onChange({ defaultModel })}
-          fetchingModels={fetchingModels}
-          canQueryProvider={canQueryProvider}
-          onFetch={handleFetchModels}
-          fetchStatus={fetchStatus}
-          fetchedModels={fetchedModels}
-          onApplyImport={applyModels}
-          onCancelImport={() => setFetchedModels(null)}
-        />
-      </EditorSection>
-
-      {import.meta.env.DEV && (
-        <EditorSection title="Developer">
-          <label className={styles.checkRow}>
+          <label className={styles.rememberRow}>
             <input
               type="checkbox"
-              checked={provider.bypassDevProxy}
-              onChange={(e) => onChange({ bypassDevProxy: e.target.checked })}
+              checked={provider.credentialStorage === 'local'}
+              onChange={(e) => setRemember(e.target.checked)}
             />
             <span>
-              <strong>Bypass dev proxy</strong>
-              <span className={styles.checkHint}>
-                Send requests directly from the browser instead of through the Vite dev-server proxy.
-                Use when the endpoint is only reachable from your browser (VPN, etc.) and supports CORS.
+              Remember key in this browser
+              <span className={styles.rememberHint}>
+                {provider.credentialStorage === 'local'
+                  ? 'Persists in local storage until cleared. Not a secure vault.'
+                  : 'Off: the key is cleared when this tab closes.'}
               </span>
             </span>
           </label>
-        </EditorSection>
-      )}
+        </div>
 
-      <EditorSection title="Test connection" defaultOpen>
-        <TestSection
-          provider={provider}
-          testModel={testModel}
-          onTestModelChange={setTestModel}
-          testing={testing}
-          canQueryProvider={canQueryProvider}
-          onTest={handleTest}
-          testResult={testResult}
-        />
-      </EditorSection>
-    </div>
-  );
-}
+        <details className={styles.advanced}>
+          <summary className={styles.advancedSummary}>Advanced</summary>
+          <div className={styles.advancedBody}>
+            <div className="field">
+              <label htmlFor="pv-path">Chat completions path</label>
+              <input
+                id="pv-path"
+                value={provider.path}
+                onChange={(e) => onChange({ path: e.target.value })}
+                placeholder="/v1/chat/completions"
+                spellCheck={false}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="pv-timeout">Request timeout (ms)</label>
+              <input
+                id="pv-timeout"
+                type="number"
+                min={1000}
+                step={1000}
+                value={provider.timeoutMs}
+                onChange={(e) => {
+                  const next = Number(e.target.value);
+                  if (Number.isFinite(next) && next >= 1000) onChange({ timeoutMs: next });
+                }}
+              />
+            </div>
+            <p className={styles.hint}>
+              Leave the path at the default unless your host uses a custom route.
+            </p>
+          </div>
+        </details>
+      </section>
 
-function EditorSection({
-  title,
-  children,
-  defaultOpen = false,
-  badge,
-}: {
-  title: string;
-  children: ReactNode;
-  defaultOpen?: boolean;
-  badge?: number;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <section className={styles.section}>
-      <button
-        type="button"
-        className={styles.sectionHead}
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <span className={styles.sectionCaret}>{open ? '▾' : '▸'}</span>
-        <span className={styles.sectionTitle}>{title}</span>
-        {badge !== undefined && badge > 0 && (
-          <span className={styles.sectionBadge}>{badge}</span>
+      {/* ── Models ── */}
+      <section className={styles.group}>
+        <div className={styles.groupHeadRow}>
+          <h3 className={styles.groupTitle}>
+            Models
+            {provider.models.length > 0 && <span className={styles.countBadge}>{provider.models.length}</span>}
+          </h3>
+          <button
+            type="button"
+            onClick={handleFetchModels}
+            disabled={busy !== null || !canQuery}
+            title={canQuery ? undefined : 'Enter a valid base URL first'}
+          >
+            {busy === 'fetch' ? 'Fetching…' : 'Fetch from provider'}
+          </button>
+        </div>
+
+        {banner && (
+          <p
+            className={banner.kind === 'err' ? styles.err : styles.hint}
+            role="status"
+            aria-live="polite"
+          >
+            {banner.text}
+          </p>
         )}
-      </button>
-      {open && <div className={styles.sectionBody}>{children}</div>}
-    </section>
-  );
-}
 
-function ModelsSection({
-  provider,
-  manualModel,
-  onManualModelChange,
-  onAddModel,
-  onRemoveModel,
-  onDefaultChange,
-  fetchingModels,
-  canQueryProvider,
-  onFetch,
-  fetchStatus,
-  fetchedModels,
-  onApplyImport,
-  onCancelImport,
-}: {
-  provider: Provider;
-  manualModel: string;
-  onManualModelChange: (v: string) => void;
-  onAddModel: (model: string) => void;
-  onRemoveModel: (model: string) => void;
-  onDefaultChange: (model: string) => void;
-  fetchingModels: boolean;
-  canQueryProvider: boolean;
-  onFetch: () => void;
-  fetchStatus: { kind: 'ok' | 'err'; text: string } | null;
-  fetchedModels: string[] | null;
-  onApplyImport: (models: string[], defaultModel: string) => void;
-  onCancelImport: () => void;
-}) {
-  return (
-    <div className={styles.modelsSection}>
-      <div className={styles.modelsToolbar}>
-        <button
-          type="button"
-          className="primary"
-          onClick={onFetch}
-          disabled={fetchingModels || !canQueryProvider}
-        >
-          {fetchingModels ? 'Fetching…' : 'Fetch from provider'}
-        </button>
+        {fetchedModels && fetchedModels.length > 0 && (
+          <ModelImportPanel
+            models={fetchedModels}
+            existingModels={provider.models}
+            currentDefault={provider.defaultModel}
+            onApply={applyImport}
+            onCancel={() => setFetchedModels(null)}
+          />
+        )}
+
+        {provider.models.length > 0 ? (
+          <ul className={styles.modelCatalog} aria-label="Configured models">
+            {provider.models.map((model) => (
+              <li key={model} className={styles.modelRow}>
+                <label className={styles.modelDefault}>
+                  <input
+                    type="radio"
+                    name={`default-${provider.id}`}
+                    checked={provider.defaultModel === model}
+                    onChange={() => onChange({ defaultModel: model })}
+                    aria-label={`Set ${model} as default`}
+                  />
+                  <span className={styles.modelDefaultLabel}>
+                    {provider.defaultModel === model ? 'Default' : 'Set default'}
+                  </span>
+                </label>
+                <code className={styles.modelId}>{model}</code>
+                <button
+                  type="button"
+                  className={styles.modelRemove}
+                  onClick={() => removeModel(model)}
+                  aria-label={`Remove ${model}`}
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          !fetchedModels && (
+            <p className={styles.modelsEmpty}>
+              No models yet. Fetch them from your provider or add a model ID below.
+            </p>
+          )
+        )}
+
         <form
           className={styles.manualAdd}
           onSubmit={(e) => {
             e.preventDefault();
-            onAddModel(manualModel);
+            addModel(manualModel);
           }}
         >
           <input
             value={manualModel}
-            onChange={(e) => onManualModelChange(e.target.value)}
+            onChange={(e) => setManualModel(e.target.value)}
             placeholder="Add model ID manually"
             aria-label="Model ID to add"
+            spellCheck={false}
           />
           <button type="submit" disabled={!manualModel.trim()}>Add</button>
         </form>
-      </div>
+      </section>
 
-      {fetchStatus && (
-        <p
-          className={fetchStatus.kind === 'err' ? styles.err : styles.hint}
-          role="status"
-          aria-live="polite"
-        >
-          {fetchStatus.text}
+      {/* ── Test ── */}
+      <section className={styles.group}>
+        <h3 className={styles.groupTitle}>Test connection</h3>
+        <div className={styles.testRow}>
+          {provider.models.length > 0 ? (
+            <select
+              value={testModel}
+              onChange={(e) => setTestModel(e.target.value)}
+              aria-label="Model to test"
+            >
+              <option value="">Default / auto-detect</option>
+              {provider.models.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          ) : (
+            <input
+              value={testModel}
+              onChange={(e) => setTestModel(e.target.value)}
+              placeholder="Model to test (optional)"
+              aria-label="Model to test"
+              spellCheck={false}
+            />
+          )}
+          <button
+            type="button"
+            className="primary"
+            onClick={handleTest}
+            disabled={busy !== null || !canQuery}
+          >
+            {busy === 'test' ? 'Testing…' : 'Run test'}
+          </button>
+        </div>
+        <p className={styles.hint}>
+          Sends a minimal chat completion to verify the endpoint, key, and response format.
         </p>
-      )}
 
-      {fetchedModels && fetchedModels.length > 0 && (
-        <ModelImportPanel
-          models={fetchedModels}
-          existingModels={provider.models}
-          currentDefault={provider.defaultModel}
-          onApply={onApplyImport}
-          onCancel={onCancelImport}
-        />
-      )}
+        {testResult && <TestResultView result={testResult} />}
+      </section>
+    </div>
+  );
+}
 
-      {provider.models.length > 0 ? (
-        <ul className={styles.modelCatalog} aria-label="Configured models">
-          {provider.models.map((model) => (
-            <li key={model} className={styles.modelRow}>
-              <label className={styles.modelDefault}>
-                <input
-                  type="radio"
-                  name={`default-${provider.id}`}
-                  checked={provider.defaultModel === model}
-                  onChange={() => onDefaultChange(model)}
-                  aria-label={`Set ${model} as default`}
-                />
-                <span className={styles.modelDefaultLabel}>
-                  {provider.defaultModel === model ? 'Default' : 'Set default'}
-                </span>
-              </label>
-              <code className={styles.modelId}>{model}</code>
-              <button
-                type="button"
-                className={styles.modelRemove}
-                onClick={() => onRemoveModel(model)}
-                aria-label={`Remove ${model}`}
-              >
-                Remove
-              </button>
-            </li>
-          ))}
-        </ul>
+function TestResultView({ result }: { result: TestConnectionResult }) {
+  return (
+    <div
+      className={result.ok ? styles.testOk : styles.testFail}
+      role={result.ok ? 'status' : 'alert'}
+      aria-live="polite"
+    >
+      {result.ok ? (
+        <>
+          <strong>Connection successful</strong>
+          <span className={styles.testMeta}>
+            HTTP {result.status} · {result.durationMs}ms
+          </span>
+          {result.models && result.models.length > 0 && (
+            <div className={styles.testDetail}>{result.models.length} model(s) available</div>
+          )}
+          {result.responseText && <pre className={styles.testResp}>{result.responseText}</pre>}
+        </>
       ) : (
-        <p className={styles.modelsEmpty}>
-          No models configured. Fetch from your provider or add a model ID manually.
-        </p>
+        <>
+          <strong>Connection failed — {result.errorKind}</strong>
+          <span className={styles.testMeta}>
+            {result.status ? `HTTP ${result.status} · ` : ''}{result.durationMs}ms
+          </span>
+          <div>{result.errorSummary}</div>
+          {result.errorDetail && <div className={styles.testDetail}>{result.errorDetail}</div>}
+        </>
       )}
     </div>
   );
@@ -670,97 +678,6 @@ function ModelImportPanel({
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function TestSection({
-  provider,
-  testModel,
-  onTestModelChange,
-  testing,
-  canQueryProvider,
-  onTest,
-  testResult,
-}: {
-  provider: Provider;
-  testModel: string;
-  onTestModelChange: (v: string) => void;
-  testing: boolean;
-  canQueryProvider: boolean;
-  onTest: () => void;
-  testResult: TestConnectionResult | null;
-}) {
-  return (
-    <div className={styles.testSection}>
-      <div className={styles.testRow}>
-        {provider.models.length > 0 ? (
-          <select
-            value={testModel}
-            onChange={(e) => onTestModelChange(e.target.value)}
-            aria-label="Model to test"
-          >
-            <option value="">Default / auto-detect</option>
-            {provider.models.map((m) => (
-              <option key={m} value={m}>{m}</option>
-            ))}
-          </select>
-        ) : (
-          <input
-            value={testModel}
-            onChange={(e) => onTestModelChange(e.target.value)}
-            placeholder="Model to test (optional)"
-            aria-label="Model to test"
-          />
-        )}
-        <button
-          type="button"
-          className="primary"
-          onClick={onTest}
-          disabled={testing || !canQueryProvider}
-        >
-          {testing ? 'Testing…' : 'Run test'}
-        </button>
-      </div>
-      <p className={styles.hint}>
-        Sends a minimal chat completion to verify the endpoint and response format.
-      </p>
-
-      {testResult && (
-        <div
-          className={testResult.ok ? styles.testOk : styles.testFail}
-          role={testResult.ok ? 'status' : 'alert'}
-          aria-live="polite"
-        >
-          {testResult.ok ? (
-            <>
-              <strong>Connection successful</strong>
-              <span className={styles.testMeta}>
-                HTTP {testResult.status} · {testResult.durationMs}ms
-              </span>
-              {testResult.models && testResult.models.length > 0 && (
-                <div className={styles.testDetail}>
-                  {testResult.models.length} model(s) available from /v1/models
-                </div>
-              )}
-              {testResult.responseText && (
-                <pre className={styles.testResp}>{testResult.responseText}</pre>
-              )}
-            </>
-          ) : (
-            <>
-              <strong>Connection failed — {testResult.errorKind}</strong>
-              <span className={styles.testMeta}>
-                {testResult.status ? `HTTP ${testResult.status} · ` : ''}{testResult.durationMs}ms
-              </span>
-              <div>{testResult.errorSummary}</div>
-              {testResult.errorDetail && (
-                <div className={styles.testDetail}>{testResult.errorDetail}</div>
-              )}
-            </>
-          )}
-        </div>
-      )}
     </div>
   );
 }

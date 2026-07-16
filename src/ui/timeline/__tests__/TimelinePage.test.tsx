@@ -3,10 +3,36 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 // jsdom has no IndexedDB; stub persistence so the domain store imports cleanly.
 vi.mock('../../../persistence/db', () => import('../../../test/persistenceDbMock'));
+// The footer drives runs through the orchestrator; stub it so no real run starts.
+vi.mock('../../../orchestrator/orchestrator', () => ({
+  continueRun: vi.fn(),
+  startRun: vi.fn(),
+}));
+// Footer gating consults run validation; make the test playgrounds "valid".
+vi.mock('../../../orchestrator/validate', () => ({
+  validateForRun: vi.fn(() => []),
+  hasBlockingErrors: vi.fn((issues: unknown[]) => issues.length > 0),
+}));
+// Insight generation calls the provider; stub the call, keep the picker real.
+vi.mock('../../../agents/conversationInsights', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../../../agents/conversationInsights')>();
+  return {
+    ...mod,
+    generateConversationInsight: vi.fn(async () => ({
+      ok: true,
+      text: 'The gist of it.',
+      model: 'test-model',
+      durationMs: 5,
+    })),
+  };
+});
 
-import { createAgent, createPlayground } from '../../../domain/factories';
+import { generateConversationInsight } from '../../../agents/conversationInsights';
+import { createAgent, createPlayground, createProvider } from '../../../domain/factories';
 import type { TranscriptMessage } from '../../../domain/schema';
+import { continueRun, startRun } from '../../../orchestrator/orchestrator';
 import { useDomainStore } from '../../../store/domainStore';
+import { useProviderStore } from '../../../store/providerStore';
 import { useRuntimeStore } from '../../../store/runtimeStore';
 import { useUiStore } from '../../../store/uiStore';
 import { TimelinePage } from '../TimelinePage';
@@ -23,8 +49,10 @@ function msg(over: Partial<TranscriptMessage>): TranscriptMessage {
 
 afterEach(() => cleanup());
 beforeEach(() => {
+  vi.clearAllMocks();
   useDomainStore.setState({ playground: null, index: [], saveStatus: 'saved' });
   useUiStore.setState({ openPanel: 'timeline' });
+  useProviderStore.setState({ providers: [] });
   useRuntimeStore.getState().reset();
 });
 
@@ -171,5 +199,98 @@ describe('TimelinePage', () => {
     expect(screen.queryByText('streaming…')).not.toBeInTheDocument();
     expect(screen.queryByText('thinking…')).not.toBeInTheDocument();
     expect(screen.getByText('Final.')).toBeInTheDocument();
+  });
+});
+
+describe('TimelinePage footer tools', () => {
+  function seedConversation() {
+    const agent = createAgent({ name: 'Researcher' });
+    const playground = {
+      ...createPlayground('Demo'),
+      agents: [agent],
+      transcript: [
+        msg({ id: 'a', turn: 1, agentId: agent.id, agentName: 'Researcher', content: 'Opening idea.' }),
+      ],
+    };
+    useDomainStore.setState({ playground });
+    return { agent, playground };
+  }
+
+  it('hides the footer and disables Export while there is no conversation', () => {
+    useDomainStore.setState({ playground: createPlayground('Empty') });
+    render(<TimelinePage />);
+    expect(screen.queryByRole('button', { name: /Continue/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Export ▾' })).toBeDisabled();
+  });
+
+  it('opens the export menu with all formats and a copy action', () => {
+    seedConversation();
+    render(<TimelinePage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export ▾' }));
+    expect(screen.getByRole('menuitem', { name: 'Markdown (.md)' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Plain text (.txt)' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'JSON (.json)' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Copy as Markdown' })).toBeInTheDocument();
+  });
+
+  it('continues the run with the selected number of extra turns', () => {
+    seedConversation();
+    render(<TimelinePage />);
+
+    fireEvent.change(screen.getByLabelText('How many more turns to run'), { target: { value: '4' } });
+    fireEvent.click(screen.getByRole('button', { name: '▶ Continue' }));
+    expect(startRun).toHaveBeenCalledWith({ maxTurns: 4 });
+  });
+
+  it('disables Continue while a run is active', () => {
+    seedConversation();
+    useRuntimeStore.setState({ status: 'running' });
+    render(<TimelinePage />);
+    expect(screen.getByRole('button', { name: '▶ Continue' })).toBeDisabled();
+  });
+
+  it('keeps the interject composer collapsed until toggled, then sends via continueRun', () => {
+    seedConversation();
+    render(<TimelinePage />);
+
+    expect(screen.queryByLabelText('Message to the agents')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Interject/ }));
+
+    const box = screen.getByLabelText('Message to the agents');
+    fireEvent.change(box, { target: { value: 'Please argue the other side.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(continueRun).toHaveBeenCalledWith('Please argue the other side.');
+    expect((box as HTMLTextAreaElement).value).toBe('');
+  });
+
+  it('generates and shows a summary via the borrowed agent provider', async () => {
+    const provider = createProvider({ displayName: 'Local' });
+    useProviderStore.setState({ providers: [provider] });
+    const agent = createAgent({ name: 'Researcher' });
+    agent.llm.providerId = provider.id;
+    agent.llm.model = 'test-model';
+    const playground = {
+      ...createPlayground('Demo'),
+      agents: [agent],
+      transcript: [
+        msg({ id: 'a', turn: 1, agentId: agent.id, agentName: 'Researcher', content: 'Opening idea.' }),
+      ],
+    };
+    useDomainStore.setState({ playground });
+
+    render(<TimelinePage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Summarize' }));
+
+    expect(await screen.findByText('The gist of it.')).toBeInTheDocument();
+    expect(vi.mocked(generateConversationInsight).mock.calls[0][0]).toBe('summary');
+  });
+
+  it('disables Summarize/Review when no agent has a usable provider', () => {
+    seedConversation(); // agent has no providerId/model
+    render(<TimelinePage />);
+    expect(screen.getByRole('button', { name: 'Summarize' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Review' })).toBeDisabled();
   });
 });

@@ -151,6 +151,21 @@
   margin: 0 auto;
   padding: 0;
   max-width: 760px;
+  position: relative;
+}
+/* The spine itself: ONE unbroken line from the top of the timeline to the last
+   message (the 14px inset matches the last item's bottom padding, so the line
+   ends at the final card instead of trailing past it). Per-item agent-colored
+   segments overlay it; turn dividers carry it with .turnSpine. */
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 16px;
+  top: 0;
+  bottom: 14px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--border);
 }
 
 .turnGroup { margin: 0; }
@@ -172,6 +187,18 @@
   content: '';
   flex: 1;
   height: 1px;
+  background: var(--border);
+}
+/* Carries the spine through the divider: the divider's scroll-masking gradient
+   paints over the .timeline::before base line, so redraw that stretch on top —
+   the spine stays one visually unbroken line across turn boundaries. */
+.turnSpine {
+  position: absolute;
+  left: 16px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  border-radius: 1px;
   background: var(--border);
 }
 .turnLabel {
@@ -208,8 +235,10 @@
   border-radius: 1px;
   background: color-mix(in srgb, var(--agent-color, var(--border)) 30%, var(--border));
 }
-/* Last row in a group shouldn't trail the spine past its card. */
-.item:last-child::before { bottom: 14px; }
+/* Only the very last row of the WHOLE timeline ends its segment at the card —
+   everywhere else the colored segment runs edge-to-edge so the spine never
+   shows a gap between rows or into the next turn divider. */
+.turnGroup:last-child .item:last-child::before { bottom: 14px; }
 
 /* Agent disc: initial letter on a tinted circle; halo lets the spine pass behind. */
 .node {
@@ -312,6 +341,99 @@
   animation: liveBlink 1s steps(2) infinite;
 }
 @keyframes liveBlink { 50% { opacity: 0; } }
+
+/* --- Header export menu ------------------------------------------------- */
+
+.exportWrap { position: relative; }
+.exportMenu {
+  position: absolute;
+  top: calc(100% + 6px);
+  inset-inline-end: 0;
+  z-index: 10;
+  min-width: 190px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+.exportMenu button {
+  border: none;
+  background: none;
+  text-align: start;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+.exportMenu button:hover { background: var(--surface-2); }
+.exportSep { height: 1px; margin: 4px 6px; background: var(--border); }
+
+/* --- Footer tools: continue / summarize / review / interject ------------- */
+
+.footer {
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  padding: 10px 20px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.footerBar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.footerGroup { display: flex; align-items: center; gap: 8px; }
+.footerGroup select { font-size: var(--fs-sm); padding: 5px 8px; }
+.interjectToggle { margin-inline-start: auto; }
+
+.interject { display: flex; align-items: flex-end; gap: 8px; }
+.interject textarea { flex: 1; min-height: 44px; font-size: 13px; }
+
+/* Insight (summary/review) result panel, pinned above the footer bar. */
+.insight {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  overflow: hidden;
+}
+.insightHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.insightMeta { font-size: var(--fs-xs); color: var(--text-subtle); }
+.insightSpacer { flex: 1; }
+.insightBody {
+  padding: 10px 12px;
+  font-size: 13px;
+  max-height: 32vh;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+.insightLoading { color: var(--text-muted); font-size: var(--fs-sm); }
+.insightLoading::after {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-inline-start: 8px;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  animation: insightSpin 0.8s linear infinite;
+  vertical-align: -1px;
+}
+@keyframes insightSpin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .insightLoading::after { animation: none; }
+}
 @media (prefers-reduced-motion: reduce) {
   .liveBadge::before, .caret, .itemLive .node { animation: none; }
   .overlay, .panel { animation: none; }

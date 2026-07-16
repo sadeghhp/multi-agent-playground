@@ -333,7 +333,16 @@ export function continueRun(userMessage: string): void {
 }
 
 export async function startRun(
-  opts: { seed?: QueueItem[]; skipWrapUp?: boolean } = {},
+  opts: {
+    seed?: QueueItem[];
+    skipWrapUp?: boolean;
+    /**
+     * Turn budget for THIS run only, overriding conversation.maxTotalTurns.
+     * Used by "continue for N more turns" (timeline footer): each run counts
+     * turns from zero, so the override is exactly the number of extra turns.
+     */
+    maxTurns?: number;
+  } = {},
 ): Promise<void> {
   const domain = useDomainStore.getState();
   const runtime = useRuntimeStore.getState();
@@ -375,7 +384,7 @@ export async function startRun(
   const queued = new Set<string>(seed.map((s) => s.agentId));
   for (const s of seed) runtime.setAgentState(s.agentId, 'queued');
 
-  const maxTurns = pg.conversation.maxTotalTurns;
+  const maxTurns = opts.maxTurns ?? pg.conversation.maxTotalTurns;
   const policy = resolveFailurePolicy(pg.conversation);
 
   // Turn a recorded failure into a control-flow outcome for the loop: 'abort'

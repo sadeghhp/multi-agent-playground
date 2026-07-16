@@ -1,13 +1,35 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import {
+  type CSSProperties,
+  type FormEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import type { Agent, TranscriptMessage } from '../../domain/schema';
 import { dirForLanguage } from '../../domain/language';
 import { extractInlineThinking } from '../../providers/openaiAdapter';
+import {
+  generateConversationInsight,
+  pickInsightAgent,
+  type InsightKind,
+} from '../../agents/conversationInsights';
+import { continueRun, startRun } from '../../orchestrator/orchestrator';
+import { hasBlockingErrors, validateForRun } from '../../orchestrator/validate';
 import { useDomainStore } from '../../store/domainStore';
+import { useProviderStore } from '../../store/providerStore';
 import { useRuntimeStore } from '../../store/runtimeStore';
 import { useUiStore } from '../../store/uiStore';
 import { agentColor } from '../../graph/colors';
 import { MessageMarkdown } from '../transcript/MessageMarkdown';
 import { formatDuration } from '../formatDuration';
+import { downloadText } from '../fileDownload';
+import {
+  conversationToJson,
+  conversationToMarkdown,
+  conversationToPlainText,
+  exportBaseName,
+} from './exportConversation';
 import styles from './Timeline.module.css';
 
 /** Consecutive messages sharing a turn number, in chronological order. */
@@ -44,9 +66,28 @@ function groupByTurn(transcript: TranscriptMessage[]): TurnGroup[] {
   return groups;
 }
 
+const EXPORT_FORMATS = [
+  { key: 'md', label: 'Markdown (.md)', mime: 'text/markdown' },
+  { key: 'txt', label: 'Plain text (.txt)', mime: 'text/plain' },
+  { key: 'json', label: 'JSON (.json)', mime: 'application/json' },
+] as const;
+type ExportFormat = (typeof EXPORT_FORMATS)[number]['key'];
+
+/** Extra-turn choices for "Continue"; the playground's own limit is merged in. */
+const BASE_TURN_OPTIONS = [1, 2, 3, 4, 6, 8, 12];
+
+interface InsightState {
+  kind: InsightKind;
+  status: 'loading' | 'done' | 'error';
+  text?: string;
+  model?: string;
+  error?: string;
+}
+
 /**
- * Full-screen, read-only conversation timeline (spec §13). Renders the entire
- * transcript as a vertical spine grouped by turn. Opened from the toolbar via
+ * Full-screen conversation timeline (spec §13). Renders the entire transcript
+ * as a vertical spine grouped by turn, with header export tools and a footer
+ * for continuing/steering the conversation. Opened from the toolbar via
  * `openPanel === 'timeline'`; the live BottomPanel transcript is untouched.
  */
 export function TimelinePage() {
@@ -61,6 +102,7 @@ export function TimelinePage() {
   const liveReasoning = useRuntimeStore((s) =>
     s.activeAgentId ? s.streamingReasoning[s.activeAgentId] : undefined,
   );
+  const providers = useProviderStore((s) => s.providers);
 
   const transcript = playground?.transcript ?? [];
   const groups = useMemo(() => groupByTurn(transcript), [transcript]);
@@ -94,6 +136,123 @@ export function TimelinePage() {
     return { tokens, duration, hasTokens, turns: groups.length, messages: transcript.length };
   }, [transcript, groups.length]);
 
+  // ---------------------------------------------------------------------------
+  // Footer tools: continue N more turns / summarize / review / interject.
+  // ---------------------------------------------------------------------------
+
+  // Same gate the Run paths use: a playground whose graph validates clean.
+  const graphOk = useMemo(
+    () => !!playground && !hasBlockingErrors(validateForRun(playground, providers)),
+    [playground, providers],
+  );
+  const idle = status !== 'running' && status !== 'paused';
+  // Continue re-enters via startRun, which no-ops while running OR paused.
+  const canRunMore = idle && transcript.length > 0 && graphOk;
+  // Interjection mirrors BottomPanel's follow-up gate (paused runs pick the
+  // message up as a pending user directive when they resume).
+  const canInterject = status !== 'running' && transcript.length > 0 && graphOk;
+
+  const turnOptions = useMemo(() => {
+    const opts = new Set(BASE_TURN_OPTIONS);
+    if (playground) opts.add(playground.conversation.maxTotalTurns);
+    return [...opts].sort((a, b) => a - b);
+  }, [playground]);
+  const [moreTurns, setMoreTurns] = useState(2);
+
+  const [interjectOpen, setInterjectOpen] = useState(false);
+  const [interjectText, setInterjectText] = useState('');
+
+  function handleInterject(e: FormEvent) {
+    e.preventDefault();
+    const text = interjectText.trim();
+    if (!text || !canInterject) return;
+    continueRun(text);
+    setInterjectText('');
+    setAtBottom(true);
+  }
+
+  // On-demand summary/review: borrows an existing agent's provider+model (a
+  // summarizer if the playground has one) and never touches the transcript.
+  const insightAgent = useMemo(() => (playground ? pickInsightAgent(playground) : null), [playground]);
+  const insightProvider = insightAgent
+    ? providers.find((p) => p.id === insightAgent.llm.providerId) ?? null
+    : null;
+  const canInsight = transcript.length > 0 && !!insightProvider;
+
+  const [insight, setInsight] = useState<InsightState | null>(null);
+  const insightAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => insightAbort.current?.abort(), []);
+
+  async function runInsight(kind: InsightKind) {
+    if (!playground || !insightAgent || !insightProvider) return;
+    insightAbort.current?.abort();
+    const controller = new AbortController();
+    insightAbort.current = controller;
+    setInsight({ kind, status: 'loading' });
+    const res = await generateConversationInsight(kind, playground, insightAgent, insightProvider, {
+      signal: controller.signal,
+    });
+    if (controller.signal.aborted) return;
+    setInsight(
+      res.ok
+        ? { kind, status: 'done', text: res.text, model: res.model }
+        : { kind, status: 'error', error: res.errorSummary },
+    );
+  }
+
+  function closeInsight() {
+    insightAbort.current?.abort();
+    setInsight(null);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Header export menu.
+  // ---------------------------------------------------------------------------
+
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportOpenRef = useRef(false);
+  exportOpenRef.current = exportOpen;
+  const exportWrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!exportOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!exportWrapRef.current?.contains(e.target as Node)) setExportOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [exportOpen]);
+
+  const [copied, setCopied] = useState(false);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (copiedTimer.current) clearTimeout(copiedTimer.current); }, []);
+
+  function flashCopied() {
+    setCopied(true);
+    if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    copiedTimer.current = setTimeout(() => setCopied(false), 1500);
+  }
+
+  function handleExport(format: ExportFormat) {
+    if (!playground) return;
+    const def = EXPORT_FORMATS.find((f) => f.key === format)!;
+    const content =
+      format === 'md'
+        ? conversationToMarkdown(playground)
+        : format === 'txt'
+          ? conversationToPlainText(playground)
+          : conversationToJson(playground);
+    downloadText(exportBaseName(playground), content, def.key, def.mime);
+    setExportOpen(false);
+  }
+
+  function handleCopyMarkdown() {
+    if (!playground) return;
+    void navigator.clipboard?.writeText(conversationToMarkdown(playground));
+    setExportOpen(false);
+    flashCopied();
+  }
+
   // Auto-scroll to the newest content when the reader is already near the bottom.
   const contentRef = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
@@ -119,13 +278,16 @@ export function TimelinePage() {
     if (atBottom) scrollToBottom();
   }, [transcript.length, liveText, liveReasoning, atBottom]);
 
-  // Escape closes; restore focus to whatever was focused before opening (spec §22).
+  // Escape closes (the export menu first, if open); restore focus to whatever
+  // was focused before opening (spec §22).
   const panelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const previouslyFocused = document.activeElement as HTMLElement | null;
     panelRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') close();
+      if (e.key !== 'Escape') return;
+      if (exportOpenRef.current) setExportOpen(false);
+      else close();
     };
     document.addEventListener('keydown', onKey);
     return () => {
@@ -176,6 +338,32 @@ export function TimelinePage() {
                 )}
               </div>
             )}
+            {copied && <span className="chip">Copied ✓</span>}
+            <div className={styles.exportWrap} ref={exportWrapRef}>
+              <button
+                type="button"
+                className="secondary"
+                aria-haspopup="menu"
+                aria-expanded={exportOpen}
+                disabled={transcript.length === 0}
+                onClick={() => setExportOpen((v) => !v)}
+              >
+                Export ▾
+              </button>
+              {exportOpen && (
+                <div className={styles.exportMenu} role="menu" aria-label="Export conversation">
+                  {EXPORT_FORMATS.map((f) => (
+                    <button key={f.key} type="button" role="menuitem" onClick={() => handleExport(f.key)}>
+                      {f.label}
+                    </button>
+                  ))}
+                  <div className={styles.exportSep} role="separator" />
+                  <button type="button" role="menuitem" onClick={handleCopyMarkdown}>
+                    Copy as Markdown
+                  </button>
+                </div>
+              )}
+            </div>
             <button type="button" className="icon ghost" onClick={close} aria-label="Close timeline">
               ✕
             </button>
@@ -200,6 +388,7 @@ export function TimelinePage() {
               {groups.map((group, gi) => (
                 <li key={gi} className={styles.turnGroup}>
                   <div className={styles.turnDivider} aria-label={`Turn ${group.turn}`}>
+                    <span className={styles.turnSpine} aria-hidden="true" />
                     <span className={styles.turnLabel}>Turn {group.turn}</span>
                   </div>
                   {group.messages.map((msg) => (
@@ -218,6 +407,7 @@ export function TimelinePage() {
               {needsNewLiveGroup && liveAgent && (
                 <li className={styles.turnGroup}>
                   <div className={styles.turnDivider} aria-label={`Turn ${currentTurn}`}>
+                    <span className={styles.turnSpine} aria-hidden="true" />
                     <span className={styles.turnLabel}>Turn {currentTurn}</span>
                   </div>
                   <TimelineLiveItem
@@ -241,6 +431,147 @@ export function TimelinePage() {
             </button>
           )}
         </div>
+
+        {hasContent && (
+          <footer className={styles.footer}>
+            {insight && (
+              <section
+                className={styles.insight}
+                aria-label={insight.kind === 'summary' ? 'Conversation summary' : 'Conversation review'}
+              >
+                <div className={styles.insightHeader}>
+                  <strong>{insight.kind === 'summary' ? 'Summary' : 'Review'}</strong>
+                  {insight.model && <span className={styles.insightMeta}>{insight.model}</span>}
+                  <span className={styles.insightSpacer} />
+                  {insight.status === 'done' && insight.text && (
+                    <>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => {
+                          void navigator.clipboard?.writeText(insight.text!);
+                          flashCopied();
+                        }}
+                      >
+                        Copy
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() =>
+                          playground &&
+                          downloadText(
+                            `${playground.name || 'conversation'}-${insight.kind}`,
+                            insight.text!,
+                            'md',
+                            'text/markdown',
+                          )
+                        }
+                      >
+                        Download
+                      </button>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    className="icon ghost"
+                    onClick={closeInsight}
+                    aria-label={`Close ${insight.kind}`}
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className={styles.insightBody}>
+                  {insight.status === 'loading' && (
+                    <span className={styles.insightLoading}>
+                      Generating {insight.kind === 'summary' ? 'summary' : 'review'}…
+                    </span>
+                  )}
+                  {insight.status === 'error' && (
+                    <span className={styles.errText}>{insight.error ?? 'Generation failed.'}</span>
+                  )}
+                  {insight.status === 'done' && insight.text && <MessageMarkdown content={insight.text} />}
+                </div>
+              </section>
+            )}
+
+            <div className={styles.footerBar}>
+              <div className={styles.footerGroup}>
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={!canRunMore}
+                  title={
+                    canRunMore
+                      ? `Let the agents talk for up to ${moreTurns} more turn${moreTurns === 1 ? '' : 's'}`
+                      : 'Available once a run has finished'
+                  }
+                  onClick={() => void startRun({ maxTurns: moreTurns })}
+                >
+                  ▶ Continue
+                </button>
+                <select
+                  value={moreTurns}
+                  onChange={(e) => setMoreTurns(Number(e.target.value))}
+                  disabled={!canRunMore}
+                  aria-label="How many more turns to run"
+                >
+                  {turnOptions.map((n) => (
+                    <option key={n} value={n}>
+                      +{n} turn{n === 1 ? '' : 's'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className={styles.footerGroup}>
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={!canInsight || insight?.status === 'loading'}
+                  title={canInsight ? 'Generate a concise summary of the conversation' : 'Needs a configured agent provider'}
+                  onClick={() => void runInsight('summary')}
+                >
+                  Summarize
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={!canInsight || insight?.status === 'loading'}
+                  title={canInsight ? 'Assess the discussion and suggest next steps' : 'Needs a configured agent provider'}
+                  onClick={() => void runInsight('review')}
+                >
+                  Review
+                </button>
+              </div>
+              <button
+                type="button"
+                className={`ghost ${styles.interjectToggle}`}
+                aria-expanded={interjectOpen}
+                onClick={() => setInterjectOpen((v) => !v)}
+              >
+                💬 Interject {interjectOpen ? '▾' : '▸'}
+              </button>
+            </div>
+
+            {interjectOpen && (
+              <form className={styles.interject} onSubmit={handleInterject}>
+                <textarea
+                  value={interjectText}
+                  rows={2}
+                  onChange={(e) => setInterjectText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleInterject(e);
+                  }}
+                  placeholder="Step into the conversation — an instruction, opinion, or question for the agents…"
+                  aria-label="Message to the agents"
+                />
+                <button type="submit" className="primary" disabled={!canInterject || !interjectText.trim()}>
+                  Send
+                </button>
+              </form>
+            )}
+          </footer>
+        )}
       </div>
     </div>
   );

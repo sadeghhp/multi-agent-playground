@@ -2,7 +2,7 @@
   width: 200px;
   flex-shrink: 0;
   background: var(--surface);
-  border-right: 1px solid var(--border);
+  border-inline-end: 1px solid var(--border);
   padding: 14px;
   display: flex;
   flex-direction: column;
@@ -20,10 +20,10 @@
   color: var(--text-subtle);
 }
 
-.block { width: 100%; text-align: left; }
+.block { width: 100%; text-align: start; }
 
 .templates { display: flex; flex-direction: column; gap: 6px; }
-.template { width: 100%; text-align: left; font-size: 13px; }
+.template { width: 100%; text-align: start; font-size: 13px; }
 
 .spacer { flex: 1; }
 

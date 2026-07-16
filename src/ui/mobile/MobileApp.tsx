@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useDomainStore } from '../../store/domainStore';
 import { useRuntimeStore } from '../../store/runtimeStore';
 import { MobileTabBar, type MobileTab } from './MobileTabBar';
@@ -7,13 +8,13 @@ import { MobileAgents } from './MobileAgents';
 import { MobileMenu } from './MobileMenu';
 import styles from './MobileApp.module.css';
 
-const RUN_STATUS_LABEL: Record<string, string> = {
-  idle: 'Idle',
-  running: 'Running…',
-  stopped: 'Stopped',
-  completed: 'Completed',
-  error: 'Error',
-  interrupted: 'Interrupted',
+const RUN_STATUS_KEY: Record<string, string> = {
+  idle: 'mobile.statusIdle',
+  running: 'mobile.statusRunning',
+  stopped: 'mobile.statusStopped',
+  completed: 'mobile.statusCompleted',
+  error: 'mobile.statusError',
+  interrupted: 'mobile.statusInterrupted',
 };
 
 /**
@@ -23,6 +24,7 @@ const RUN_STATUS_LABEL: Record<string, string> = {
  * reimplementing them; the desktop three-column editor is never mounted here.
  */
 export function MobileApp() {
+  const { t } = useTranslation();
   const [tab, setTab] = useState<MobileTab>('chat');
   const playgroundName = useDomainStore((s) => s.playground?.name);
   const status = useRuntimeStore((s) => s.status);
@@ -31,10 +33,10 @@ export function MobileApp() {
   return (
     <div className={styles.shell}>
       <header className={styles.appBar}>
-        <span className={styles.title}>{playgroundName ?? 'Playground'}</span>
+        <span className={styles.title} dir="auto">{playgroundName ?? t('mobile.defaultTitle')}</span>
         <span className={`${styles.statusPill} ${styles[`status_${status}`] ?? ''}`}>
-          {RUN_STATUS_LABEL[status]}
-          {status === 'running' ? ` · turn ${currentTurn}` : ''}
+          {RUN_STATUS_KEY[status] ? t(RUN_STATUS_KEY[status]) : ''}
+          {status === 'running' ? t('mobile.statusTurn', { turn: currentTurn }) : ''}
         </span>
       </header>
 

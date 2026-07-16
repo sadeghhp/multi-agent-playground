@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useDomainStore } from '../../store/domainStore';
 import { useProviderStore } from '../../store/providerStore';
 import { useUiStore } from '../../store/uiStore';
@@ -12,6 +13,7 @@ import styles from './MobileApp.module.css';
 
 /** Touch list of the playground's agents; tapping one opens a full-screen editor sheet. */
 export function MobileAgents() {
+  const { t } = useTranslation();
   const playground = useDomainStore((s) => s.playground);
   const addAgent = useDomainStore((s) => s.addAgent);
   const providers = useProviderStore((s) => s.providers);
@@ -33,7 +35,7 @@ export function MobileAgents() {
   function providerLabel(providerId: string | null, model: string | null): string {
     const p = providerId ? providers.find((pr) => pr.id === providerId) : undefined;
     const m = model || '—';
-    return p ? `${p.displayName} · ${m}` : `no provider · ${m}`;
+    return p ? `${p.displayName} · ${m}` : `${t('mobile.noProvider')} · ${m}`;
   }
 
   function handleAdd() {
@@ -47,23 +49,23 @@ export function MobileAgents() {
     <div className={styles.agents}>
       <div className={styles.agentsHeader}>
         <button type="button" className={`${styles.addBtn} primary`} onClick={handleAdd} disabled={isRunning}>
-          <PlusIcon className={styles.btnIcon} /> Add agent
+          <PlusIcon className={styles.btnIcon} /> {t('mobile.addAgent')}
         </button>
         <button
           type="button"
           className="secondary"
           onClick={() => setPanel('createAgentAi')}
           disabled={isRunning || !hasEnabledProvider}
-          title={hasEnabledProvider ? 'Generate an agent with AI' : 'Add a provider first'}
+          title={hasEnabledProvider ? t('mobile.generateWithAi') : t('mobile.addProviderFirst')}
         >
-          ✨ AI
+          {t('mobile.aiButton')}
         </button>
       </div>
 
       {agents.length === 0 ? (
         <div className={styles.chatEmpty}>
-          <p className={styles.chatEmptyTitle}>No agents yet</p>
-          <p className={styles.chatEmptyText}>Add your first agent to start building a conversation.</p>
+          <p className={styles.chatEmptyTitle}>{t('mobile.noAgentsTitle')}</p>
+          <p className={styles.chatEmptyText}>{t('mobile.noAgentsText')}</p>
         </div>
       ) : (
         <ul className={styles.agentList}>
@@ -79,13 +81,13 @@ export function MobileAgents() {
                 >
                   <span className={styles.agentDot} aria-hidden="true" />
                   <span className={styles.agentMain}>
-                    <span className={styles.agentName}>{a.name || 'Unnamed agent'}</span>
-                    <span className={styles.agentSub}>
+                    <span className={styles.agentName} dir="auto">{a.name || t('mobile.unnamedAgent')}</span>
+                    <span className={styles.agentSub} dir="auto">
                       {a.role ? `${a.role} · ` : ''}{providerLabel(a.llm.providerId, a.llm.model)}
                     </span>
                     <span className={styles.agentMeta}>
-                      {outgoing} connection{outgoing === 1 ? '' : 's'}
-                      {!a.runtime.enabled && ' · disabled'}
+                      {t('mobile.connectionCount', { count: outgoing })}
+                      {!a.runtime.enabled && ` · ${t('mobile.disabled')}`}
                     </span>
                   </span>
                   <ChevronRightIcon className={styles.agentChevron} />
@@ -97,16 +99,16 @@ export function MobileAgents() {
       )}
 
       <p className={styles.desktopHint}>
-        Tip: arranging the graph and wiring agents visually is available on a larger screen.
+        {t('mobile.desktopHint')}
       </p>
 
       {selectedAgent && (
-        <Modal title={selectedAgent.name || 'Agent'} onClose={clearSelection}>
+        <Modal title={selectedAgent.name || t('mobile.agent')} onClose={clearSelection}>
           <AgentInspector key={selectedAgent.id} agent={selectedAgent} />
         </Modal>
       )}
       {selectedConnection && (
-        <Modal title="Connection" onClose={clearSelection}>
+        <Modal title={t('mobile.connection')} onClose={clearSelection}>
           <ConnectionInspector key={selectedConnection.id} connection={selectedConnection} />
         </Modal>
       )}

@@ -1,16 +1,20 @@
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useProviderStore } from '../store/providerStore';
 import { useRuntimeStore } from '../store/runtimeStore';
 import { useUiStore } from '../store/uiStore';
 import { useUsageStore } from '../store/usageStore';
 import { formatUsd } from '../usage/pricing';
 import { startOfLocalDay } from '../usage/budget';
+import { formatNumber } from '../i18n/format';
 import { Modal } from './Modal';
 import styles from './UsagePanel.module.css';
 
 type Scope = 'run' | 'today' | 'all';
 
 export function UsagePanel() {
+  const { t } = useTranslation();
+  const language = useUiStore((s) => s.language);
   const setPanel = useUiStore((s) => s.setPanel);
   const requestConfirm = useUiStore((s) => s.requestConfirm);
   const entries = useUsageStore((s) => s.entries);
@@ -67,9 +71,9 @@ export function UsagePanel() {
 
   async function handleClearToday() {
     const ok = await requestConfirm({
-      title: 'Clear today’s usage',
-      message: 'Remove all usage ledger rows from today?',
-      confirmLabel: 'Clear today',
+      title: t('usage.clearTodayTitle'),
+      message: t('usage.clearTodayMessage'),
+      confirmLabel: t('usage.clearToday'),
       danger: true,
     });
     if (ok) await clearToday();
@@ -77,9 +81,9 @@ export function UsagePanel() {
 
   async function handleClearAll() {
     const ok = await requestConfirm({
-      title: 'Clear usage ledger',
-      message: 'Remove all recorded usage? Prices are kept.',
-      confirmLabel: 'Clear all',
+      title: t('usage.clearAllTitle'),
+      message: t('usage.clearAllMessage'),
+      confirmLabel: t('usage.clearAll'),
       danger: true,
     });
     if (ok) await clearAll();
@@ -98,16 +102,15 @@ export function UsagePanel() {
   }
 
   return (
-    <Modal title="LLM usage & budget" onClose={() => setPanel('none')} width={720}>
+    <Modal title={t('usage.title')} onClose={() => setPanel('none')} width={720}>
       <section className={styles.section}>
-        <h3 className={styles.h3}>Token budgets</h3>
+        <h3 className={styles.h3}>{t('usage.tokenBudgetsTitle')}</h3>
         <p className="muted">
-          Hard stops before an API call when the next request would exceed a cap. Current run:{' '}
-          {runTokens.toLocaleString()} tok used.
+          {t('usage.budgetHelp', { tokens: formatNumber(runTokens, language) })}
         </p>
         <div className={styles.budgetGrid}>
           <label>
-            Max tokens / run
+            {t('usage.maxTokensPerRun')}
             <input
               type="number"
               min={1}
@@ -118,7 +121,7 @@ export function UsagePanel() {
             />
           </label>
           <label>
-            Max tokens / day
+            {t('usage.maxTokensPerDay')}
             <input
               type="number"
               min={1}
@@ -129,7 +132,7 @@ export function UsagePanel() {
             />
           </label>
           <label>
-            Max fallback tokens / run
+            {t('usage.maxFallbackTokensPerRun')}
             <input
               type="number"
               min={1}
@@ -147,8 +150,8 @@ export function UsagePanel() {
 
       <section className={styles.section}>
         <div className={styles.scopeRow}>
-          <h3 className={styles.h3}>Usage</h3>
-          <div className={styles.scopeBtns} role="group" aria-label="Usage scope">
+          <h3 className={styles.h3}>{t('usage.usageTitle')}</h3>
+          <div className={styles.scopeBtns} role="group" aria-label={t('usage.scopeAria')}>
             {(['run', 'today', 'all'] as Scope[]).map((s) => (
               <button
                 key={s}
@@ -156,36 +159,36 @@ export function UsagePanel() {
                 className={scope === s ? 'primary' : 'secondary'}
                 onClick={() => setScope(s)}
               >
-                {s === 'run' ? 'This run' : s === 'today' ? 'Today' : 'All time'}
+                {s === 'run' ? t('usage.scopeRun') : s === 'today' ? t('usage.scopeToday') : t('usage.scopeAll')}
               </button>
             ))}
           </div>
         </div>
         <p>
-          <strong>{totals.tokens.toLocaleString()}</strong> tokens · est.{' '}
+          <strong>{formatNumber(totals.tokens, language)}</strong> {t('usage.tokensUnit')} · {t('usage.estPrefix')}{' '}
           <strong>{formatUsd(totals.cost)}</strong>
           {filtered.some((e) => e.estimated) && (
-            <span className="muted"> · some rows estimated</span>
+            <span className="muted"> {t('usage.someEstimated')}</span>
           )}
         </p>
         {totals.rows.length === 0 ? (
-          <p className="muted">No usage recorded for this scope yet.</p>
+          <p className="muted">{t('usage.noUsageForScope')}</p>
         ) : (
           <table className={styles.table}>
             <thead>
               <tr>
-                <th>Provider</th>
-                <th>Model</th>
-                <th>Tokens</th>
-                <th>Est. $</th>
+                <th>{t('usage.colProvider')}</th>
+                <th>{t('usage.colModel')}</th>
+                <th>{t('usage.colTokens')}</th>
+                <th>{t('usage.colEstDollar')}</th>
               </tr>
             </thead>
             <tbody>
               {totals.rows.map((row) => (
                 <tr key={`${row.providerName}-${row.model}`}>
-                  <td>{row.providerName}</td>
-                  <td>{row.model}</td>
-                  <td>{row.tokens.toLocaleString()}</td>
+                  <td dir="auto">{row.providerName}</td>
+                  <td dir="auto">{row.model}</td>
+                  <td>{formatNumber(row.tokens, language)}</td>
                   <td>{formatUsd(row.cost)}</td>
                 </tr>
               ))}
@@ -194,27 +197,27 @@ export function UsagePanel() {
         )}
         <div className={styles.actions}>
           <button type="button" className="secondary" onClick={() => void handleClearToday()}>
-            Clear today
+            {t('usage.clearToday')}
           </button>
           <button type="button" className="danger" onClick={() => void handleClearAll()}>
-            Clear all
+            {t('usage.clearAll')}
           </button>
         </div>
       </section>
 
       <section className={styles.section}>
-        <h3 className={styles.h3}>Model prices (USD / 1M tokens)</h3>
-        <p className="muted">Editable estimates for accounting — not billed by this app.</p>
+        <h3 className={styles.h3}>{t('usage.pricesTitle')}</h3>
+        <p className="muted">{t('usage.pricesHelp')}</p>
         {prices.length === 0 ? (
-          <p className="muted">No prices yet. Add one below.</p>
+          <p className="muted">{t('usage.noPrices')}</p>
         ) : (
           <table className={styles.table}>
             <thead>
               <tr>
-                <th>Provider</th>
-                <th>Model</th>
-                <th>Input</th>
-                <th>Output</th>
+                <th>{t('usage.colProvider')}</th>
+                <th>{t('usage.colModel')}</th>
+                <th>{t('usage.colInput')}</th>
+                <th>{t('usage.colOutput')}</th>
                 <th />
               </tr>
             </thead>
@@ -223,8 +226,8 @@ export function UsagePanel() {
                 const name = providers.find((x) => x.id === p.providerId)?.displayName ?? p.providerId;
                 return (
                   <tr key={p.id}>
-                    <td>{name}</td>
-                    <td>{p.model}</td>
+                    <td dir="auto">{name}</td>
+                    <td dir="auto">{p.model}</td>
                     <td>
                       <input
                         type="number"
@@ -261,7 +264,7 @@ export function UsagePanel() {
                     </td>
                     <td>
                       <button type="button" className="ghost" onClick={() => removePrice(p.id)}>
-                        Remove
+                        {t('common.remove')}
                       </button>
                     </td>
                   </tr>
@@ -274,16 +277,16 @@ export function UsagePanel() {
           <select
             value={priceProviderId}
             onChange={(e) => setPriceProviderId(e.target.value)}
-            aria-label="Price provider"
+            aria-label={t('usage.priceProviderAria')}
           >
             {providers.map((p) => (
-              <option key={p.id} value={p.id}>
+              <option key={p.id} value={p.id} dir="auto">
                 {p.displayName}
               </option>
             ))}
           </select>
           <input
-            placeholder="model id"
+            placeholder={t('usage.modelIdPlaceholder')}
             value={priceModel}
             onChange={(e) => setPriceModel(e.target.value)}
           />
@@ -293,8 +296,8 @@ export function UsagePanel() {
             step="0.01"
             value={inputPer1M}
             onChange={(e) => setInputPer1M(e.target.value)}
-            aria-label="Input $/1M"
-            title="Input USD per 1M tokens"
+            aria-label={t('usage.inputPer1MAria')}
+            title={t('usage.inputPer1MTitle')}
           />
           <input
             type="number"
@@ -302,11 +305,11 @@ export function UsagePanel() {
             step="0.01"
             value={outputPer1M}
             onChange={(e) => setOutputPer1M(e.target.value)}
-            aria-label="Output $/1M"
-            title="Output USD per 1M tokens"
+            aria-label={t('usage.outputPer1MAria')}
+            title={t('usage.outputPer1MTitle')}
           />
           <button type="button" className="primary" onClick={handleAddPrice}>
-            Add price
+            {t('usage.addPrice')}
           </button>
         </div>
       </section>

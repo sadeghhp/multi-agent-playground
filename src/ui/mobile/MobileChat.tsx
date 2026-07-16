@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useDomainStore } from '../../store/domainStore';
 import { useProviderStore } from '../../store/providerStore';
 import { useRuntimeStore } from '../../store/runtimeStore';
@@ -14,6 +15,7 @@ import styles from './MobileApp.module.css';
 
 /** The conversation surface: transcript + streaming bubble + a touch composer. */
 export function MobileChat() {
+  const { t } = useTranslation();
   const playground = useDomainStore((s) => s.playground);
   const setPanel = useUiStore((s) => s.setPanel);
   const providers = useProviderStore((s) => s.providers);
@@ -89,9 +91,9 @@ export function MobileChat() {
       <div className={styles.chatScroll} ref={contentRef} onScroll={handleScroll}>
         {transcript.length === 0 && !liveAgent ? (
           <div className={styles.chatEmpty}>
-            <p className={styles.chatEmptyTitle}>No conversation yet</p>
+            <p className={styles.chatEmptyTitle}>{t('mobile.noConversationTitle')}</p>
             <p className={styles.chatEmptyText}>
-              Configure your agents, then press Run to start a conversation.
+              {t('mobile.noConversationText')}
             </p>
           </div>
         ) : (
@@ -119,14 +121,14 @@ export function MobileChat() {
           className={`${styles.jumpBtn} primary`}
           onClick={() => { scrollToBottom('smooth'); setAtBottom(true); }}
         >
-          ↓ Jump to latest
+          {t('mobile.jumpToLatest')}
         </button>
       )}
 
       <div className={styles.composer}>
         {isRunning ? (
           <button type="button" className={`${styles.composerFull} danger`} onClick={() => stopRun()}>
-            <StopIcon className={styles.btnIcon} /> Stop
+            <StopIcon className={styles.btnIcon} /> {t('mobile.stop')}
           </button>
         ) : transcript.length === 0 ? (
           <button
@@ -135,7 +137,7 @@ export function MobileChat() {
             onClick={() => setPanel('run')}
             disabled={!playground}
           >
-            <RunIcon className={styles.btnIcon} /> Run conversation
+            <RunIcon className={styles.btnIcon} /> {t('mobile.runConversation')}
           </button>
         ) : (
           <form className={styles.composerForm} onSubmit={handleContinue}>
@@ -143,13 +145,13 @@ export function MobileChat() {
               type="text"
               value={followUp}
               onChange={(e) => setFollowUp(e.target.value)}
-              placeholder="Continue the conversation…"
-              aria-label="Message to continue the conversation"
+              placeholder={t('mobile.continuePlaceholder')}
+              aria-label={t('mobile.continueAriaLabel')}
             />
             <button
               type="submit"
               className={`${styles.sendBtn} primary icon`}
-              aria-label="Send"
+              aria-label={t('mobile.send')}
               disabled={!canContinue || !followUp.trim()}
             >
               <SendIcon className={styles.btnIcon} />

@@ -1,5 +1,6 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { CSSProperties } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { AgentFlowNode } from './graphAdapter';
 import { useRuntimeStore } from '../store/runtimeStore';
 import { agentColor } from './colors';
@@ -11,41 +12,20 @@ import styles from './AgentNode.module.css';
  * on color alone (spec §22).
  */
 
-const STATUS_LABEL: Record<string, string> = {
-  idle: 'Idle',
-  queued: 'Queued',
-  generating: 'Generating…',
-  completed: 'Done',
-  failed: 'Failed',
-  disabled: 'Disabled',
-};
-
-/** Visual treatment per lifecycle kind. `participant` shows no chip (the default). */
+/** Lifecycle-kind icons. `participant` shows no chip (the default). Labels/hints
+ *  are translated via the `graph.kind.*` catalog; only the glyph + wrap-up flag
+ *  live here. */
 const KIND_META: Record<
   'moderator' | 'summarizer' | 'finalizer',
-  { icon: string; label: string; wrapUp: boolean; hint: string }
+  { icon: string; wrapUp: boolean }
 > = {
-  moderator: {
-    icon: '⚖',
-    label: 'Moderator',
-    wrapUp: false,
-    hint: 'Facilitates the discussion; scheduled by edges but always sees the full transcript.',
-  },
-  summarizer: {
-    icon: '⏹',
-    label: 'Summarizer',
-    wrapUp: true,
-    hint: 'Runs automatically in the wrap-up phase, after the discussion ends.',
-  },
-  finalizer: {
-    icon: '🏁',
-    label: 'Finalizer',
-    wrapUp: true,
-    hint: 'Runs last, in the wrap-up phase — after every other agent.',
-  },
+  moderator: { icon: '⚖', wrapUp: false },
+  summarizer: { icon: '⏹', wrapUp: true },
+  finalizer: { icon: '🏁', wrapUp: true },
 };
 
 export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
+  const { t } = useTranslation();
   const status = data.runtimeState;
   // Mid-turn tool execution label ("Using Wikipedia search…"); replaces the
   // generic generating badge while a tool call is in flight.
@@ -71,30 +51,35 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
         <span
           className={styles.dot}
           aria-hidden="true"
-          title={`Category: ${data.colorCategory}`}
+          title={t('graph.categoryTitle', { category: data.colorCategory })}
         />
-        <span className={styles.name} title={data.name}>
-          {data.name || 'Unnamed agent'}
+        <span className={styles.name} title={data.name} dir="auto">
+          {data.name || t('graph.unnamedAgent')}
         </span>
         <span className={`${styles.badge} ${styles[`badge_${status}`] ?? ''}`}>
           {data.hasError
-            ? 'Error'
+            ? t('graph.error')
             : status === 'generating' && toolStatus
               ? toolStatus
-              : STATUS_LABEL[status] ?? status}
+              : t(`graph.status.${status}`, { defaultValue: status })}
         </span>
       </div>
-      {data.role && <div className={styles.role}>{data.role}</div>}
+      {data.role && (
+        <div className={styles.role} dir="auto">
+          {data.role}
+        </div>
+      )}
       {data.kind !== 'participant' && KIND_META[data.kind] && (
         <div
           className={`${styles.kindChip} ${KIND_META[data.kind].wrapUp ? styles.kindWrapUp : ''}`}
-          title={KIND_META[data.kind].hint}
+          title={t(`graph.kind.${data.kind}.hint`)}
         >
-          <span aria-hidden="true">{KIND_META[data.kind].icon}</span> {KIND_META[data.kind].label}
-          {KIND_META[data.kind].wrapUp ? ' · wrap-up' : ''}
+          <span aria-hidden="true">{KIND_META[data.kind].icon}</span>{' '}
+          {t(`graph.kind.${data.kind}.label`)}
+          {KIND_META[data.kind].wrapUp ? t('graph.wrapUpSuffix') : ''}
         </div>
       )}
-      <div className={styles.provider} title={data.providerLabel}>
+      <div className={styles.provider} title={data.providerLabel} dir="auto">
         {data.providerLabel}
       </div>
       <Handle type="source" position={Position.Right} className={styles.handle} />

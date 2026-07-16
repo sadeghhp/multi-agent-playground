@@ -1,0 +1,37 @@
+{
+  "noPlayground": "No playground loaded.",
+  "selfConnectionWarn": "Self-connections create loops — allowed, but bounded by turn limits.",
+  "emptyTitle": "Start building your agent graph",
+  "emptyText": "Add an agent and wire edges, or try a sample playground to see how multi-agent workflows work across domains like product, science, and law.",
+  "addFirstAgent": "+ Add your first agent",
+  "browseSamples": "Browse sample playgrounds",
+  "lockedDuringRun": "Graph locked during run",
+  "fitGraph": "Fit graph",
+  "resetView": "Reset view",
+  "unnamedAgent": "Unnamed agent",
+  "error": "Error",
+  "categoryTitle": "Category: {{category}}",
+  "wrapUpSuffix": " · wrap-up",
+  "status": {
+    "idle": "Idle",
+    "queued": "Queued",
+    "generating": "Generating…",
+    "completed": "Done",
+    "failed": "Failed",
+    "disabled": "Disabled"
+  },
+  "kind": {
+    "moderator": {
+      "label": "Moderator",
+      "hint": "Facilitates the discussion; scheduled by edges but always sees the full transcript."
+    },
+    "summarizer": {
+      "label": "Summarizer",
+      "hint": "Runs automatically in the wrap-up phase, after the discussion ends."
+    },
+    "finalizer": {
+      "label": "Finalizer",
+      "hint": "Runs last, in the wrap-up phase — after every other agent."
+    }
+  }
+}

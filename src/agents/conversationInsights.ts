@@ -1,4 +1,5 @@
 import type { Agent, Playground, Provider } from '../domain/schema';
+import type { LlmSettings } from '../domain/llmSettings';
 import { ProviderError, retryEligible } from '../providers/errors';
 import { extractInlineThinking, sendChat } from '../providers/openaiAdapter';
 import type { ChatMessage } from '../providers/types';
@@ -92,6 +93,47 @@ export function pickInsightAgent(pg: Playground, providers: Provider[]): Agent |
   );
 }
 
+/** The concrete provider/model an insight call runs against, once resolved. */
+export interface InsightTarget {
+  provider: Provider;
+  model: string;
+  maxOutputTokens: number;
+}
+
+/** Long-run synthesis needs room even if the borrowed agent is tuned short. */
+const INSIGHT_MIN_OUTPUT_TOKENS = 2048;
+
+/**
+ * Resolve where a timeline insight should run. A provider/model explicitly set
+ * in app settings wins — provided that provider still exists and is enabled and
+ * a model is named — so the user can pin insights to a CORS-friendly endpoint.
+ * Otherwise fall back to borrowing a suitable agent (see pickInsightAgent). An
+ * invalid settings target (deleted/disabled provider, blank model) degrades to
+ * the borrow path rather than failing, so the caller can gate the buttons on a
+ * non-null result. Returns null when nothing usable is configured.
+ */
+export function resolveInsightTarget(
+  pg: Playground,
+  providers: Provider[],
+  settings: LlmSettings,
+): InsightTarget | null {
+  if (settings.insightProviderId && settings.insightModel.trim()) {
+    const provider = providers.find((p) => p.id === settings.insightProviderId);
+    if (provider && provider.enabled) {
+      return { provider, model: settings.insightModel, maxOutputTokens: INSIGHT_MIN_OUTPUT_TOKENS };
+    }
+  }
+  const agent = pickInsightAgent(pg, providers);
+  if (!agent) return null;
+  const provider = providers.find((p) => p.id === agent.llm.providerId);
+  if (!provider) return null;
+  return {
+    provider,
+    model: agent.llm.model,
+    maxOutputTokens: Math.max(agent.llm.maxOutputTokens, INSIGHT_MIN_OUTPUT_TOKENS),
+  };
+}
+
 export interface InsightResult {
   ok: boolean;
   /** Cleaned Markdown insight on success. */
@@ -112,8 +154,7 @@ export interface InsightOptions {
 export async function generateConversationInsight(
   kind: InsightKind,
   pg: Playground,
-  agent: Agent,
-  provider: Provider,
+  target: InsightTarget,
   options: InsightOptions = {},
 ): Promise<InsightResult> {
   const start = Date.now();
@@ -124,13 +165,12 @@ export async function generateConversationInsight(
 
   try {
     const res = await sendChat(
-      provider,
+      target.provider,
       {
-        model: agent.llm.model,
+        model: target.model,
         messages,
         temperature: 0.3,
-        // Room for a long-run synthesis even if the borrowed agent is tuned short.
-        maxOutputTokens: Math.max(agent.llm.maxOutputTokens, 2048),
+        maxOutputTokens: target.maxOutputTokens,
       },
       { signal: options.signal, timeoutMs: options.timeoutMs },
     );

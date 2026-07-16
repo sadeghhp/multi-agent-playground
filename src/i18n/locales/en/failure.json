@@ -1,0 +1,14 @@
+{
+  "title": "An agent failed — what next?",
+  "stopRun": "Stop run",
+  "skipTurn": "Skip this turn",
+  "removeFromCircuit": "Remove from circuit",
+  "retryTurn": "Retry turn",
+  "failed": "{{agent}} failed.",
+  "failedTimes": "{{agent}} failed {{n, number}} times in a row.",
+  "suggestDisable": "This agent keeps failing. Remove it from the circuit to keep the rest of the run going without it — your saved agent settings stay unchanged.",
+  "retryTurnDesc": "attempt this agent's turn again now.",
+  "skipTurnDesc": "drop this turn and continue the run.",
+  "removeFromCircuitDesc": "take this agent out for the rest of the run.",
+  "stopRunDesc": "end the run here."
+}

@@ -19,7 +19,7 @@
   display: inline-block;
   width: 7px;
   height: 1em;
-  margin-left: 1px;
+  margin-inline-start: 1px;
   background: var(--text-subtle);
   vertical-align: text-bottom;
   animation: blink 1s step-start infinite;
@@ -58,7 +58,7 @@
 }
 .err strong { text-transform: capitalize; }
 .rawWrap { margin-top: 8px; }
-.rawWrap button { font-size: 11px; padding: 2px 8px; margin-bottom: 6px; margin-right: 6px; }
+.rawWrap button { font-size: 11px; padding: 2px 8px; margin-bottom: 6px; margin-inline-end: 6px; }
 .recoveryErr { margin-top: 6px; font-size: 11px; }
 
 .draftPreview { display: flex; flex-direction: column; }

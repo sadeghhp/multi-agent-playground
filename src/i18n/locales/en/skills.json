@@ -1,0 +1,22 @@
+{
+  "title": "Skill library",
+  "intro": "Reusable declared capabilities — not executable tools. Attach these to agents from the agent inspector; each agent keeps its own editable copy.",
+  "addSkill": "+ Add skill",
+  "noSkills": "No skills yet.",
+  "unnamed": "(unnamed)",
+  "export": "Export",
+  "import": "Import",
+  "selectOrAdd": "Select or add a skill.",
+  "editSkill": "Edit skill",
+  "duplicate": "Duplicate",
+  "nameLabel": "Name",
+  "descLabel": "Short description",
+  "instructionLabel": "Instruction text",
+  "instructionPlaceholder": "Merged into an agent's system prompt when the copied skill is enabled.",
+  "deleteTitle": "Delete skill",
+  "deleteMessage": "Delete skill \"{{name}}\"? Agents that copied it keep their own copy.",
+  "emptyExport": "The library is empty — nothing to export.",
+  "importFailed": "Import failed.",
+  "imported_one": "Imported {{count, number}} skill.",
+  "imported_other": "Imported {{count, number}} skills."
+}

@@ -1,13 +1,14 @@
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChatIcon, AgentsIcon, MenuIcon } from './icons';
 import styles from './MobileApp.module.css';
 
 export type MobileTab = 'chat' | 'agents' | 'more';
 
-const TABS: { key: MobileTab; label: string; Icon: typeof ChatIcon }[] = [
-  { key: 'chat', label: 'Chat', Icon: ChatIcon },
-  { key: 'agents', label: 'Agents', Icon: AgentsIcon },
-  { key: 'more', label: 'More', Icon: MenuIcon },
+const TABS: { key: MobileTab; labelKey: string; Icon: typeof ChatIcon }[] = [
+  { key: 'chat', labelKey: 'mobile.tabChat', Icon: ChatIcon },
+  { key: 'agents', labelKey: 'mobile.tabAgents', Icon: AgentsIcon },
+  { key: 'more', labelKey: 'mobile.tabMore', Icon: MenuIcon },
 ];
 
 /** Thumb-reachable bottom navigation. WAI-ARIA tablist with arrow-key roving focus. */
@@ -18,6 +19,8 @@ export function MobileTabBar({
   active: MobileTab;
   onChange: (tab: MobileTab) => void;
 }) {
+  const { t } = useTranslation();
+
   function onKeyDown(e: ReactKeyboardEvent) {
     if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft' && e.key !== 'Home' && e.key !== 'End') return;
     e.preventDefault();
@@ -32,8 +35,8 @@ export function MobileTabBar({
   }
 
   return (
-    <nav className={styles.tabBar} role="tablist" aria-label="Sections">
-      {TABS.map(({ key, label, Icon }) => {
+    <nav className={styles.tabBar} role="tablist" aria-label={t('mobile.sections')}>
+      {TABS.map(({ key, labelKey, Icon }) => {
         const selected = active === key;
         return (
           <button
@@ -49,7 +52,7 @@ export function MobileTabBar({
             onKeyDown={onKeyDown}
           >
             <Icon className={styles.tabIcon} />
-            <span className={styles.tabLabel}>{label}</span>
+            <span className={styles.tabLabel}>{t(labelKey)}</span>
           </button>
         );
       })}

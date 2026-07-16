@@ -1,29 +1,33 @@
+import { useTranslation } from 'react-i18next';
 import type { RequestSnapshot } from '../../store/runtimeStore';
 import {
   troubleshootingHints,
   type ProviderErrorKind,
 } from '../../providers/errors';
 import { useUiStore } from '../../store/uiStore';
+import { formatNumber } from '../../i18n/format';
 import styles from './Transcript.module.css';
 
-const TITLE_FOR_KIND: Partial<Record<ProviderErrorKind, string>> = {
-  'bad-request': 'Request rejected',
-  'rate-limit': 'Rate limited',
-  timeout: 'Request timed out',
-  'server-error': 'Upstream model error',
-  auth: 'Authentication failed',
-  cors: 'Browser blocked the request (CORS)',
-  'private-network': 'Cannot reach local provider from this site',
-  'insecure-remote': 'Insecure remote endpoint',
-  network: 'Network error',
-  'model-not-found': 'Model not found',
-  aborted: 'Request cancelled',
+// Maps each provider error kind to its translation key (under the `transcript`
+// area). The visible titles themselves are localized at render time via t().
+const TITLE_KEY_FOR_KIND: Partial<Record<ProviderErrorKind, string>> = {
+  'bad-request': 'titleBadRequest',
+  'rate-limit': 'titleRateLimit',
+  timeout: 'titleTimeout',
+  'server-error': 'titleServerError',
+  auth: 'titleAuth',
+  cors: 'titleCors',
+  'private-network': 'titlePrivateNetwork',
+  'insecure-remote': 'titleInsecureRemote',
+  network: 'titleNetwork',
+  'model-not-found': 'titleModelNotFound',
+  aborted: 'titleAborted',
 };
 
-function titleFor(kind?: ProviderErrorKind, streamed?: boolean): string {
-  if (kind === 'server-error' && streamed) return 'Upstream model error (mid-stream)';
-  if (kind && TITLE_FOR_KIND[kind]) return TITLE_FOR_KIND[kind]!;
-  return 'Request failed';
+function titleKeyFor(kind?: ProviderErrorKind, streamed?: boolean): string {
+  if (kind === 'server-error' && streamed) return 'titleServerErrorMidStream';
+  if (kind && TITLE_KEY_FOR_KIND[kind]) return TITLE_KEY_FOR_KIND[kind]!;
+  return 'titleFailed';
 }
 
 function diagnosticsBlob(snapshot: RequestSnapshot): string {
@@ -59,13 +63,15 @@ export function FailureDiagnostics({
   showRequest: boolean;
   onToggleRequest: () => void;
 }) {
+  const { t } = useTranslation();
+  const language = useUiStore((s) => s.language);
   const showToast = useUiStore((s) => s.showToast);
   const errorKind = snapshot?.errorKind;
   const primary =
     snapshot?.rawUpstream?.trim() ||
     snapshot?.error?.trim() ||
     fallbackError?.trim() ||
-    'Unknown provider error.';
+    t('transcript.unknownProviderError');
   const maxOutputTokens =
     typeof snapshot?.params?.maxOutputTokens === 'number'
       ? snapshot.params.maxOutputTokens
@@ -85,42 +91,45 @@ export function FailureDiagnostics({
   const metaParts: string[] = [];
   if (snapshot?.status != null) metaParts.push(String(snapshot.status));
   if (snapshot?.errorType) metaParts.push(`error_type: ${snapshot.errorType}`);
-  if (snapshot?.streamedError) metaParts.push('mid-stream');
+  if (snapshot?.streamedError) metaParts.push(t('transcript.midStream'));
   if (snapshot?.promptMessages != null && snapshot.promptChars != null) {
     metaParts.push(
-      `${snapshot.promptMessages} messages · ~${snapshot.promptChars.toLocaleString()} chars`,
+      t('transcript.diagPromptSummary', {
+        messages: snapshot.promptMessages,
+        chars: formatNumber(snapshot.promptChars, language),
+      }),
     );
   }
   if (maxOutputTokens != null) metaParts.push(`max_tokens ${maxOutputTokens}`);
   if (snapshot?.partialOutputChars) {
-    metaParts.push(`${snapshot.partialOutputChars} chars streamed before fail`);
+    metaParts.push(t('transcript.diagStreamedBeforeFail', { n: snapshot.partialOutputChars }));
   }
 
   const copyDiagnostics = () => {
     if (!snapshot) {
-      showToast('error', 'No request snapshot available to copy.');
+      showToast('error', t('transcript.noSnapshotToCopy'));
       return;
     }
     if (!navigator.clipboard) {
-      showToast('error', 'Clipboard is not available in this context.');
+      showToast('error', t('transcript.clipboardUnavailable'));
       return;
     }
     navigator.clipboard.writeText(diagnosticsBlob(snapshot)).then(
-      () => showToast('info', 'Copied diagnostics (no credentials).'),
-      () => showToast('error', 'Could not copy diagnostics.'),
+      () => showToast('info', t('transcript.copiedDiagnostics')),
+      () => showToast('error', t('transcript.couldNotCopyDiagnostics')),
     );
   };
 
   return (
     <div className={styles.failureDiag} dir="ltr">
-      <div className={styles.failureTitle}>{titleFor(errorKind, snapshot?.streamedError)}</div>
+      <div className={styles.failureTitle}>{t(`transcript.${titleKeyFor(errorKind, snapshot?.streamedError)}`)}</div>
       <div className={styles.errText}>{primary}</div>
       {metaParts.length > 0 && (
         <div className={styles.failureMeta}>{metaParts.join(' · ')}</div>
       )}
       {hints.length > 0 && (
         <div className={styles.failureHints}>
-          <div className={styles.failureHintsLabel}>What to try</div>
+          <div className={styles.failureHintsLabel}>{t('transcript.whatToTry')}</div>
           <ul>
             {hints.map((h) => (
               <li key={h}>{h}</li>
@@ -130,11 +139,11 @@ export function FailureDiagnostics({
       )}
       <div className={styles.failureActions}>
         <button type="button" onClick={copyDiagnostics} disabled={!snapshot}>
-          Copy diagnostics
+          {t('transcript.copyDiagnostics')}
         </button>
         {snapshot && (
           <button type="button" onClick={onToggleRequest} aria-pressed={showRequest}>
-            {showRequest ? 'Hide request details' : 'Show request details'}
+            {showRequest ? t('transcript.hideRequestDetails') : t('transcript.showRequestDetails')}
           </button>
         )}
       </div>

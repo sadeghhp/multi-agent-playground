@@ -79,7 +79,7 @@
 .mentionSuggestions {
   position: absolute;
   bottom: 100%;
-  left: 12px;
+  inset-inline-start: 12px;
   display: flex;
   flex-direction: column;
   background: var(--panel, var(--bg, #fff));
@@ -90,7 +90,7 @@
   overflow: hidden;
 }
 .mentionSuggestions button {
-  text-align: left;
+  text-align: start;
   padding: 6px 12px;
   font-size: 13px;
   border: none;

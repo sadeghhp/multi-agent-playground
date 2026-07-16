@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useId, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import styles from './Modal.module.css';
 
 interface ModalProps {
@@ -11,6 +12,7 @@ interface ModalProps {
 
 /** Accessible modal dialog: Escape closes, focus is trapped, backdrop click closes. */
 export function Modal({ title, onClose, children, footer, width = 560 }: ModalProps) {
+  const { t } = useTranslation();
   const ref = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -101,8 +103,8 @@ export function Modal({ title, onClose, children, footer, width = 560 }: ModalPr
         ref={ref}
       >
         <header className={styles.header}>
-          <h2 id={titleId} className={styles.title}>{title}</h2>
-          <button type="button" aria-label="Close" className={`${styles.close} icon ghost`} onClick={onClose}>
+          <h2 id={titleId} className={styles.title} dir="auto">{title}</h2>
+          <button type="button" aria-label={t('common.close')} className={`${styles.close} icon ghost`} onClick={onClose}>
             ✕
           </button>
         </header>

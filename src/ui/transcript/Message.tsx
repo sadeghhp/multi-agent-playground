@@ -1,4 +1,5 @@
 import { type CSSProperties, memo, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { TranscriptMessage } from '../../domain/schema';
 import { dirForLanguage } from '../../domain/language';
 import { extractInlineThinking } from '../../providers/openaiAdapter';
@@ -6,7 +7,7 @@ import { useUiStore } from '../../store/uiStore';
 import { useRuntimeStore } from '../../store/runtimeStore';
 import { MessageMarkdown } from './MessageMarkdown';
 import { FailureDiagnostics } from './FailureDiagnostics';
-import { formatDuration } from '../formatDuration';
+import { formatDuration, formatNumber, formatTime } from '../../i18n/format';
 import styles from './Transcript.module.css';
 
 /**
@@ -19,6 +20,8 @@ import styles from './Transcript.module.css';
 // parent BottomPanel on every token) unaffected messages skip re-rendering
 // instead of re-parsing their Markdown and inline-thinking on each token.
 export const Message = memo(function Message({ msg, color }: { msg: TranscriptMessage; color?: string }) {
+  const { t } = useTranslation();
+  const language = useUiStore((s) => s.language);
   const failed = msg.status === 'failed';
   const [expanded, setExpanded] = useState(true);
   const [showRequest, setShowRequest] = useState(failed);
@@ -33,7 +36,7 @@ export const Message = memo(function Message({ msg, color }: { msg: TranscriptMe
   const visibleContent = split.text;
   const reasoning = [msg.reasoning, split.reasoning].filter(Boolean).join('\n\n') || undefined;
 
-  const time = new Date(msg.timestamp).toLocaleTimeString();
+  const time = formatTime(msg.timestamp, language);
   // Mirror the whole message (header, alignment, body) for RTL languages so
   // Persian output reads naturally right-to-left.
   const dir = dirForLanguage(msg.language);
@@ -49,17 +52,17 @@ export const Message = memo(function Message({ msg, color }: { msg: TranscriptMe
         <span className={styles.dot} style={{ backgroundColor: color }} aria-hidden="true" />
         <span className={styles.msgAgent}>
           {msg.agentName}
-          {msg.agentDeleted && <span className="chip"> deleted</span>}
+          {msg.agentDeleted && <span className="chip"> {t('transcript.deleted')}</span>}
         </span>
         {msg.role && <span className="chip">{msg.role}</span>}
         {msg.targetAgentName && (
-          <span className="chip" title={`This message directs a question at ${msg.targetAgentName}`}>
+          <span className="chip" title={t('transcript.directsQuestionAt', { name: msg.targetAgentName })}>
             → {msg.targetAgentName}
           </span>
         )}
         {msg.answeringTo && (
-          <span className="chip" title={`Out-of-turn reply to ${msg.answeringTo}'s direct question`}>
-            answering {msg.answeringTo}
+          <span className="chip" title={t('transcript.outOfTurnReply', { name: msg.answeringTo })}>
+            {t('transcript.answering', { name: msg.answeringTo })}
           </span>
         )}
         {reasoning && (
@@ -69,7 +72,7 @@ export const Message = memo(function Message({ msg, color }: { msg: TranscriptMe
             aria-expanded={showReasoning}
             onClick={() => setShowReasoning((v) => !v)}
           >
-            thinking {showReasoning ? '▾' : '▸'}
+            {t('transcript.thinking')} {showReasoning ? '▾' : '▸'}
           </button>
         )}
         {msg.toolTrace && msg.toolTrace.length > 0 && (
@@ -79,20 +82,20 @@ export const Message = memo(function Message({ msg, color }: { msg: TranscriptMe
             aria-expanded={showTools}
             onClick={() => setShowTools((v) => !v)}
           >
-            tools ({msg.toolTrace.length}) {showTools ? '▾' : '▸'}
+            {t('transcript.toolsCount', { n: msg.toolTrace.length })} {showTools ? '▾' : '▸'}
           </button>
         )}
         <span className={styles.msgMeta}>
-          turn {msg.turn} · {msg.model || '—'} · {time}
-          {msg.durationMs != null && ` · ${formatDuration(msg.durationMs)}`}
-          {msg.totalTokens != null && ` · ${msg.totalTokens} tok`}
+          {t('transcript.turnLabel', { n: msg.turn })} · {msg.model || '—'} · {time}
+          {msg.durationMs != null && ` · ${formatDuration(msg.durationMs, language)}`}
+          {msg.totalTokens != null && ` · ${t('transcript.tokens', { n: msg.totalTokens })}`}
         </span>
         <span className={styles.msgActions}>
           {snapshot && (
             <button
               type="button"
-              aria-label="Inspect request metadata"
-              title="Inspect request"
+              aria-label={t('transcript.inspectRequestMetadata')}
+              title={t('transcript.inspectRequest')}
               aria-pressed={showRequest}
               onClick={() => setShowRequest((v) => !v)}
             >
@@ -101,34 +104,34 @@ export const Message = memo(function Message({ msg, color }: { msg: TranscriptMe
           )}
           <button
             type="button"
-            aria-label="Copy response"
-            title="Copy"
+            aria-label={t('transcript.copyResponse')}
+            title={t('transcript.copy')}
             onClick={() => {
               if (!navigator.clipboard) {
-                showToast('error', 'Clipboard is not available in this context.');
+                showToast('error', t('transcript.clipboardUnavailable'));
                 return;
               }
               navigator.clipboard.writeText(visibleContent).then(
-                () => showToast('info', 'Copied response.'),
-                () => showToast('error', 'Could not copy the response.'),
+                () => showToast('info', t('transcript.copiedResponse')),
+                () => showToast('error', t('transcript.couldNotCopyResponse')),
               );
             }}
           >
             ⧉
           </button>
-          <button type="button" aria-label={expanded ? 'Collapse' : 'Expand'} onClick={() => setExpanded((e) => !e)}>
+          <button type="button" aria-label={expanded ? t('transcript.collapse') : t('transcript.expand')} onClick={() => setExpanded((e) => !e)}>
             {expanded ? '−' : '+'}
           </button>
         </span>
       </div>
       {msg.sourceAgentId && msg.connectionType && (
         <div className={styles.msgSource}>
-          via {msg.connectionType} connection
+          {t('transcript.viaConnection', { type: msg.connectionType })}
         </div>
       )}
       {msg.topicChange && (
         <div className={styles.msgSource}>
-          topic redirected to: “{msg.topicChange}”
+          {t('transcript.topicRedirected', { topic: msg.topicChange })}
         </div>
       )}
       {showReasoning && reasoning && (
@@ -142,7 +145,7 @@ export const Message = memo(function Message({ msg, color }: { msg: TranscriptMe
             {msg.toolTrace
               .map(
                 (t) =>
-                  `→ ${t.tool} ${t.input}${t.durationMs != null ? ` (${formatDuration(t.durationMs)})` : ''}\n${t.result}`,
+                  `→ ${t.tool} ${t.input}${t.durationMs != null ? ` (${formatDuration(t.durationMs, language)})` : ''}\n${t.result}`,
               )
               .join('\n\n')}
           </pre>
@@ -165,8 +168,7 @@ export const Message = memo(function Message({ msg, color }: { msg: TranscriptMe
             <MessageMarkdown content={visibleContent} />
           ) : reasoning ? (
             <span className={styles.msgSource}>
-              No visible answer — the model only produced thinking. Expand “thinking” or raise Max
-              output tokens.
+              {t('transcript.noVisibleAnswer')}
             </span>
           ) : null}
         </div>
@@ -174,47 +176,47 @@ export const Message = memo(function Message({ msg, color }: { msg: TranscriptMe
 
       {showRequest && snapshot && (
         <div className={styles.request} dir="ltr">
-          <div className={styles.reqRow}><span>URL</span><code>{snapshot.url}</code></div>
-          <div className={styles.reqRow}><span>Provider</span><code>{snapshot.providerName}</code></div>
-          <div className={styles.reqRow}><span>Model</span><code>{snapshot.model}</code></div>
+          <div className={styles.reqRow}><span>{t('transcript.reqUrl')}</span><code>{snapshot.url}</code></div>
+          <div className={styles.reqRow}><span>{t('transcript.reqProvider')}</span><code>{snapshot.providerName}</code></div>
+          <div className={styles.reqRow}><span>{t('transcript.reqModel')}</span><code>{snapshot.model}</code></div>
           <div className={styles.reqRow}>
-            <span>Status</span>
-            <code>{snapshot.status ?? '—'}{snapshot.finishReason ? ` · ${snapshot.finishReason}` : ''}{snapshot.streamedError ? ' · mid-stream' : ''}</code>
+            <span>{t('transcript.reqStatus')}</span>
+            <code>{snapshot.status ?? '—'}{snapshot.finishReason ? ` · ${snapshot.finishReason}` : ''}{snapshot.streamedError ? ` · ${t('transcript.midStream')}` : ''}</code>
           </div>
           {snapshot.errorKind && (
-            <div className={styles.reqRow}><span>Kind</span><code>{snapshot.errorKind}</code></div>
+            <div className={styles.reqRow}><span>{t('transcript.reqKind')}</span><code>{snapshot.errorKind}</code></div>
           )}
           {snapshot.errorType && (
-            <div className={styles.reqRow}><span>Type</span><code>{snapshot.errorType}</code></div>
+            <div className={styles.reqRow}><span>{t('transcript.reqType')}</span><code>{snapshot.errorType}</code></div>
           )}
           {snapshot.rawUpstream && (
-            <div className={styles.reqRow}><span>Upstream</span><code>{snapshot.rawUpstream}</code></div>
+            <div className={styles.reqRow}><span>{t('transcript.reqUpstream')}</span><code>{snapshot.rawUpstream}</code></div>
           )}
           {(snapshot.promptMessages != null || snapshot.promptChars != null) && (
             <div className={styles.reqRow}>
-              <span>Prompt</span>
+              <span>{t('transcript.reqPrompt')}</span>
               <code>
-                {snapshot.promptMessages ?? '—'} messages
-                {snapshot.promptChars != null ? ` · ~${snapshot.promptChars.toLocaleString()} chars` : ''}
-                {snapshot.partialOutputChars ? ` · ${snapshot.partialOutputChars} streamed before fail` : ''}
+                {t('transcript.reqPromptMessages', { n: snapshot.promptMessages ?? '—' })}
+                {snapshot.promptChars != null ? ` · ${t('transcript.reqPromptChars', { n: formatNumber(snapshot.promptChars, language) })}` : ''}
+                {snapshot.partialOutputChars ? ` · ${t('transcript.reqPromptStreamed', { n: snapshot.partialOutputChars })}` : ''}
               </code>
             </div>
           )}
-          <div className={styles.reqRow}><span>Params</span><code>{JSON.stringify(snapshot.params)}</code></div>
-          {snapshot.error && <div className={styles.reqRow}><span>Error</span><code>{snapshot.error}</code></div>}
+          <div className={styles.reqRow}><span>{t('transcript.reqParams')}</span><code>{JSON.stringify(snapshot.params)}</code></div>
+          {snapshot.error && <div className={styles.reqRow}><span>{t('transcript.reqError')}</span><code>{snapshot.error}</code></div>}
           <details>
-            <summary>Prompt messages ({snapshot.messages.length})</summary>
+            <summary>{t('transcript.promptMessagesDetails', { n: snapshot.messages.length })}</summary>
             <pre className={styles.reqPre}>
               {snapshot.messages.map((m) => `[${m.role}]\n${m.content}`).join('\n\n')}
             </pre>
           </details>
           {snapshot.rawExcerpt && (
             <details>
-              <summary>Raw response (excerpt)</summary>
+              <summary>{t('transcript.rawResponseExcerpt')}</summary>
               <pre className={styles.reqPre}>{snapshot.rawExcerpt}</pre>
             </details>
           )}
-          <p className={styles.reqNote}>Auth headers and credentials are excluded.</p>
+          <p className={styles.reqNote}>{t('transcript.authExcluded')}</p>
         </div>
       )}
     </div>

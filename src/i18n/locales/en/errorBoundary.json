@@ -1,0 +1,5 @@
+{
+  "title": "Something went wrong",
+  "description": "The app hit an unexpected error and couldn't continue rendering.",
+  "reload": "Reload"
+}

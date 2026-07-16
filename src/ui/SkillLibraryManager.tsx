@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { LibrarySkill } from '../domain/schema';
 import { useDomainStore } from '../store/domainStore';
 import { useUiStore } from '../store/uiStore';
@@ -15,6 +16,7 @@ import styles from './ProviderManager.module.css';
  * whole catalog. Master/detail layout mirrors the provider manager.
  */
 export function SkillLibraryManager() {
+  const { t } = useTranslation();
   const playground = useDomainStore((s) => s.playground);
   const addLibrarySkill = useDomainStore((s) => s.addLibrarySkill);
   const updateLibrarySkill = useDomainStore((s) => s.updateLibrarySkill);
@@ -53,9 +55,9 @@ export function SkillLibraryManager() {
 
   async function handleDelete(skill: LibrarySkill) {
     const ok = await requestConfirm({
-      title: 'Delete skill',
-      message: `Delete skill "${skill.name}"? Agents that copied it keep their own copy.`,
-      confirmLabel: 'Delete',
+      title: t('skills.deleteTitle'),
+      message: t('skills.deleteMessage', { name: skill.name }),
+      confirmLabel: t('common.delete'),
       danger: true,
     });
     if (!ok) return;
@@ -65,7 +67,7 @@ export function SkillLibraryManager() {
 
   function handleExport() {
     if (skills.length === 0) {
-      showToast('warn', 'The library is empty — nothing to export.');
+      showToast('warn', t('skills.emptyExport'));
       return;
     }
     downloadJson(`${playground?.name || 'playground'}-skill-library`, exportSkillSet(skills));
@@ -74,27 +76,26 @@ export function SkillLibraryManager() {
   async function handleImport(file: File) {
     const result = importSkillSet(await file.text());
     if (!result.ok) {
-      showToast('error', result.error ?? 'Import failed.');
+      showToast('error', result.error ?? t('skills.importFailed'));
       return;
     }
     // Append: imported skills already carry fresh ids from importSkillSet.
     setSkillLibrary([...skills, ...result.skills]);
     if (result.skills[0]) setSelectedId(result.skills[0].id);
-    showToast('info', `Imported ${result.skills.length} skill${result.skills.length === 1 ? '' : 's'}.`);
+    showToast('info', t('skills.imported', { count: result.skills.length }));
   }
 
   return (
-    <Modal title="Skill library" onClose={() => setPanel('none')} width={720}>
+    <Modal title={t('skills.title')} onClose={() => setPanel('none')} width={720}>
       <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
-        Reusable declared capabilities — not executable tools. Attach these to agents from the
-        agent inspector; each agent keeps its own editable copy.
+        {t('skills.intro')}
       </p>
       <div className={styles.layout}>
         <div className={styles.list}>
           <button type="button" className={`primary ${styles.addBtn}`} onClick={handleAdd}>
-            + Add skill
+            {t('skills.addSkill')}
           </button>
-          {skills.length === 0 && <p className="muted" style={{ fontSize: 12 }}>No skills yet.</p>}
+          {skills.length === 0 && <p className="muted" style={{ fontSize: 12 }}>{t('skills.noSkills')}</p>}
           {skills.map((s) => (
             <button
               key={s.id}
@@ -102,12 +103,12 @@ export function SkillLibraryManager() {
               className={`${styles.listItem} ${s.id === selectedId ? styles.listActive : ''}`}
               onClick={() => setSelectedId(s.id)}
             >
-              <span className={styles.listName}>{s.name || '(unnamed)'}</span>
+              <span className={styles.listName} dir="auto">{s.name || t('skills.unnamed')}</span>
             </button>
           ))}
           <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-            <button type="button" onClick={handleExport} style={{ flex: 1 }}>Export</button>
-            <button type="button" onClick={() => fileInput.current?.click()} style={{ flex: 1 }}>Import</button>
+            <button type="button" onClick={handleExport} style={{ flex: 1 }}>{t('skills.export')}</button>
+            <button type="button" onClick={() => fileInput.current?.click()} style={{ flex: 1 }}>{t('skills.import')}</button>
           </div>
           <input
             ref={fileInput}
@@ -132,7 +133,7 @@ export function SkillLibraryManager() {
               onDelete={() => handleDelete(selected)}
             />
           ) : (
-            <p className="muted">Select or add a skill.</p>
+            <p className="muted">{t('skills.selectOrAdd')}</p>
           )}
         </div>
       </div>
@@ -151,29 +152,31 @@ function SkillEditor({
   onDuplicate: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div>
       <div className={styles.editorActions}>
-        <strong>Edit skill</strong>
+        <strong>{t('skills.editSkill')}</strong>
         <div style={{ display: 'flex', gap: 6 }}>
-          <button type="button" onClick={onDuplicate}>Duplicate</button>
-          <button type="button" className="danger" onClick={onDelete}>Delete</button>
+          <button type="button" onClick={onDuplicate}>{t('skills.duplicate')}</button>
+          <button type="button" className="danger" onClick={onDelete}>{t('common.delete')}</button>
         </div>
       </div>
       <div className="field">
-        <label htmlFor="sk-name">Name</label>
-        <input id="sk-name" value={skill.name} onChange={(e) => onChange({ name: e.target.value })} />
+        <label htmlFor="sk-name">{t('skills.nameLabel')}</label>
+        <input id="sk-name" dir="auto" value={skill.name} onChange={(e) => onChange({ name: e.target.value })} />
       </div>
       <div className="field">
-        <label htmlFor="sk-desc">Short description</label>
-        <input id="sk-desc" value={skill.description} onChange={(e) => onChange({ description: e.target.value })} />
+        <label htmlFor="sk-desc">{t('skills.descLabel')}</label>
+        <input id="sk-desc" dir="auto" value={skill.description} onChange={(e) => onChange({ description: e.target.value })} />
       </div>
       <div className="field">
-        <label htmlFor="sk-inst">Instruction text</label>
+        <label htmlFor="sk-inst">{t('skills.instructionLabel')}</label>
         <textarea
           id="sk-inst"
           rows={4}
-          placeholder="Merged into an agent's system prompt when the copied skill is enabled."
+          dir="auto"
+          placeholder={t('skills.instructionPlaceholder')}
           value={skill.instruction}
           onChange={(e) => onChange({ instruction: e.target.value })}
         />

@@ -1,0 +1,16 @@
+{
+  "title": "Playgrounds",
+  "samplePlaygrounds": "Sample playgrounds",
+  "sampleHint": "Pre-built graphs that show how multi-agent conversations work. Confirm Local (Ollama) under Providers, then press Run.",
+  "sampleHintRemote": "Samples default to Ollama on localhost — run the app with <1>npm run dev</1>, or switch agents to a public HTTPS provider.",
+  "yourPlaygrounds": "Your playgrounds",
+  "newPlayground": "+ New playground",
+  "duplicateCurrent": "Duplicate current",
+  "noSaved": "No saved playgrounds yet.",
+  "deleteAria": "Delete {{name}}",
+  "loadSampleTitle": "Load sample playground",
+  "loadSampleMessage": "Load \"{{name}}\"? Your current playground will be replaced.",
+  "loadSampleConfirm": "Load sample",
+  "deleteTitle": "Delete playground",
+  "deleteMessage": "Delete playground \"{{name}}\"? This cannot be undone."
+}

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   generateArrangement,
   normalizeArrangement,
@@ -30,6 +31,7 @@ interface ArrangementSnapshot {
  * CreateAgentWithAiModal's generate/error/recover mechanics.
  */
 export function SmartArrangeModal() {
+  const { t } = useTranslation();
   const playground = useDomainStore((s) => s.playground);
   const applyArrangement = useDomainStore((s) => s.applyArrangement);
   const setPanel = useUiStore((s) => s.setPanel);
@@ -58,15 +60,15 @@ export function SmartArrangeModal() {
 
   const blockedReason =
     enabledProviders.length === 0
-      ? 'No enabled providers — add one in Provider manager.'
+      ? t('smartArrange.blocked.noProviders')
       : enabledAgentCount < 2
-        ? 'Add at least 2 enabled agents first.'
+        ? t('smartArrange.blocked.needAgents')
         : !providerId
-          ? 'Select a provider.'
+          ? t('smartArrange.blocked.selectProvider')
           : !model.trim()
-            ? 'Select a model.'
+            ? t('smartArrange.blocked.selectModel')
             : !subject.trim()
-              ? 'Enter the conversation subject first.'
+              ? t('smartArrange.blocked.enterSubject')
               : null;
   const canGenerate = !blockedReason && !generating;
 
@@ -159,12 +161,14 @@ export function SmartArrangeModal() {
     setNormalizeError(null);
     const parsed = parseArrangementDraftFromText(result.rawText);
     if (!parsed.ok) {
-      setNormalizeError(`Recovery failed: ${parsed.errorDetail ?? parsed.errorSummary}`);
+      setNormalizeError(
+        t('smartArrange.recoveryFailed', { detail: parsed.errorDetail ?? parsed.errorSummary }),
+      );
       return;
     }
     const normalized = normalizeArrangement(parsed.draft, playground.agents);
     if (!normalized.ok) {
-      setNormalizeError(`Recovery failed: ${normalized.errorSummary}`);
+      setNormalizeError(t('smartArrange.recoveryFailed', { detail: normalized.errorSummary }));
       return;
     }
     setResult(null);
@@ -178,7 +182,7 @@ export function SmartArrangeModal() {
     snapshotRef.current = null;
     setApplied(null);
     requestFitView();
-    showToast('info', 'Arrangement reverted.');
+    showToast('info', t('smartArrange.reverted'));
   }
 
   function handleClose() {
@@ -191,26 +195,26 @@ export function SmartArrangeModal() {
 
   return (
     <Modal
-      title="Smart Arrange"
+      title={t('smartArrange.title')}
       onClose={handleClose}
       width={560}
       footer={
         applied ? (
           <>
-            <button type="button" onClick={handleRevert}>Revert</button>
-            <button type="button" className="primary" onClick={handleClose}>Done</button>
+            <button type="button" onClick={handleRevert}>{t('smartArrange.revert')}</button>
+            <button type="button" className="primary" onClick={handleClose}>{t('smartArrange.done')}</button>
           </>
         ) : (
           <>
-            <button type="button" onClick={handleClose}>Cancel</button>
+            <button type="button" onClick={handleClose}>{t('common.cancel')}</button>
             <button
               type="button"
               className="primary"
               onClick={() => void handleGenerate()}
               disabled={!canGenerate}
-              title={blockedReason ?? 'Let AI wire the agents for this subject'}
+              title={blockedReason ?? t('smartArrange.arrangeHint')}
             >
-              {generating ? 'Arranging…' : 'Arrange'}
+              {generating ? t('smartArrange.arranging') : t('smartArrange.arrange')}
             </button>
           </>
         )
@@ -218,25 +222,22 @@ export function SmartArrangeModal() {
     >
       {!applied && (
         <>
-          <p className={styles.hint}>
-            AI connects the agents on the canvas into a conversation flow for your subject — order,
-            interaction types, and layout. Applied immediately; you can revert.
-          </p>
+          <p className={styles.hint}>{t('smartArrange.intro')}</p>
           <div className="field">
-            <label htmlFor="arr-subject">Subject of the conversation</label>
+            <label htmlFor="arr-subject">{t('smartArrange.subjectLabel')}</label>
             <textarea
               id="arr-subject"
               rows={2}
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
-              placeholder="Should our team adopt a four-day work week?"
+              placeholder={t('smartArrange.subjectPlaceholder')}
               disabled={generating}
             />
           </div>
 
           <div className="field-row">
             <div className="field">
-              <label htmlFor="arr-provider">Provider</label>
+              <label htmlFor="arr-provider">{t('smartArrange.provider')}</label>
               <select
                 id="arr-provider"
                 value={providerId}
@@ -247,17 +248,17 @@ export function SmartArrangeModal() {
                   setModel(p?.defaultModel ?? '');
                 }}
               >
-                <option value="">— select —</option>
+                <option value="">{t('smartArrange.selectOption')}</option>
                 {enabledProviders.map((p) => (
                   <option key={p.id} value={p.id}>{p.displayName}</option>
                 ))}
               </select>
             </div>
             <div className="field">
-              <label htmlFor="arr-model">Model</label>
+              <label htmlFor="arr-model">{t('smartArrange.model')}</label>
               {selectedProvider && selectedProvider.models.length > 0 ? (
                 <select id="arr-model" value={model} disabled={generating} onChange={(e) => setModel(e.target.value)}>
-                  <option value="">— select —</option>
+                  <option value="">{t('smartArrange.selectOption')}</option>
                   {selectedProvider.models.map((m) => (
                     <option key={m} value={m}>{m}</option>
                   ))}
@@ -268,7 +269,7 @@ export function SmartArrangeModal() {
                   value={model}
                   disabled={generating}
                   onChange={(e) => setModel(e.target.value)}
-                  placeholder="model id"
+                  placeholder={t('smartArrange.modelPlaceholder')}
                 />
               )}
             </div>
@@ -279,7 +280,7 @@ export function SmartArrangeModal() {
           {generating && (
             <div className="field">
               <span className={styles.liveBadge} role="status" aria-live="polite">
-                {streamBuffer.length === 0 ? 'thinking…' : 'streaming…'}
+                {streamBuffer.length === 0 ? t('smartArrange.thinking') : t('smartArrange.streaming')}
               </span>
               {streamBuffer.length === 0 && reasoningBuffer.length > 0 && (
                 <pre className={styles.streamPreview}>
@@ -298,16 +299,16 @@ export function SmartArrangeModal() {
 
           {result && !result.ok && (
             <div className={styles.err} role="alert">
-              <strong>{result.errorKind ?? 'error'}</strong> — {result.errorSummary}
+              <strong>{result.errorKind ?? t('smartArrange.errorLabel')}</strong> — {result.errorSummary}
               {result.errorDetail && <div>{result.errorDetail}</div>}
               {result.rawText && (
                 <div className={styles.rawWrap}>
                   <button type="button" onClick={() => setShowRaw((v) => !v)}>
-                    {showRaw ? 'Hide' : 'Show'} raw response
+                    {showRaw ? t('smartArrange.hideRaw') : t('smartArrange.showRaw')}
                   </button>
                   {(result.errorKind === 'invalid-json' || result.errorKind === 'invalid-arrangement') && (
                     <button type="button" onClick={handleRecover}>
-                      Recover arrangement
+                      {t('smartArrange.recoverArrangement')}
                     </button>
                   )}
                   {showRaw && <pre className={styles.streamPreview}>{result.rawText}</pre>}
@@ -321,27 +322,27 @@ export function SmartArrangeModal() {
 
       {applied && (
         <div className={styles.draftPreview}>
-          <p className={styles.draftHead}>Arrangement applied</p>
-          {applied.rationale && <p>{applied.rationale}</p>}
+          <p className={styles.draftHead}>{t('smartArrange.appliedHead')}</p>
+          {applied.rationale && <p dir="auto">{applied.rationale}</p>}
           <div className="field">
-            <label>Starts with</label>
-            <div className={styles.readonlyValue}>{agentName(applied.startingAgentId)}</div>
+            <label>{t('smartArrange.startsWith')}</label>
+            <div className={styles.readonlyValue} dir="auto">{agentName(applied.startingAgentId)}</div>
           </div>
           <div className="field">
-            <label>Connections ({applied.connections.length})</label>
+            <label>{t('smartArrange.connections', { n: applied.connections.length })}</label>
             {applied.connections.map((c, i) => (
-              <div key={i} className={styles.readonlyValue}>
+              <div key={i} className={styles.readonlyValue} dir="auto">
                 {agentName(c.source)} → {agentName(c.target)} · {c.type}
-                {c.priority !== 0 ? ` · priority ${c.priority}` : ''}
+                {c.priority !== 0 ? ` · ${t('smartArrange.priority', { n: c.priority })}` : ''}
                 {c.label ? ` · ${c.label}` : ''}
               </div>
             ))}
           </div>
           {applied.kindCorrections.length > 0 && (
             <div className="field">
-              <label>Kind changes</label>
+              <label>{t('smartArrange.kindChanges')}</label>
               {applied.kindCorrections.map((c, i) => (
-                <div key={i} className={styles.readonlyValue}>
+                <div key={i} className={styles.readonlyValue} dir="auto">
                   {agentName(c.agentId)} → {c.kind}
                 </div>
               ))}
@@ -349,25 +350,25 @@ export function SmartArrangeModal() {
           )}
           {Object.keys(applied.settings).length > 0 && (
             <div className="field">
-              <label>Suggested settings</label>
+              <label>{t('smartArrange.suggestedSettings')}</label>
               <div className={styles.charList}>
                 {applied.settings.conversationMode && (
-                  <span className="chip">mode: {applied.settings.conversationMode}</span>
+                  <span className="chip">{t('smartArrange.mode', { mode: applied.settings.conversationMode })}</span>
                 )}
                 {applied.settings.maxTotalTurns != null && (
-                  <span className="chip">max turns: {applied.settings.maxTotalTurns}</span>
+                  <span className="chip">{t('smartArrange.maxTurns', { n: applied.settings.maxTotalTurns })}</span>
                 )}
                 {applied.settings.maxResponsesPerAgent != null && (
-                  <span className="chip">per agent: {applied.settings.maxResponsesPerAgent}</span>
+                  <span className="chip">{t('smartArrange.perAgent', { n: applied.settings.maxResponsesPerAgent })}</span>
                 )}
               </div>
             </div>
           )}
           {applied.notes.length > 0 && (
             <div className="field">
-              <label>Adjustments</label>
+              <label>{t('smartArrange.adjustments')}</label>
               {applied.notes.map((n, i) => (
-                <p key={i} className={styles.hint}>{n}</p>
+                <p key={i} className={styles.hint} dir="auto">{n}</p>
               ))}
             </div>
           )}

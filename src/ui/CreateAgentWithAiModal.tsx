@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { createAgent } from '../domain/factories';
 import {
   draftToAgentOverrides,
@@ -13,12 +14,12 @@ import { useUiStore } from '../store/uiStore';
 import { Modal } from './Modal';
 import styles from './CreateAgentWithAiModal.module.css';
 
-const CHAR_LABELS: { key: keyof GeneratedAgentDraft['characteristics']; label: string }[] = [
-  { key: 'verbosity', label: 'Verbosity' },
-  { key: 'creativity', label: 'Creativity' },
-  { key: 'assertiveness', label: 'Assertiveness' },
-  { key: 'skepticism', label: 'Skepticism' },
-  { key: 'cooperation', label: 'Cooperation' },
+const CHAR_KEYS: (keyof GeneratedAgentDraft['characteristics'])[] = [
+  'verbosity',
+  'creativity',
+  'assertiveness',
+  'skepticism',
+  'cooperation',
 ];
 
 /**
@@ -28,6 +29,7 @@ const CHAR_LABELS: { key: keyof GeneratedAgentDraft['characteristics']; label: s
  * whole agent instead of one field.
  */
 export function CreateAgentWithAiModal() {
+  const { t } = useTranslation();
   const playground = useDomainStore((s) => s.playground);
   const addAgent = useDomainStore((s) => s.addAgent);
   const selectAgent = useUiStore((s) => s.selectAgent);
@@ -59,13 +61,13 @@ export function CreateAgentWithAiModal() {
 
   const blockedReason =
     enabledProviders.length === 0
-      ? 'No enabled providers — add one in Provider manager.'
+      ? t('createAgent.blocked.noProviders')
       : !providerId
-        ? 'Select a provider.'
+        ? t('createAgent.blocked.selectProvider')
         : !model.trim()
-          ? 'Select a model.'
+          ? t('createAgent.blocked.selectModel')
           : !description.trim()
-            ? 'Describe the agent first.'
+            ? t('createAgent.blocked.describeFirst')
             : null;
   const canGenerate = !blockedReason && !generating;
 
@@ -128,9 +130,9 @@ export function CreateAgentWithAiModal() {
       return;
     }
     setRecoveryError(
-      recovered.errorDetail
-        ? `Recovery failed: ${recovered.errorDetail}`
-        : `Recovery failed: ${recovered.errorSummary}`,
+      t('createAgent.recoveryFailed', {
+        detail: recovered.errorDetail ?? recovered.errorSummary,
+      }),
     );
   }
 
@@ -141,26 +143,26 @@ export function CreateAgentWithAiModal() {
 
   return (
     <Modal
-      title="Create agent with AI"
+      title={t('createAgent.title')}
       onClose={handleClose}
       width={560}
       footer={
         draft ? (
           <>
-            <button type="button" onClick={handleDiscard}>Discard</button>
-            <button type="button" className="primary" onClick={handleApply}>Apply</button>
+            <button type="button" onClick={handleDiscard}>{t('createAgent.discard')}</button>
+            <button type="button" className="primary" onClick={handleApply}>{t('createAgent.apply')}</button>
           </>
         ) : (
           <>
-            <button type="button" onClick={handleClose}>Cancel</button>
+            <button type="button" onClick={handleClose}>{t('common.cancel')}</button>
             <button
               type="button"
               className="primary"
               onClick={() => void handleGenerate()}
               disabled={!canGenerate}
-              title={blockedReason ?? 'Generate an agent from the description below'}
+              title={blockedReason ?? t('createAgent.generateHint')}
             >
-              {generating ? 'Generating…' : 'Generate'}
+              {generating ? t('createAgent.generating') : t('createAgent.generate')}
             </button>
           </>
         )
@@ -169,20 +171,20 @@ export function CreateAgentWithAiModal() {
       {!draft && (
         <>
           <div className="field">
-            <label htmlFor="ai-desc">Describe the agent you want</label>
+            <label htmlFor="ai-desc">{t('createAgent.describeLabel')}</label>
             <textarea
               id="ai-desc"
               rows={4}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="A skeptical financial analyst who challenges assumptions and cites sources."
+              placeholder={t('createAgent.describePlaceholder')}
               disabled={generating}
             />
           </div>
 
           <div className="field-row">
             <div className="field">
-              <label htmlFor="ai-provider">Provider</label>
+              <label htmlFor="ai-provider">{t('createAgent.provider')}</label>
               <select
                 id="ai-provider"
                 value={providerId}
@@ -193,17 +195,17 @@ export function CreateAgentWithAiModal() {
                   setModel(p?.defaultModel ?? '');
                 }}
               >
-                <option value="">— select —</option>
+                <option value="">{t('createAgent.selectOption')}</option>
                 {enabledProviders.map((p) => (
                   <option key={p.id} value={p.id}>{p.displayName}</option>
                 ))}
               </select>
             </div>
             <div className="field">
-              <label htmlFor="ai-model">Model</label>
+              <label htmlFor="ai-model">{t('createAgent.model')}</label>
               {selectedProvider && selectedProvider.models.length > 0 ? (
                 <select id="ai-model" value={model} disabled={generating} onChange={(e) => setModel(e.target.value)}>
-                  <option value="">— select —</option>
+                  <option value="">{t('createAgent.selectOption')}</option>
                   {selectedProvider.models.map((m) => (
                     <option key={m} value={m}>{m}</option>
                   ))}
@@ -214,7 +216,7 @@ export function CreateAgentWithAiModal() {
                   value={model}
                   disabled={generating}
                   onChange={(e) => setModel(e.target.value)}
-                  placeholder="model id"
+                  placeholder={t('createAgent.modelPlaceholder')}
                 />
               )}
             </div>
@@ -227,7 +229,7 @@ export function CreateAgentWithAiModal() {
               {/* Announce state transitions (thinking → streaming), not the raw
                   token stream, so screen readers aren't spammed per token. */}
               <span className={styles.liveBadge} role="status" aria-live="polite">
-                {streamBuffer.length === 0 ? 'thinking…' : 'streaming…'}
+                {streamBuffer.length === 0 ? t('createAgent.thinking') : t('createAgent.streaming')}
               </span>
               {streamBuffer.length === 0 && reasoningBuffer.length > 0 && (
                 <pre className={styles.streamPreview}>
@@ -246,16 +248,16 @@ export function CreateAgentWithAiModal() {
 
           {result && !result.ok && (
             <div className={styles.err} role="alert">
-              <strong>{result.errorKind ?? 'error'}</strong> — {result.errorSummary}
+              <strong>{result.errorKind ?? t('createAgent.errorLabel')}</strong> — {result.errorSummary}
               {result.errorDetail && <div>{result.errorDetail}</div>}
               {result.rawText && (
                 <div className={styles.rawWrap}>
                   <button type="button" onClick={() => setShowRaw((v) => !v)}>
-                    {showRaw ? 'Hide' : 'Show'} raw response
+                    {showRaw ? t('createAgent.hideRaw') : t('createAgent.showRaw')}
                   </button>
                   {result.errorKind === 'invalid-json' && (
                     <button type="button" onClick={handleRecoverDraft}>
-                      Recover draft
+                      {t('createAgent.recoverDraft')}
                     </button>
                   )}
                   {showRaw && <pre className={styles.streamPreview}>{result.rawText}</pre>}
@@ -269,42 +271,44 @@ export function CreateAgentWithAiModal() {
 
       {draft && (
         <div className={styles.draftPreview}>
-          <p className={styles.draftHead}>Review before applying</p>
+          <p className={styles.draftHead}>{t('createAgent.reviewHead')}</p>
 
           <div className="field">
-            <label>Name</label>
-            <div className={styles.readonlyValue}>{draft.name}</div>
+            <label>{t('createAgent.name')}</label>
+            <div className={styles.readonlyValue} dir="auto">{draft.name}</div>
           </div>
           <div className="field">
-            <label>Role</label>
-            <div className={styles.readonlyValue}>{draft.role || '—'}</div>
+            <label>{t('createAgent.role')}</label>
+            <div className={styles.readonlyValue} dir="auto">{draft.role || '—'}</div>
           </div>
           <div className="field">
-            <label>Persona</label>
-            <div className={styles.readonlyValue}>
+            <label>{t('createAgent.persona')}</label>
+            <div className={styles.readonlyValue} dir="auto">
               {draft.personaMode === 'digital-shadow'
-                ? `Digital shadow${draft.persona?.realName ? ` of ${draft.persona.realName}` : ''}`
-                : 'Role agent'}
+                ? draft.persona?.realName
+                  ? t('createAgent.digitalShadowOf', { name: draft.persona.realName })
+                  : t('createAgent.digitalShadow')
+                : t('createAgent.roleAgent')}
             </div>
           </div>
           <div className="field">
-            <label>System instruction</label>
-            <pre className={styles.preview}>{draft.systemInstruction}</pre>
+            <label>{t('createAgent.systemInstruction')}</label>
+            <pre className={styles.preview} dir="auto">{draft.systemInstruction}</pre>
           </div>
           <div className="field">
-            <label>Characteristics</label>
+            <label>{t('createAgent.characteristics')}</label>
             <div className={styles.charList}>
-              <span className="chip">tone: {draft.characteristics.tone}</span>
-              {CHAR_LABELS.map(({ key, label }) => (
-                <span key={key} className="chip">{label}: {draft.characteristics[key]}</span>
+              <span className="chip">{t('createAgent.tone')}: {draft.characteristics.tone}</span>
+              {CHAR_KEYS.map((key) => (
+                <span key={key} className="chip">{t(`createAgent.char.${key}`)}: {draft.characteristics[key]}</span>
               ))}
             </div>
           </div>
           {draft.skills.length > 0 && (
             <div className="field">
-              <label>Skills ({draft.skills.length})</label>
+              <label>{t('createAgent.skills', { n: draft.skills.length })}</label>
               {draft.skills.map((s, i) => (
-                <div key={i} className={styles.skillPreview}>
+                <div key={i} className={styles.skillPreview} dir="auto">
                   <strong>{s.name}</strong>
                   {s.description && <span className={styles.skillDesc}> — {s.description}</span>}
                   <div className={styles.skillInstruction}>{s.instruction}</div>

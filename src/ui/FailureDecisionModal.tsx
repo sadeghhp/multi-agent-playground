@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useUiStore } from '../store/uiStore';
 import { Modal } from './Modal';
 
@@ -13,6 +14,7 @@ import { Modal } from './Modal';
  * matching an abort landing on the pending prompt (see uiStore).
  */
 export function FailureDecisionModal() {
+  const { t } = useTranslation();
   const decision = useUiStore((s) => s.failureDecision);
   const resolve = useUiStore((s) => s.resolveFailureDecision);
 
@@ -20,62 +22,62 @@ export function FailureDecisionModal() {
 
   return (
     <Modal
-      title="An agent failed — what next?"
+      title={t('failure.title')}
       onClose={() => resolve('stop')}
       width={520}
       footer={
         <>
           <button type="button" className="secondary" onClick={() => resolve('stop')}>
-            Stop run
+            {t('failure.stopRun')}
           </button>
           <button type="button" className="secondary" onClick={() => resolve('skip')}>
-            Skip this turn
+            {t('failure.skipTurn')}
           </button>
           <button
             type="button"
             className={decision.suggestDisable ? 'primary' : 'secondary'}
             onClick={() => resolve('disable')}
           >
-            Remove from circuit
+            {t('failure.removeFromCircuit')}
           </button>
           <button
             type="button"
             className={decision.suggestDisable ? 'secondary' : 'primary'}
             onClick={() => resolve('retry')}
           >
-            Retry turn
+            {t('failure.retryTurn')}
           </button>
         </>
       }
     >
-      <p>
-        <strong>{decision.agentName}</strong> failed
+      <p dir="auto">
         {decision.consecutiveFailures > 1
-          ? ` ${decision.consecutiveFailures} times in a row`
-          : ''}
-        .
+          ? t('failure.failedTimes', {
+              agent: decision.agentName,
+              n: decision.consecutiveFailures,
+            })
+          : t('failure.failed', { agent: decision.agentName })}
       </p>
-      <p className="muted" style={{ marginTop: 8 }}>
+      <p className="muted" style={{ marginTop: 8 }} dir="auto">
         {decision.errorSummary}
       </p>
       {decision.suggestDisable && (
         <p style={{ marginTop: 14 }}>
-          This agent keeps failing. <strong>Remove it from the circuit</strong> to keep the rest of
-          the run going without it — your saved agent settings stay unchanged.
+          {t('failure.suggestDisable')}
         </p>
       )}
-      <ul className="muted" style={{ marginTop: 14, fontSize: 13, paddingLeft: 18 }}>
+      <ul className="muted" style={{ marginTop: 14, fontSize: 13, paddingInlineStart: 18 }}>
         <li>
-          <strong>Retry turn</strong> — attempt this agent's turn again now.
+          <strong>{t('failure.retryTurn')}</strong> — {t('failure.retryTurnDesc')}
         </li>
         <li>
-          <strong>Skip this turn</strong> — drop this turn and continue the run.
+          <strong>{t('failure.skipTurn')}</strong> — {t('failure.skipTurnDesc')}
         </li>
         <li>
-          <strong>Remove from circuit</strong> — take this agent out for the rest of the run.
+          <strong>{t('failure.removeFromCircuit')}</strong> — {t('failure.removeFromCircuitDesc')}
         </li>
         <li>
-          <strong>Stop run</strong> — end the run here.
+          <strong>{t('failure.stopRun')}</strong> — {t('failure.stopRunDesc')}
         </li>
       </ul>
     </Modal>

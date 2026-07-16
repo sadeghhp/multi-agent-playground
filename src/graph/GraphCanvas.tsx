@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Background,
   Controls,
@@ -28,6 +29,7 @@ import styles from './GraphCanvas.module.css';
 const nodeTypes = { agent: AgentNode };
 
 function CanvasInner() {
+  const { t } = useTranslation();
   const playground = useDomainStore((s) => s.playground);
   const setAgentPosition = useDomainStore((s) => s.setAgentPosition);
   const removeAgent = useDomainStore((s) => s.removeAgent);
@@ -134,7 +136,7 @@ function CanvasInner() {
     (conn: FlowConnection) => {
       if (isRunning || !conn.source || !conn.target) return;
       if (conn.source === conn.target) {
-        showToast('warn', 'Self-connections create loops — allowed, but bounded by turn limits.');
+        showToast('warn', t('graph.selfConnectionWarn'));
       }
       addConnection({
         id: newConnectionId(),
@@ -145,7 +147,7 @@ function CanvasInner() {
         priority: 0,
       });
     },
-    [isRunning, addConnection, showToast],
+    [isRunning, addConnection, showToast, t],
   );
 
   const onNodesDelete = useCallback(
@@ -167,7 +169,7 @@ function CanvasInner() {
   );
 
   if (!playground) {
-    return <div className={styles.empty}>No playground loaded.</div>;
+    return <div className={styles.empty}>{t('graph.noPlayground')}</div>;
   }
 
   return (
@@ -204,11 +206,8 @@ function CanvasInner() {
       {playground.agents.length === 0 && !isRunning && (
         <div className={styles.emptyGraph}>
           <div className={styles.emptyCard}>
-            <h2 className={styles.emptyTitle}>Start building your agent graph</h2>
-            <p className={styles.emptyText}>
-              Add an agent and wire edges, or try a sample playground to see how
-              multi-agent workflows work across domains like product, science, and law.
-            </p>
+            <h2 className={styles.emptyTitle}>{t('graph.emptyTitle')}</h2>
+            <p className={styles.emptyText}>{t('graph.emptyText')}</p>
             <div className={styles.emptyActions}>
               <button
                 type="button"
@@ -223,22 +222,22 @@ function CanvasInner() {
                   selectAgent(agent.id);
                 }}
               >
-                + Add your first agent
+                {t('graph.addFirstAgent')}
               </button>
               <button type="button" onClick={() => setPanel('playgrounds')}>
-                Browse sample playgrounds
+                {t('graph.browseSamples')}
               </button>
             </div>
           </div>
         </div>
       )}
-      {isRunning && <div className={styles.lockBadge}>Graph locked during run</div>}
+      {isRunning && <div className={styles.lockBadge}>{t('graph.lockedDuringRun')}</div>}
       <div className={styles.viewButtons}>
         <button type="button" onClick={() => void fitView({ duration: 200 })}>
-          Fit graph
+          {t('graph.fitGraph')}
         </button>
         <button type="button" onClick={() => void fitView({ duration: 200, maxZoom: 1 })}>
-          Reset view
+          {t('graph.resetView')}
         </button>
       </div>
     </div>

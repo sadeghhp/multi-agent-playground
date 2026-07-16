@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useDomainStore } from '../store/domainStore';
 import { useUiStore } from '../store/uiStore';
 import { agentColor } from '../graph/colors';
@@ -6,6 +7,7 @@ import { ConnectionInspector } from './inspector/ConnectionInspector';
 import styles from './inspector/Inspector.module.css';
 
 export function Inspector() {
+  const { t } = useTranslation();
   const selection = useUiStore((s) => s.selection);
   const playground = useDomainStore((s) => s.playground);
 
@@ -17,7 +19,7 @@ export function Inspector() {
       : undefined;
 
   return (
-    <aside className={styles.inspector} aria-label="Inspector">
+    <aside className={styles.inspector} aria-label={t('inspector.title')}>
       <header className={styles.header}>
         {agent ? (
           <h2 className={styles.title}>
@@ -26,12 +28,12 @@ export function Inspector() {
               style={{ backgroundColor: agentColor(agent.colorCategory) }}
               aria-hidden="true"
             />
-            <span className={styles.identityName} title={agent.name}>
-              {agent.name || 'Unnamed agent'}
+            <span className={styles.identityName} title={agent.name} dir="auto">
+              {agent.name || t('inspector.unnamedAgent')}
             </span>
           </h2>
         ) : (
-          <h2 className={styles.title}>{connection ? 'Connection' : 'Inspector'}</h2>
+          <h2 className={styles.title}>{connection ? t('inspector.connectionTitle') : t('inspector.title')}</h2>
         )}
       </header>
       {agent ? (
@@ -43,8 +45,8 @@ export function Inspector() {
         <ConnectionInspector key={connection.id} connection={connection} />
       ) : (
         <div className={styles.emptyState}>
-          <p>Select an agent or connection to edit it.</p>
-          <p className="muted">Add an agent from the left palette to get started.</p>
+          <p>{t('inspector.emptyStatePrimary')}</p>
+          <p className="muted">{t('inspector.emptyStateSecondary')}</p>
         </div>
       )}
     </aside>

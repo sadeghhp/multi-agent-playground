@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
+import i18n from '../i18n';
 import styles from './ErrorBoundary.module.css';
 
 interface Props {
@@ -29,11 +30,13 @@ export class ErrorBoundary extends Component<Props, State> {
     if (this.state.error) {
       return (
         <div className={styles.fallback} role="alert">
-          <h1>Something went wrong</h1>
-          <p>The app hit an unexpected error and couldn&apos;t continue rendering.</p>
-          <pre className={styles.detail}>{this.state.error.message}</pre>
+          {/* Class component (error boundaries can't be hooks) — read from the
+              i18n instance directly rather than useTranslation. */}
+          <h1>{i18n.t('errorBoundary.title')}</h1>
+          <p>{i18n.t('errorBoundary.description')}</p>
+          <pre className={styles.detail} dir="auto">{this.state.error.message}</pre>
           <button type="button" onClick={() => window.location.reload()}>
-            Reload
+            {i18n.t('errorBoundary.reload')}
           </button>
         </div>
       );

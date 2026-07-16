@@ -32,16 +32,16 @@ describe('prefs round-trip', () => {
   });
 
   it('persists LLM settings, defaulting to zero request delay', () => {
-    expect(getLlmSettings()).toEqual({ requestDelayMs: 0 });
-    setLlmSettings({ requestDelayMs: 1500 });
-    expect(getLlmSettings()).toEqual({ requestDelayMs: 1500 });
+    expect(getLlmSettings()).toEqual({ requestDelayMs: 0, insightProviderId: '', insightModel: '' });
+    setLlmSettings({ requestDelayMs: 1500, insightProviderId: '', insightModel: '' });
+    expect(getLlmSettings()).toEqual({ requestDelayMs: 1500, insightProviderId: '', insightModel: '' });
   });
 
   it('falls back to defaults for invalid LLM settings JSON', () => {
     window.localStorage.setItem('map.llmSettings', '{not-json');
-    expect(getLlmSettings()).toEqual({ requestDelayMs: 0 });
+    expect(getLlmSettings()).toEqual({ requestDelayMs: 0, insightProviderId: '', insightModel: '' });
     window.localStorage.setItem('map.llmSettings', JSON.stringify({ requestDelayMs: -5 }));
-    expect(getLlmSettings()).toEqual({ requestDelayMs: 0 });
+    expect(getLlmSettings()).toEqual({ requestDelayMs: 0, insightProviderId: '', insightModel: '' });
   });
 });
 
@@ -84,10 +84,12 @@ describe('localStorage failure resilience (L-11 regression)', () => {
   it('getLlmSettings/setLlmSettings do not throw', () => {
     makeStorageThrow('getItem');
     expect(() => getLlmSettings()).not.toThrow();
-    expect(getLlmSettings()).toEqual({ requestDelayMs: 0 });
+    expect(getLlmSettings()).toEqual({ requestDelayMs: 0, insightProviderId: '', insightModel: '' });
 
     vi.restoreAllMocks();
     makeStorageThrow('setItem');
-    expect(() => setLlmSettings({ requestDelayMs: 500 })).not.toThrow();
+    expect(() =>
+      setLlmSettings({ requestDelayMs: 500, insightProviderId: '', insightModel: '' }),
+    ).not.toThrow();
   });
 });

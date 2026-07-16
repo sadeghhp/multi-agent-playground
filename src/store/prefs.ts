@@ -17,10 +17,13 @@ import {
 
 const SELECTED_KEY = 'map.selectedPlaygroundId';
 const THEME_KEY = 'map.theme';
+const LANG_KEY = 'map.lang';
 const BUDGET_KEY = 'map.usageBudget';
 const LLM_SETTINGS_KEY = 'map.llmSettings';
 
 export type Theme = 'light' | 'dark';
+/** UI language. 'fa' (Persian) is right-to-left; 'en' (English) is left-to-right. */
+export type Language = 'en' | 'fa';
 export type { UsageBudgetSettings };
 export type { LlmSettings };
 
@@ -53,6 +56,26 @@ export function setTheme(theme: Theme): void {
   } catch {
     /* storage full / disabled (e.g. private-browsing quota) — non-fatal */
   }
+}
+
+export function getLanguage(): Language {
+  try {
+    return window.localStorage.getItem(LANG_KEY) === 'fa' ? 'fa' : 'en';
+  } catch {
+    return 'en';
+  }
+}
+export function setLanguage(lang: Language): void {
+  try {
+    window.localStorage.setItem(LANG_KEY, lang);
+  } catch {
+    /* storage full / disabled (e.g. private-browsing quota) — non-fatal */
+  }
+}
+
+/** The writing direction for a language. Used to set `dir` on <html>. */
+export function directionFor(lang: Language): 'rtl' | 'ltr' {
+  return lang === 'fa' ? 'rtl' : 'ltr';
 }
 
 export function getUsageBudget(): UsageBudgetSettings {

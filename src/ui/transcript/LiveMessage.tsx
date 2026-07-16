@@ -1,4 +1,5 @@
 import { type CSSProperties, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { AgentLanguage } from '../../domain/schema';
 import { dirForLanguage } from '../../domain/language';
 import { extractInlineThinking } from '../../providers/openaiAdapter';
@@ -31,6 +32,7 @@ export function LiveMessage({
   color?: string;
   language: AgentLanguage;
 }) {
+  const { t } = useTranslation();
   const style = color ? ({ '--agent-color': color } as CSSProperties) : undefined;
   const [showReasoning, setShowReasoning] = useState(false);
   const split = extractInlineThinking(text);
@@ -57,11 +59,11 @@ export function LiveMessage({
             aria-expanded={showReasoning}
             onClick={() => setShowReasoning((v) => !v)}
           >
-            thinking {showReasoning ? '▾' : '▸'}
+            {t('transcript.thinking')} {showReasoning ? '▾' : '▸'}
           </button>
         )}
         <span className={styles.liveBadge}>
-          {toolStatus ?? (thinking ? 'thinking…' : 'streaming…')}
+          {toolStatus ?? (thinking ? t('transcript.thinkingBadge') : t('transcript.streamingBadge'))}
         </span>
       </div>
       {showReasoning && reasoning && (

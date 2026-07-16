@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import type { Connection, ConnectionType } from '../../domain/schema';
 import { useDomainStore } from '../../store/domainStore';
 import { useUiStore } from '../../store/uiStore';
@@ -19,13 +20,14 @@ function parsePriority(raw: string): number | null {
   return Math.trunc(n);
 }
 
-const TYPE_DESCRIPTIONS: Record<ConnectionType, string> = {
-  conversation: 'The target may respond after the source.',
-  review: "The target reviews the source's most recent answer.",
-  handoff: "The target receives the source output as its primary task context.",
+const TYPE_DESC_KEYS: Record<ConnectionType, string> = {
+  conversation: 'inspector.connTypeDesc_conversation',
+  review: 'inspector.connTypeDesc_review',
+  handoff: 'inspector.connTypeDesc_handoff',
 };
 
 export function ConnectionInspector({ connection }: { connection: Connection }) {
+  const { t } = useTranslation();
   const playground = useDomainStore((s) => s.playground)!;
   const update = useDomainStore((s) => s.updateConnection);
   const remove = useDomainStore((s) => s.removeConnection);
@@ -38,11 +40,11 @@ export function ConnectionInspector({ connection }: { connection: Connection }) 
 
   return (
     <fieldset className={styles.body} disabled={isRunning}>
-      {isRunning && <p className={styles.hint}>Editing is locked while a conversation is running.</p>}
+      {isRunning && <p className={styles.hint}>{t('inspector.editingLocked')}</p>}
       <div className={styles.connHeader}>
-        <strong>{source?.name ?? 'deleted'}</strong>
+        <strong dir="auto">{source?.name ?? t('inspector.deleted')}</strong>
         <span className={styles.arrow}>→</span>
-        <strong>{target?.name ?? 'deleted'}</strong>
+        <strong dir="auto">{target?.name ?? t('inspector.deleted')}</strong>
       </div>
 
       <label className={styles.enableToggle}>
@@ -51,30 +53,30 @@ export function ConnectionInspector({ connection }: { connection: Connection }) 
           checked={connection.enabled}
           onChange={(e) => update(connection.id, { enabled: e.target.checked })}
         />
-        Enabled
+        {t('inspector.enabled')}
       </label>
 
       <div className="field">
-        <label htmlFor="cn-type">Connection type</label>
+        <label htmlFor="cn-type">{t('inspector.connectionType')}</label>
         <select
           id="cn-type"
           value={connection.type}
           onChange={(e) => update(connection.id, { type: e.target.value as ConnectionType })}
         >
-          <option value="conversation">Conversation flow</option>
-          <option value="review">Review flow</option>
-          <option value="handoff">Handoff flow</option>
+          <option value="conversation">{t('inspector.connTypeConversationOption')}</option>
+          <option value="review">{t('inspector.connTypeReviewOption')}</option>
+          <option value="handoff">{t('inspector.connTypeHandoffOption')}</option>
         </select>
-        <p className={styles.hint}>{TYPE_DESCRIPTIONS[connection.type]}</p>
+        <p className={styles.hint}>{t(TYPE_DESC_KEYS[connection.type])}</p>
       </div>
 
       <div className="field">
-        <label htmlFor="cn-label">Label (optional)</label>
+        <label htmlFor="cn-label">{t('inspector.labelOptionalLabel')}</label>
         <input id="cn-label" value={connection.label ?? ''} onChange={(e) => update(connection.id, { label: e.target.value })} />
       </div>
 
       <div className="field">
-        <label htmlFor="cn-priority">Priority (higher runs first)</label>
+        <label htmlFor="cn-priority">{t('inspector.priorityLabel')}</label>
         <input
           id="cn-priority"
           type="number"
@@ -87,13 +89,13 @@ export function ConnectionInspector({ connection }: { connection: Connection }) 
       </div>
 
       <div className="field">
-        <label htmlFor="cn-override">Instruction override (optional)</label>
+        <label htmlFor="cn-override">{t('inspector.instructionOverrideLabel')}</label>
         <textarea
           id="cn-override"
           rows={2}
           value={connection.instructionOverride ?? ''}
           onChange={(e) => update(connection.id, { instructionOverride: e.target.value })}
-          placeholder="Focus only on factual weaknesses in the previous response."
+          placeholder={t('inspector.instructionOverridePlaceholder')}
         />
       </div>
 
@@ -102,9 +104,12 @@ export function ConnectionInspector({ connection }: { connection: Connection }) 
         className="danger"
         onClick={async () => {
           const ok = await requestConfirm({
-            title: 'Delete connection',
-            message: `Delete the connection ${source?.name ?? 'deleted'} → ${target?.name ?? 'deleted'}?`,
-            confirmLabel: 'Delete',
+            title: t('inspector.deleteConnectionTitle'),
+            message: t('inspector.deleteConnectionMessage', {
+              source: source?.name ?? t('inspector.deleted'),
+              target: target?.name ?? t('inspector.deleted'),
+            }),
+            confirmLabel: t('common.delete'),
             danger: true,
           });
           if (!ok) return;
@@ -112,7 +117,7 @@ export function ConnectionInspector({ connection }: { connection: Connection }) 
           clearSelection();
         }}
       >
-        Delete connection
+        {t('inspector.deleteConnectionButton')}
       </button>
     </fieldset>
   );

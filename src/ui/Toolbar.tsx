@@ -1,4 +1,5 @@
 import { useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useDomainStore } from '../store/domainStore';
 import { useProviderStore } from '../store/providerStore';
 import { useUiStore } from '../store/uiStore';
@@ -8,14 +9,8 @@ import { startRun, stopRun, pauseRun, resumeRun } from '../orchestrator/orchestr
 import { hasBlockingErrors, validateForRun } from '../orchestrator/validate';
 import styles from './Toolbar.module.css';
 
-const SAVE_LABEL: Record<string, string> = {
-  saved: 'Saved',
-  saving: 'Saving…',
-  unsaved: 'Unsaved changes',
-  failed: 'Save failed',
-};
-
 export function Toolbar() {
+  const { t } = useTranslation();
   const playground = useDomainStore((s) => s.playground);
   const saveStatus = useDomainStore((s) => s.saveStatus);
   const renamePlayground = useDomainStore((s) => s.renamePlayground);
@@ -45,7 +40,7 @@ export function Toolbar() {
   function handleRerun() {
     if (!playground) return;
     if (hasBlockingErrors(validateForRun(playground, providers))) {
-      showToast('warn', 'Fix configuration issues before running. Opening run setup.');
+      showToast('warn', t('toolbar.fixConfigBeforeRun'));
       setPanel('run');
       return;
     }
@@ -55,9 +50,9 @@ export function Toolbar() {
 
   async function handleClearChat() {
     const ok = await requestConfirm({
-      title: 'Clear chat',
-      message: 'Remove the entire conversation transcript? This cannot be undone.',
-      confirmLabel: 'Clear chat',
+      title: t('toolbar.clearChat'),
+      message: t('toolbar.clearChatConfirm'),
+      confirmLabel: t('toolbar.clearChat'),
       danger: true,
     });
     if (ok) clearTranscript();
@@ -74,14 +69,14 @@ export function Toolbar() {
     a.download = `${playground.name.replace(/[^\w.-]+/g, '_') || 'playground'}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    showToast('info', 'Exported playground (API keys excluded).');
+    showToast('info', t('toolbar.exported'));
   }
 
   async function handleImportFile(file: File) {
     const text = await file.text();
     const result = importFromJson(text, true);
     if (!result.ok || !result.playground) {
-      showToast('error', result.error ?? 'Import failed.');
+      showToast('error', result.error ?? t('toolbar.importFailed'));
       return;
     }
     // Merge the file's providers into the global registry (deduped by id) so the
@@ -91,7 +86,7 @@ export function Toolbar() {
     if (result.warnings.length) {
       showToast('warn', result.warnings[0]);
     } else {
-      showToast('info', 'Imported playground as a new copy.');
+      showToast('info', t('toolbar.imported'));
     }
   }
 
@@ -101,67 +96,68 @@ export function Toolbar() {
         <strong className={styles.brand}>Multi-Agent Playground</strong>
         <input
           className={styles.nameInput}
-          aria-label="Playground name"
+          aria-label={t('toolbar.playgroundName')}
           value={playground?.name ?? ''}
           onChange={(e) => renamePlayground(e.target.value)}
           disabled={!playground || isActive}
+          dir="auto"
         />
         <span className={`${styles.save} ${styles[`save_${saveStatus}`] ?? ''}`}>
-          {SAVE_LABEL[saveStatus]}
+          {t(`toolbar.saveStatus.${saveStatus}`)}
         </span>
         {saveStatus === 'failed' && (
           <button
             type="button"
             className="danger"
             onClick={() => void flushSave()}
-            title="Retry saving the playground"
+            title={t('toolbar.retryTitle')}
           >
-            Retry
+            {t('toolbar.retry')}
           </button>
         )}
       </div>
 
       <div className={styles.right}>
-        <div className={styles.group} role="group" aria-label="Playground file actions">
+        <div className={styles.group} role="group" aria-label={t('toolbar.fileActions')}>
           <button type="button" className="secondary" onClick={() => newPlayground('Untitled Playground')} disabled={isActive}>
-            New
+            {t('toolbar.new')}
           </button>
-          <button type="button" className="secondary" onClick={() => setPanel('playgrounds')}>Open</button>
+          <button type="button" className="secondary" onClick={() => setPanel('playgrounds')}>{t('toolbar.open')}</button>
           <button type="button" className="secondary" onClick={() => fileInput.current?.click()} disabled={isActive}>
-            Import
+            {t('toolbar.import')}
           </button>
           <button type="button" className="secondary" onClick={handleExport} disabled={!playground}>
-            Export
+            {t('toolbar.export')}
           </button>
         </div>
         <span className={styles.sep} />
-        <div className={styles.group} role="group" aria-label="Manage">
-          <button type="button" className="secondary" onClick={() => setPanel('providers')}>Providers</button>
-          <button type="button" className="secondary" onClick={() => setPanel('usage')}>Usage</button>
-          <button type="button" className="secondary" onClick={() => setPanel('skills')} disabled={!playground}>Skills</button>
+        <div className={styles.group} role="group" aria-label={t('toolbar.manage')}>
+          <button type="button" className="secondary" onClick={() => setPanel('providers')}>{t('toolbar.providers')}</button>
+          <button type="button" className="secondary" onClick={() => setPanel('usage')}>{t('toolbar.usage')}</button>
+          <button type="button" className="secondary" onClick={() => setPanel('skills')} disabled={!playground}>{t('toolbar.skills')}</button>
           <button
             type="button"
             className="secondary"
             onClick={() => setPanel('runHistory')}
             disabled={!playground}
-            title="View versioned conversation run history"
+            title={t('toolbar.runsTitle')}
           >
-            Runs
+            {t('toolbar.runs')}
           </button>
           <button
             type="button"
             className="secondary"
             onClick={() => setPanel('timeline')}
             disabled={!playground}
-            title="View the conversation as a timeline"
+            title={t('toolbar.timelineTitle')}
           >
-            Timeline
+            {t('toolbar.timeline')}
           </button>
           <button type="button" className="secondary" onClick={() => setPanel('settings')}>
-            Settings
+            {t('toolbar.settings')}
           </button>
           <button type="button" className="danger" onClick={handleClearChat} disabled={isActive}>
-            Clear chat
+            {t('toolbar.clearChat')}
           </button>
         </div>
         <span className={styles.sep} />
@@ -172,33 +168,33 @@ export function Toolbar() {
                 type="button"
                 className="secondary"
                 onClick={() => pauseRun()}
-                title="Pause after the current turn finishes"
+                title={t('toolbar.pauseTitle')}
               >
-                Pause
+                {t('toolbar.pause')}
               </button>
             )}
             {isPaused && (
               <button type="button" className="primary" onClick={() => resumeRun()}>
-                Resume
+                {t('toolbar.resume')}
               </button>
             )}
             <button type="button" className="danger" onClick={() => stopRun()}>
-              Stop
+              {t('toolbar.stop')}
             </button>
           </>
         ) : (
           <>
             {(playground?.transcript.length ?? 0) > 0 && (
-              <button type="button" className="secondary" onClick={handleRerun} title="Clear transcript and run again">
-                Rerun
+              <button type="button" className="secondary" onClick={handleRerun} title={t('toolbar.rerunTitle')}>
+                {t('toolbar.rerun')}
               </button>
             )}
             <button type="button" className="primary" onClick={() => setPanel('run')} disabled={!playground}>
-              Run…
+              {t('toolbar.run')}
             </button>
           </>
         )}
-        <button type="button" className="icon ghost" aria-label="Toggle theme" onClick={toggleTheme} title="Toggle theme">
+        <button type="button" className="icon ghost" aria-label={t('toolbar.toggleTheme')} onClick={toggleTheme} title={t('toolbar.toggleTheme')}>
           {theme === 'dark' ? '☀' : '☾'}
         </button>
       </div>

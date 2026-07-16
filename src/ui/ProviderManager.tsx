@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import type { Provider } from '../domain/schema';
 import { deriveAuthMethod } from './providerAuth';
 import { useProviderStore } from '../store/providerStore';
@@ -11,6 +13,7 @@ import { listModels, type ListedModel } from '../providers/listModels';
 import { testConnection, type TestConnectionResult } from '../providers/testConnection';
 import { DEFAULT_OPENROUTER_PRICES, formatUsd } from '../usage/pricing';
 import { useUsageStore } from '../store/usageStore';
+import { formatNumber } from '../i18n/format';
 import { Modal } from './Modal';
 import styles from './ProviderManager.module.css';
 
@@ -49,6 +52,7 @@ const PRESETS: Preset[] = [
 ];
 
 export function ProviderManager() {
+  const { t } = useTranslation();
   const addProvider = useProviderStore((s) => s.addProvider);
   const updateProvider = useProviderStore((s) => s.updateProvider);
   const removeProvider = useProviderStore((s) => s.removeProvider);
@@ -74,9 +78,9 @@ export function ProviderManager() {
 
   async function handleDelete(p: Provider) {
     const ok = await requestConfirm({
-      title: 'Delete provider',
-      message: `Delete provider "${p.displayName}"? Agents using it will be unassigned.`,
-      confirmLabel: 'Delete',
+      title: t('providers.deleteProviderTitle'),
+      message: t('providers.deleteConfirmMessage', { name: p.displayName }),
+      confirmLabel: t('common.delete'),
       danger: true,
     });
     if (!ok) return;
@@ -86,22 +90,24 @@ export function ProviderManager() {
   }
 
   return (
-    <Modal title="LLM providers" onClose={() => setPanel('none')} width={900}>
+    <Modal title={t('providers.title')} onClose={() => setPanel('none')} width={900}>
       <p className={styles.intro}>
-        Connect any OpenAI-compatible endpoint that is reachable from this browser. Providers are
-        shared across every playground in this browser. Localhost servers (Ollama, LM Studio) require
-        running the app locally (<code>npm run dev</code>). API keys are stored on this device — never
-        use unrestricted production keys.
+        <Trans i18nKey="providers.intro" components={{ code: <code /> }}>
+          Connect any OpenAI-compatible endpoint that is reachable from this browser. Providers are
+          shared across every playground in this browser. Localhost servers (Ollama, LM Studio) require
+          running the app locally (<code>npm run dev</code>). API keys are stored on this device — never
+          use unrestricted production keys.
+        </Trans>
       </p>
 
       <div className={styles.layout}>
-        <aside className={styles.list} aria-label="Provider list">
+        <aside className={styles.list} aria-label={t('providers.providerListAria')}>
           <button type="button" className={`primary ${styles.addBtn}`} onClick={handleAdd}>
-            + Add provider
+            {t('providers.addProvider')}
           </button>
 
           {providers.length === 0 ? (
-            <p className={styles.listEmpty}>No providers yet. Add one to get started.</p>
+            <p className={styles.listEmpty}>{t('providers.noProvidersYet')}</p>
           ) : (
             <div className={styles.listItems}>
               {providers.map((p) => (
@@ -116,10 +122,10 @@ export function ProviderManager() {
                     aria-hidden="true"
                   />
                   <span className={styles.listMeta}>
-                    <span className={styles.listName}>{p.displayName}</span>
+                    <span className={styles.listName} dir="auto">{p.displayName}</span>
                     <span className={styles.listSub}>
-                      {providerHost(p.baseUrl)}
-                      {p.models.length > 0 && ` · ${p.models.length} model${p.models.length === 1 ? '' : 's'}`}
+                      <span dir="auto">{providerHost(p.baseUrl, t('providers.noUrl'))}</span>
+                      {p.models.length > 0 && ` · ${t('providers.modelCount', { count: p.models.length })}`}
                     </span>
                   </span>
                 </button>
@@ -139,9 +145,9 @@ export function ProviderManager() {
             />
           ) : (
             <div className={styles.editorEmpty}>
-              <p className={styles.editorEmptyTitle}>No provider selected</p>
-              <p className="muted">Choose a provider from the list or add a new one.</p>
-              <button type="button" className="primary" onClick={handleAdd}>+ Add provider</button>
+              <p className={styles.editorEmptyTitle}>{t('providers.noProviderSelected')}</p>
+              <p className="muted">{t('providers.chooseProvider')}</p>
+              <button type="button" className="primary" onClick={handleAdd}>{t('providers.addProvider')}</button>
             </div>
           )}
         </div>
@@ -150,8 +156,8 @@ export function ProviderManager() {
   );
 }
 
-function providerHost(baseUrl: string): string {
-  if (!baseUrl) return 'No URL';
+function providerHost(baseUrl: string, noUrlLabel: string): string {
+  if (!baseUrl) return noUrlLabel;
   try {
     return new URL(baseUrl).host;
   } catch {
@@ -172,6 +178,8 @@ function ProviderEditor({
   onDuplicate: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useTranslation();
+  const language = useUiStore((s) => s.language);
   const [testResult, setTestResult] = useState<TestConnectionResult | null>(null);
   const [busy, setBusy] = useState<'test' | 'fetch' | null>(null);
   const [banner, setBanner] = useState<Banner>(null);
@@ -305,7 +313,7 @@ function ProviderEditor({
     }
     if (!testModel.trim() || !models.includes(testModel)) setTestModel(defaultModel);
     setFetchedModels(null);
-    setBanner({ kind: 'ok', text: `${models.length} model${models.length === 1 ? '' : 's'} configured.` });
+    setBanner({ kind: 'ok', text: t('providers.modelsConfigured', { count: models.length }) });
   }
 
   async function handleFetchModels() {
@@ -324,14 +332,17 @@ function ProviderEditor({
         setFetchedModels(result.models);
         setBanner({
           kind: 'info',
-          text: `${result.models.length} model${result.models.length === 1 ? '' : 's'} found — choose which to add.`,
+          text: t('providers.modelsFound', { count: result.models.length }),
         });
       } else if (result.ok) {
-        setBanner({ kind: 'err', text: `Connected in ${result.durationMs}ms, but the server listed no models.` });
+        setBanner({ kind: 'err', text: t('providers.connectedNoModels', { ms: result.durationMs }) });
       } else {
         setBanner({
           kind: 'err',
-          text: `Failed (${result.errorKind ?? 'error'}): ${result.errorSummary ?? 'Could not list models.'}`,
+          text: t('providers.fetchFailed', {
+            kind: result.errorKind ?? 'error',
+            summary: result.errorSummary ?? t('providers.couldNotListModels'),
+          }),
         });
       }
     } finally {
@@ -375,10 +386,11 @@ function ProviderEditor({
           <input
             className={styles.nameInput}
             id="pv-name"
+            dir="auto"
             value={provider.displayName}
             onChange={(e) => onChange({ displayName: e.target.value })}
-            aria-label="Display name"
-            placeholder="Provider name"
+            aria-label={t('providers.displayNameAria')}
+            placeholder={t('providers.providerNamePlaceholder')}
           />
           <label className={styles.enableToggle}>
             <input
@@ -386,18 +398,18 @@ function ProviderEditor({
               checked={provider.enabled}
               onChange={(e) => onChange({ enabled: e.target.checked })}
             />
-            {provider.enabled ? 'Enabled' : 'Disabled'}
+            {provider.enabled ? t('providers.enabled') : t('providers.disabled')}
           </label>
         </div>
         <div className={styles.editorHeaderActions}>
-          <button type="button" onClick={onDuplicate}>Duplicate</button>
-          <button type="button" className="danger" onClick={onDelete}>Delete</button>
+          <button type="button" onClick={onDuplicate}>{t('providers.duplicate')}</button>
+          <button type="button" className="danger" onClick={onDelete}>{t('common.delete')}</button>
         </div>
       </header>
 
       {showPresets && (
-        <div className={styles.presets} role="group" aria-label="Quick start">
-          <span className={styles.presetsLabel}>Quick start</span>
+        <div className={styles.presets} role="group" aria-label={t('providers.quickStart')}>
+          <span className={styles.presetsLabel}>{t('providers.quickStart')}</span>
           <div className={styles.presetChips}>
             {PRESETS.map((preset) => (
               <button
@@ -405,6 +417,7 @@ function ProviderEditor({
                 type="button"
                 className={styles.presetChip}
                 onClick={() => applyPreset(preset)}
+                dir="auto"
               >
                 {preset.label}
               </button>
@@ -415,24 +428,25 @@ function ProviderEditor({
 
       {/* ── Connection ── */}
       <section className={styles.group}>
-        <h3 className={styles.groupTitle}>Connection</h3>
+        <h3 className={styles.groupTitle}>{t('providers.connection')}</h3>
         <div className="field">
-          <label htmlFor="pv-url">Base URL</label>
+          <label htmlFor="pv-url">{t('providers.baseUrl')}</label>
           <input
             id="pv-url"
+            dir="auto"
             value={provider.baseUrl}
             onChange={(e) => onChange({ baseUrl: e.target.value })}
             placeholder="https://api.example.com"
             spellCheck={false}
           />
-          {!urlValidation.ok && hasUrl && <p className={styles.err}>{urlValidation.reason}</p>}
+          {!urlValidation.ok && hasUrl && <p className={styles.err} dir="auto">{urlValidation.reason}</p>}
           {reachability && !reachability.ok && (
             <div className={styles.reachErr} role="alert">
-              <p className={styles.err}>{reachability.message}</p>
+              <p className={styles.err} dir="auto">{reachability.message}</p>
               {reachability.hints.length > 0 && (
                 <ul className={styles.reachHints}>
                   {reachability.hints.map((h) => (
-                    <li key={h}>{h}</li>
+                    <li key={h} dir="auto">{h}</li>
                   ))}
                 </ul>
               )}
@@ -440,27 +454,31 @@ function ProviderEditor({
           )}
           {reachability?.ok && reachability.issue === 'cors-required' && (
             <p className={styles.reachWarn} role="status">
-              {reachability.message} Use <strong>Test connection</strong> before running.
+              <span dir="auto">{reachability.message}</span>{' '}
+              <Trans i18nKey="providers.corsUseTestHint" components={{ strong: <strong /> }}>
+                Use <strong>Test connection</strong> before running.
+              </Trans>
             </p>
           )}
         </div>
 
         <div className="field">
-          <label htmlFor="pv-key">API key</label>
+          <label htmlFor="pv-key">{t('providers.apiKey')}</label>
           <div className={styles.keyRow}>
             <input
               id="pv-key"
+              dir="auto"
               type={showKey ? 'text' : 'password'}
               value={provider.apiKey ?? ''}
               onChange={(e) => setKey(e.target.value)}
-              placeholder="sk-…  (leave empty for local servers)"
+              placeholder={t('providers.apiKeyPlaceholder')}
               autoComplete="off"
               spellCheck={false}
             />
             <button type="button" onClick={() => setShowKey((v) => !v)}>
-              {showKey ? 'Hide' : 'Show'}
+              {showKey ? t('providers.hide') : t('providers.show')}
             </button>
-            {provider.apiKey ? <button type="button" onClick={clearKey}>Clear</button> : null}
+            {provider.apiKey ? <button type="button" onClick={clearKey}>{t('providers.clear')}</button> : null}
           </div>
           <label className={styles.rememberRow}>
             <input
@@ -469,23 +487,24 @@ function ProviderEditor({
               onChange={(e) => setRemember(e.target.checked)}
             />
             <span>
-              Remember key in this browser
+              {t('providers.rememberKey')}
               <span className={styles.rememberHint}>
                 {provider.credentialStorage === 'local'
-                  ? 'Persists in local storage until cleared. Not a secure vault.'
-                  : 'Off: the key is cleared when this tab closes.'}
+                  ? t('providers.rememberHintLocal')
+                  : t('providers.rememberHintSession')}
               </span>
             </span>
           </label>
         </div>
 
         <details className={styles.advanced}>
-          <summary className={styles.advancedSummary}>Advanced</summary>
+          <summary className={styles.advancedSummary}>{t('providers.advanced')}</summary>
           <div className={styles.advancedBody}>
             <div className="field">
-              <label htmlFor="pv-path">Chat completions path</label>
+              <label htmlFor="pv-path">{t('providers.chatCompletionsPath')}</label>
               <input
                 id="pv-path"
+                dir="auto"
                 value={provider.path}
                 onChange={(e) => onChange({ path: e.target.value })}
                 placeholder="/v1/chat/completions"
@@ -493,7 +512,7 @@ function ProviderEditor({
               />
             </div>
             <div className="field">
-              <label htmlFor="pv-timeout">Request timeout (ms)</label>
+              <label htmlFor="pv-timeout">{t('providers.requestTimeout')}</label>
               <input
                 id="pv-timeout"
                 type="number"
@@ -507,7 +526,7 @@ function ProviderEditor({
               />
             </div>
             <p className={styles.hint}>
-              Leave the path at the default unless your host uses a custom route.
+              {t('providers.pathHint')}
             </p>
             {import.meta.env.DEV && (
               <label className={styles.rememberRow}>
@@ -533,8 +552,8 @@ function ProviderEditor({
       <section className={styles.group}>
         <div className={styles.groupHeadRow}>
           <h3 className={styles.groupTitle}>
-            Models
-            {provider.models.length > 0 && <span className={styles.countBadge}>{provider.models.length}</span>}
+            {t('providers.models')}
+            {provider.models.length > 0 && <span className={styles.countBadge}>{formatNumber(provider.models.length, language)}</span>}
           </h3>
           <button
             type="button"
@@ -545,10 +564,10 @@ function ProviderEditor({
                 ? undefined
                 : reachability && !reachability.ok
                   ? reachability.message
-                  : 'Enter a valid base URL first'
+                  : t('providers.enterValidUrlFirst')
             }
           >
-            {busy === 'fetch' ? 'Fetching…' : 'Fetch from provider'}
+            {busy === 'fetch' ? t('providers.fetching') : t('providers.fetchFromProvider')}
           </button>
         </div>
 
@@ -557,6 +576,7 @@ function ProviderEditor({
             className={banner.kind === 'err' ? styles.err : styles.hint}
             role="status"
             aria-live="polite"
+            dir="auto"
           >
             {banner.text}
           </p>
@@ -573,7 +593,7 @@ function ProviderEditor({
         )}
 
         {provider.models.length > 0 ? (
-          <ul className={styles.modelCatalog} aria-label="Configured models">
+          <ul className={styles.modelCatalog} aria-label={t('providers.configuredModels')}>
             {provider.models.map((model) => (
               <li key={model} className={styles.modelRow}>
                 <label className={styles.modelDefault}>
@@ -582,20 +602,20 @@ function ProviderEditor({
                     name={`default-${provider.id}`}
                     checked={provider.defaultModel === model}
                     onChange={() => onChange({ defaultModel: model })}
-                    aria-label={`Set ${model} as default`}
+                    aria-label={t('providers.setModelAsDefault', { model })}
                   />
                   <span className={styles.modelDefaultLabel}>
-                    {provider.defaultModel === model ? 'Default' : 'Set default'}
+                    {provider.defaultModel === model ? t('providers.default') : t('providers.setDefault')}
                   </span>
                 </label>
-                <code className={styles.modelId}>{model}</code>
+                <code className={styles.modelId} dir="auto">{model}</code>
                 <button
                   type="button"
                   className={styles.modelRemove}
                   onClick={() => removeModel(model)}
-                  aria-label={`Remove ${model}`}
+                  aria-label={t('providers.removeModel', { model })}
                 >
-                  Remove
+                  {t('common.remove')}
                 </button>
               </li>
             ))}
@@ -603,7 +623,7 @@ function ProviderEditor({
         ) : (
           !fetchedModels && (
             <p className={styles.modelsEmpty}>
-              No models yet. Fetch them from your provider or add a model ID below.
+              {t('providers.noModelsYet')}
             </p>
           )
         )}
@@ -618,35 +638,38 @@ function ProviderEditor({
           <input
             value={manualModel}
             onChange={(e) => setManualModel(e.target.value)}
-            placeholder="Add model ID manually"
-            aria-label="Model ID to add"
+            placeholder={t('providers.addModelPlaceholder')}
+            aria-label={t('providers.modelIdToAdd')}
+            dir="auto"
             spellCheck={false}
           />
-          <button type="submit" disabled={!manualModel.trim()}>Add</button>
+          <button type="submit" disabled={!manualModel.trim()}>{t('common.add')}</button>
         </form>
       </section>
 
       {/* ── Test ── */}
       <section className={styles.group}>
-        <h3 className={styles.groupTitle}>Test connection</h3>
+        <h3 className={styles.groupTitle}>{t('providers.testConnection')}</h3>
         <div className={styles.testRow}>
           {provider.models.length > 0 ? (
             <select
               value={testModel}
               onChange={(e) => setTestModel(e.target.value)}
-              aria-label="Model to test"
+              aria-label={t('providers.modelToTest')}
+              dir="auto"
             >
-              <option value="">Default / auto-detect</option>
+              <option value="">{t('providers.defaultAutoDetect')}</option>
               {provider.models.map((m) => (
-                <option key={m} value={m}>{m}</option>
+                <option key={m} value={m} dir="auto">{m}</option>
               ))}
             </select>
           ) : (
             <input
               value={testModel}
               onChange={(e) => setTestModel(e.target.value)}
-              placeholder="Model to test (optional)"
-              aria-label="Model to test"
+              placeholder={t('providers.modelToTestPlaceholder')}
+              aria-label={t('providers.modelToTest')}
+              dir="auto"
               spellCheck={false}
             />
           )}
@@ -656,11 +679,11 @@ function ProviderEditor({
             onClick={handleTest}
             disabled={busy !== null || !canQuery}
           >
-            {busy === 'test' ? 'Testing…' : 'Run test'}
+            {busy === 'test' ? t('providers.testing') : t('providers.runTest')}
           </button>
         </div>
         <p className={styles.hint}>
-          Sends a minimal chat completion to verify the endpoint, key, and response format.
+          {t('providers.testHint')}
         </p>
 
         {testResult && <TestResultView result={testResult} />}
@@ -670,6 +693,7 @@ function ProviderEditor({
 }
 
 function TestResultView({ result }: { result: TestConnectionResult }) {
+  const { t } = useTranslation();
   return (
     <div
       className={result.ok ? styles.testOk : styles.testFail}
@@ -678,34 +702,36 @@ function TestResultView({ result }: { result: TestConnectionResult }) {
     >
       {result.ok ? (
         <>
-          <strong>Connection successful</strong>
+          <strong>{t('providers.connectionSuccessful')}</strong>
           <span className={styles.testMeta}>
-            HTTP {result.status} · {result.durationMs}ms
+            {t('providers.testMeta', { status: result.status, ms: result.durationMs })}
           </span>
           {result.models && result.models.length > 0 && (
-            <div className={styles.testDetail}>{result.models.length} model(s) available</div>
+            <div className={styles.testDetail}>{t('providers.modelsAvailable', { count: result.models.length })}</div>
           )}
-          {result.responseText && <pre className={styles.testResp}>{result.responseText}</pre>}
+          {result.responseText && <pre className={styles.testResp} dir="auto">{result.responseText}</pre>}
         </>
       ) : (
         <>
-          <strong>Connection failed — {result.errorKind}</strong>
+          <strong>{t('providers.connectionFailed', { kind: result.errorKind })}</strong>
           <span className={styles.testMeta}>
-            {result.status ? `HTTP ${result.status} · ` : ''}{result.durationMs}ms
+            {result.status
+              ? t('providers.testMeta', { status: result.status, ms: result.durationMs })
+              : t('providers.durationMs', { ms: result.durationMs })}
           </span>
-          <div>{result.errorSummary}</div>
-          {result.errorDetail && <div className={styles.testDetail}>{result.errorDetail}</div>}
+          <div dir="auto">{result.errorSummary}</div>
+          {result.errorDetail && <div className={styles.testDetail} dir="auto">{result.errorDetail}</div>}
         </>
       )}
     </div>
   );
 }
 
-function formatModelPriceLabel(m: ListedModel): string | null {
+function formatModelPriceLabel(m: ListedModel, t: TFunction): string | null {
   if (m.inputPer1M === undefined && m.outputPer1M === undefined) return null;
   const input = formatUsd(m.inputPer1M ?? 0);
   const output = formatUsd(m.outputPer1M ?? 0);
-  return `${input} in / ${output} out`;
+  return t('providers.priceInOut', { input, output });
 }
 
 function ModelImportPanel({
@@ -721,6 +747,7 @@ function ModelImportPanel({
   onApply: (selected: ListedModel[], defaultModel: string) => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const existingSet = new Set(existingModels);
   const modelIds = useMemo(() => models.map((m) => m.id), [models]);
   const hasAnyPricing = models.some(
@@ -772,18 +799,18 @@ function ModelImportPanel({
   }
 
   return (
-    <div className={styles.importPanel} role="region" aria-label="Import models from provider">
+    <div className={styles.importPanel} role="region" aria-label={t('providers.importModelsAria')}>
       <div className={styles.importHeader}>
         <div>
-          <strong>Import models</strong>
+          <strong>{t('providers.importModels')}</strong>
           <p className={styles.importSub}>
-            {selectedList.length} of {models.length} selected
-            {hasAnyPricing ? ' · prices USD / 1M tokens' : ''}
+            {t('providers.selectedOfTotal', { selected: selectedList.length, total: models.length })}
+            {hasAnyPricing ? t('providers.pricesUsd') : ''}
           </p>
         </div>
         <div className={styles.importHeaderActions}>
-          <button type="button" onClick={() => setSelected(new Set(modelIds))}>Select all</button>
-          <button type="button" onClick={() => setSelected(new Set())}>Clear</button>
+          <button type="button" onClick={() => setSelected(new Set(modelIds))}>{t('providers.selectAll')}</button>
+          <button type="button" onClick={() => setSelected(new Set())}>{t('providers.clear')}</button>
         </div>
       </div>
 
@@ -791,20 +818,21 @@ function ModelImportPanel({
         className={styles.importFilter}
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
-        placeholder="Filter models…"
-        aria-label="Filter models"
+        placeholder={t('providers.filterModelsPlaceholder')}
+        aria-label={t('providers.filterModels')}
+        dir="auto"
       />
 
       <div className={styles.importList}>
         {filtered.length === 0 ? (
-          <p className="muted" style={{ fontSize: 12, margin: 0 }}>No models match your filter.</p>
+          <p className="muted" style={{ fontSize: 12, margin: 0 }}>{t('providers.noModelsMatch')}</p>
         ) : (
           filtered.map((m) => {
-            const priceLabel = formatModelPriceLabel(m);
+            const priceLabel = formatModelPriceLabel(m, t);
             return (
               <label key={m.id} className={styles.importItem}>
                 <input type="checkbox" checked={selected.has(m.id)} onChange={() => toggle(m.id)} />
-                <span className={styles.importModelId}>{m.id}</span>
+                <span className={styles.importModelId} dir="auto">{m.id}</span>
                 {priceLabel && <span className={styles.importPrice}>{priceLabel}</span>}
               </label>
             );
@@ -814,17 +842,18 @@ function ModelImportPanel({
 
       <div className={styles.importFooter}>
         <div className="field" style={{ margin: 0, flex: 1 }}>
-          <label htmlFor="import-default-model">Default model</label>
+          <label htmlFor="import-default-model">{t('providers.defaultModel')}</label>
           <select
             id="import-default-model"
             value={defaultModel}
             disabled={selectedList.length === 0}
             onChange={(e) => setDefaultModel(e.target.value)}
+            dir="auto"
           >
             {selectedList.map((m) => {
-              const price = formatModelPriceLabel(m);
+              const price = formatModelPriceLabel(m, t);
               return (
-                <option key={m.id} value={m.id}>
+                <option key={m.id} value={m.id} dir="auto">
                   {price ? `${m.id} (${price})` : m.id}
                 </option>
               );
@@ -832,14 +861,14 @@ function ModelImportPanel({
           </select>
         </div>
         <div className={styles.importButtons}>
-          <button type="button" onClick={onCancel}>Cancel</button>
+          <button type="button" onClick={onCancel}>{t('common.cancel')}</button>
           <button
             type="button"
             className="primary"
             disabled={selectedList.length === 0}
             onClick={() => onApply(selectedList, defaultModel)}
           >
-            Use {selectedList.length} model{selectedList.length === 1 ? '' : 's'}
+            {t('providers.useModels', { count: selectedList.length })}
           </button>
         </div>
       </div>

@@ -1,8 +1,10 @@
+import { useTranslation } from 'react-i18next';
 import { useDomainStore } from '../store/domainStore';
 import { useUiStore } from '../store/uiStore';
 import { useAgentLibraryStore } from '../store/agentLibraryStore';
 import { useRuntimeStore } from '../store/runtimeStore';
 import { instantiateFromLibrary } from '../domain/factories';
+import { formatDateTime } from '../i18n/format';
 import { Modal } from './Modal';
 import styles from './AgentLibraryPanel.module.css';
 
@@ -11,6 +13,8 @@ import styles from './AgentLibraryPanel.module.css';
  * playground, or dispose of it. Agents are saved from the inspector.
  */
 export function AgentLibraryPanel() {
+  const { t } = useTranslation();
+  const language = useUiStore((s) => s.language);
   const library = useAgentLibraryStore((s) => s.library);
   const disposeAgent = useAgentLibraryStore((s) => s.disposeAgent);
   const playground = useDomainStore((s) => s.playground);
@@ -36,22 +40,22 @@ export function AgentLibraryPanel() {
   }
 
   return (
-    <Modal title="Agent library" onClose={() => setPanel('none')} width={520}>
+    <Modal title={t('library.title')} onClose={() => setPanel('none')} width={520}>
       <p className="muted" style={{ marginTop: 0 }}>
-        Reusable agents you've saved. Add one to the current playground, or dispose of it.
-        Save an agent from its inspector panel.
+        {t('library.intro')}
       </p>
 
       {library.length === 0 ? (
-        <p className="muted">No saved agents yet.</p>
+        <p className="muted">{t('library.noSaved')}</p>
       ) : (
         <ul className={styles.list}>
           {library.map((s) => (
             <li key={s.id} className={styles.item}>
               <div className={styles.info}>
-                <span className={styles.name}>{s.name || 'Untitled agent'}</span>
+                <span className={styles.name} dir="auto">{s.name || t('library.untitledAgent')}</span>
                 <span className={styles.meta}>
-                  {s.agent.role ? `${s.agent.role} · ` : ''}saved {new Date(s.savedAt).toLocaleString()}
+                  {s.agent.role ? <span dir="auto">{s.agent.role} · </span> : null}
+                  {t('library.savedAt', { when: formatDateTime(s.savedAt, language) })}
                 </span>
               </div>
               <button
@@ -61,29 +65,29 @@ export function AgentLibraryPanel() {
                 disabled={isRunning || !playground}
                 title={
                   isRunning
-                    ? 'Cannot add agents while a conversation is running'
+                    ? t('library.cannotAddRunning')
                     : !playground
-                      ? 'Open or create a playground first'
+                      ? t('library.openPlaygroundFirst')
                       : undefined
                 }
               >
-                Add to playground
+                {t('library.addToPlayground')}
               </button>
               <button
                 type="button"
                 className={`${styles.disposeBtn} secondary`}
-                aria-label={`Dispose ${s.name}`}
+                aria-label={t('library.disposeAria', { name: s.name })}
                 onClick={async () => {
                   const ok = await requestConfirm({
-                    title: 'Dispose saved agent',
-                    message: `Dispose saved agent "${s.name}"? This removes it from the library.`,
-                    confirmLabel: 'Dispose',
+                    title: t('library.disposeTitle'),
+                    message: t('library.disposeMessage', { name: s.name }),
+                    confirmLabel: t('library.dispose'),
                     danger: true,
                   });
                   if (ok) void disposeAgent(s.id);
                 }}
               >
-                Dispose
+                {t('library.dispose')}
               </button>
             </li>
           ))}

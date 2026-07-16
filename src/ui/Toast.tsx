@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useUiStore } from '../store/uiStore';
 import styles from './Toast.module.css';
 
@@ -7,6 +8,7 @@ const ICON: Record<string, string> = { info: 'ℹ', warn: '⚠', error: '⚠' };
 const DURATION: Record<string, number> = { info: 5000, warn: 7000, error: 10000 };
 
 export function Toast() {
+  const { t } = useTranslation();
   const toast = useUiStore((s) => s.toast);
   const dismiss = useUiStore((s) => s.dismissToast);
   const [paused, setPaused] = useState(false);
@@ -32,8 +34,8 @@ export function Toast() {
       onBlurCapture={() => setPaused(false)}
     >
       <span className={styles.icon} aria-hidden="true">{ICON[toast.kind]}</span>
-      <span>{toast.message}</span>
-      <button type="button" aria-label="Dismiss" onClick={dismiss} className={`${styles.close} icon ghost`}>
+      <span dir="auto">{toast.message}</span>
+      <button type="button" aria-label={t('toast.dismiss')} onClick={dismiss} className={`${styles.close} icon ghost`}>
         ✕
       </button>
     </div>

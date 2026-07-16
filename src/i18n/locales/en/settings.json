@@ -1,0 +1,19 @@
+{
+  "title": "Settings",
+  "llmHeading": "LLM",
+  "requestDelayHelp": "Minimum wait after each LLM API call completes before the next one starts. Helps avoid provider rate limits (HTTP 429). Default 0 means no delay.",
+  "requestDelayLabel": "Request delay (ms)",
+  "delayPresetsLabel": "Delay presets",
+  "delayNone": "None",
+  "delayMs": "{{ms, number}} ms",
+  "appearanceHeading": "Appearance",
+  "languageLabel": "Language",
+  "insightHeading": "Timeline insights",
+  "insightHelp": "Provider and model used for the timeline's Summarize and Review. Leave on Auto to borrow a suitable agent's provider. Choosing a provider that allows browser (CORS) requests avoids the timeline being blocked.",
+  "insightProviderLabel": "Provider",
+  "insightProviderAuto": "Auto (borrow from an agent)",
+  "insightModelLabel": "Model",
+  "insightModelSelect": "— select —",
+  "insightModelPlaceholder": "model id",
+  "providerDisabledSuffix": " (disabled)"
+}

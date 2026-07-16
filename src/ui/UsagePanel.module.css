@@ -55,7 +55,7 @@
 
 .table th,
 .table td {
-  text-align: left;
+  text-align: start;
   padding: 6px 8px;
   border-bottom: 1px solid var(--border);
   vertical-align: middle;

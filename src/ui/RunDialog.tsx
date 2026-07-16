@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useDomainStore } from '../store/domainStore';
 import { useProviderStore } from '../store/providerStore';
 import { useRunPresetStore } from '../store/runPresetStore';
@@ -13,6 +14,7 @@ import { parseBoundedInt } from './inputUtils';
 import styles from './RunDialog.module.css';
 
 export function RunDialog() {
+  const { t } = useTranslation();
   const playground = useDomainStore((s) => s.playground);
   const updateConversation = useDomainStore((s) => s.updateConversation);
   const providers = useProviderStore((s) => s.providers);
@@ -76,20 +78,20 @@ export function RunDialog() {
 
   return (
     <Modal
-      title="Run conversation"
+      title={t('run.title')}
       onClose={() => setPanel('none')}
       width={640}
       footer={
         <>
-          <button type="button" className="secondary" onClick={() => setPanel('none')}>Cancel</button>
+          <button type="button" className="secondary" onClick={() => setPanel('none')}>{t('common.cancel')}</button>
           <button
             type="button"
             className="primary"
             onClick={handleRun}
             disabled={blocking}
-            title={blocking ? 'Resolve the errors listed above before starting' : undefined}
+            title={blocking ? t('run.startBlockedTooltip') : undefined}
           >
-            Start conversation
+            {t('run.start')}
           </button>
         </>
       }
@@ -97,42 +99,42 @@ export function RunDialog() {
       {/* ── Topic ── */}
       <section className={styles.section}>
         <div className="field">
-          <label htmlFor="run-subject">Subject (required)</label>
+          <label htmlFor="run-subject">{t('run.subjectLabel')}</label>
           <textarea
             id="run-subject"
             aria-required="true"
             value={conversation.subject}
             onChange={(e) => updateConversation({ subject: e.target.value })}
-            placeholder="Evaluate whether the company should open-source its internal agent framework."
+            placeholder={t('run.subjectPlaceholder')}
           />
         </div>
 
         <div className="field">
-          <label htmlFor="run-objective">Objective (optional)</label>
+          <label htmlFor="run-objective">{t('run.objectiveLabel')}</label>
           <input
             id="run-objective"
             value={conversation.objective}
             onChange={(e) => updateConversation({ objective: e.target.value })}
-            placeholder="What should the agents ultimately produce or decide?"
+            placeholder={t('run.objectivePlaceholder')}
           />
         </div>
 
         <div className="field" style={{ marginBottom: 0 }}>
-          <label htmlFor="run-context">Initial context (optional)</label>
+          <label htmlFor="run-context">{t('run.contextLabel')}</label>
           <textarea
             id="run-context"
             value={conversation.initialContext}
             onChange={(e) => updateConversation({ initialContext: e.target.value })}
-            placeholder="Background the agents should know before they start."
+            placeholder={t('run.contextPlaceholder')}
           />
         </div>
       </section>
 
       {/* ── Presets ── */}
       <section className={styles.section}>
-        <h3 className={styles.sectionTitle}>Presets</h3>
-        <div className={styles.quickStart} role="group" aria-label="Quick-start environments">
-          <span className={styles.quickStartLabel}>Quick starts</span>
+        <h3 className={styles.sectionTitle}>{t('run.presetsTitle')}</h3>
+        <div className={styles.quickStart} role="group" aria-label={t('run.quickStartAria')}>
+          <span className={styles.quickStartLabel}>{t('run.quickStarts')}</span>
           <div className={styles.chips}>
             {QUICK_START_PRESETS.map((preset) => {
               const active = isQuickStartActive(preset);
@@ -150,12 +152,12 @@ export function RunDialog() {
               );
             })}
           </div>
-          <p className={styles.hint}>Each quick start sets the environment and style below. It won't change your turn limits or topic.</p>
+          <p className={styles.hint}>{t('run.quickStartHint')}</p>
         </div>
 
         <div className={styles.presetRow}>
           <div className="field">
-            <label htmlFor="run-preset-load">Saved presets</label>
+            <label htmlFor="run-preset-load">{t('run.savedPresetsLabel')}</label>
             <select
               id="run-preset-load"
               value={selectedPresetId}
@@ -167,10 +169,10 @@ export function RunDialog() {
               }}
             >
               <option value="">
-                {presets.length ? '— restore a saved preset —' : '— no saved presets yet —'}
+                {presets.length ? t('run.restorePreset') : t('run.noSavedPresets')}
               </option>
               {presets.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
+                <option key={p.id} value={p.id} dir="auto">{p.name}</option>
               ))}
             </select>
           </div>
@@ -182,9 +184,9 @@ export function RunDialog() {
                 const preset = presets.find((p) => p.id === selectedPresetId);
                 if (!preset) return;
                 const ok = await requestConfirm({
-                  title: 'Delete preset',
-                  message: `Delete the saved preset "${preset.name}"?`,
-                  confirmLabel: 'Delete',
+                  title: t('run.deletePresetTitle'),
+                  message: t('run.deletePresetMessage', { name: preset.name }),
+                  confirmLabel: t('common.delete'),
                   danger: true,
                 });
                 if (ok) {
@@ -193,19 +195,19 @@ export function RunDialog() {
                 }
               }}
             >
-              Delete
+              {t('common.delete')}
             </button>
           )}
         </div>
 
         <div className={styles.presetRow} style={{ marginBottom: 0 }}>
           <div className="field">
-            <label htmlFor="run-preset-name">Save current options as a preset</label>
+            <label htmlFor="run-preset-name">{t('run.savePresetLabel')}</label>
             <input
               id="run-preset-name"
               value={presetName}
               onChange={(e) => setPresetName(e.target.value)}
-              placeholder="e.g. Terse fact-check"
+              placeholder={t('run.savePresetPlaceholder')}
             />
           </div>
           <button
@@ -218,17 +220,17 @@ export function RunDialog() {
               setSelectedPresetId(saved.id);
             }}
           >
-            Save
+            {t('common.save')}
           </button>
         </div>
       </section>
 
       {/* ── Environment & style ── */}
       <section className={styles.section}>
-        <h3 className={styles.sectionTitle}>Environment &amp; style</h3>
+        <h3 className={styles.sectionTitle}>{t('run.envStyleTitle')}</h3>
 
         <div className="field">
-          <label htmlFor="run-mode">Conversation environment</label>
+          <label htmlFor="run-mode">{t('run.conversationEnvLabel')}</label>
           <select
             id="run-mode"
             value={conversation.conversationMode}
@@ -243,59 +245,59 @@ export function RunDialog() {
 
         <div className="field-row">
           <div className="field">
-            <label htmlFor="run-tone">Tone for this run (optional)</label>
+            <label htmlFor="run-tone">{t('run.toneLabel')}</label>
             <input
               id="run-tone"
               value={conversation.toneOverride}
               onChange={(e) => updateConversation({ toneOverride: e.target.value })}
-              placeholder="e.g. energetic, formal, playful — blank uses each agent's own tone"
+              placeholder={t('run.tonePlaceholder')}
             />
           </div>
           <div className="field">
-            <label htmlFor="run-length">Response length</label>
+            <label htmlFor="run-length">{t('run.responseLengthLabel')}</label>
             <select
               id="run-length"
               value={conversation.responseLength}
               onChange={(e) => updateConversation({ responseLength: e.target.value as typeof conversation.responseLength })}
             >
-              <option value="agent-default">Agent default</option>
-              <option value="short">Short</option>
-              <option value="medium">Medium</option>
-              <option value="long">Long</option>
+              <option value="agent-default">{t('run.lengthAgentDefault')}</option>
+              <option value="short">{t('run.lengthShort')}</option>
+              <option value="medium">{t('run.lengthMedium')}</option>
+              <option value="long">{t('run.lengthLong')}</option>
             </select>
           </div>
         </div>
 
         <div className="field-row">
           <div className="field">
-            <label htmlFor="run-chitchat">Chit-chat &amp; flattery</label>
+            <label htmlFor="run-chitchat">{t('run.chitchatLabel')}</label>
             <select
               id="run-chitchat"
               value={conversation.chitchatPolicy}
               onChange={(e) => updateConversation({ chitchatPolicy: e.target.value as typeof conversation.chitchatPolicy })}
             >
-              <option value="agent-default">Allow — use each agent's own style</option>
-              <option value="concise-factual">Disallow — concise, strict, and factual only</option>
+              <option value="agent-default">{t('run.chitchatAllow')}</option>
+              <option value="concise-factual">{t('run.chitchatDisallow')}</option>
             </select>
           </div>
           <div className="field">
-            <label htmlFor="run-language">Language for this run</label>
+            <label htmlFor="run-language">{t('run.languageLabel')}</label>
             <select
               id="run-language"
               value={conversation.languageOverride}
               onChange={(e) => updateConversation({ languageOverride: e.target.value as typeof conversation.languageOverride })}
             >
-              <option value="agent-default">Agent default — keep each agent's language</option>
-              <option value="en">Force English</option>
-              <option value="fa">Force Persian (Farsi)</option>
-              <option value="fr">Force French</option>
+              <option value="agent-default">{t('run.languageAgentDefault')}</option>
+              <option value="en">{t('run.languageForceEn')}</option>
+              <option value="fa">{t('run.languageForceFa')}</option>
+              <option value="fr">{t('run.languageForceFr')}</option>
             </select>
           </div>
         </div>
 
         <div className="field-row" style={{ marginBottom: 0 }}>
           <div className="field" style={{ marginBottom: 0 }}>
-            <label htmlFor="run-temperature">Temperature override (optional)</label>
+            <label htmlFor="run-temperature">{t('run.temperatureLabel')}</label>
             <input
               id="run-temperature"
               type="number"
@@ -303,7 +305,7 @@ export function RunDialog() {
               max={2}
               step={0.1}
               value={conversation.temperatureOverride ?? ''}
-              placeholder="Blank uses each agent's own temperature"
+              placeholder={t('run.temperaturePlaceholder')}
               onChange={(e) => {
                 const raw = e.target.value;
                 if (raw === '') {
@@ -316,14 +318,14 @@ export function RunDialog() {
             />
           </div>
           <div className="field" style={{ marginBottom: 0 }}>
-            <label htmlFor="run-timeout">Response timeout cap, ms (optional)</label>
+            <label htmlFor="run-timeout">{t('run.timeoutLabel')}</label>
             <input
               id="run-timeout"
               type="number"
               min={1000}
               step={1000}
               value={conversation.responseTimeoutOverrideMs ?? ''}
-              placeholder="Blank uses each agent's own timeout"
+              placeholder={t('run.timeoutPlaceholder')}
               onChange={(e) => {
                 const raw = e.target.value;
                 if (raw === '') {
@@ -340,27 +342,26 @@ export function RunDialog() {
 
       {/* ── Flow & limits ── */}
       <section className={styles.section}>
-        <h3 className={styles.sectionTitle}>Flow &amp; limits</h3>
+        <h3 className={styles.sectionTitle}>{t('run.flowLimitsTitle')}</h3>
 
         <div className="field-row">
           <div className="field">
-            <label htmlFor="run-start">Starting agent</label>
+            <label htmlFor="run-start">{t('run.startingAgentLabel')}</label>
             <select
               id="run-start"
               value={conversation.startingAgentId ?? ''}
               onChange={(e) => updateConversation({ startingAgentId: e.target.value || null })}
             >
-              <option value="">— select —</option>
+              <option value="">{t('run.selectPlaceholder')}</option>
               {enabledAgents.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                  {suggestedStarts.has(a.id) ? ' (no incoming — suggested)' : ''}
+                <option key={a.id} value={a.id} dir="auto">
+                  {suggestedStarts.has(a.id) ? t('run.startingAgentSuggested', { name: a.name }) : a.name}
                 </option>
               ))}
             </select>
           </div>
           <div className="field">
-            <label htmlFor="run-maxturns">Max total turns</label>
+            <label htmlFor="run-maxturns">{t('run.maxTurnsLabel')}</label>
             <input
               id="run-maxturns"
               type="number"
@@ -373,7 +374,7 @@ export function RunDialog() {
             />
           </div>
           <div className="field">
-            <label htmlFor="run-maxper">Max responses / agent</label>
+            <label htmlFor="run-maxper">{t('run.maxPerAgentLabel')}</label>
             <input
               id="run-maxper"
               type="number"
@@ -390,19 +391,19 @@ export function RunDialog() {
         {policy && (
           <div className="field-row">
             <div className="field">
-              <label htmlFor="run-onfailure">On agent failure</label>
+              <label htmlFor="run-onfailure">{t('run.onFailureLabel')}</label>
               <select
                 id="run-onfailure"
                 value={policy.onFailure}
                 onChange={(e) => setPolicy({ onFailure: e.target.value as FailureAction })}
               >
-                <option value="stop">Stop the run</option>
-                <option value="skip">Skip the turn, keep going</option>
-                <option value="prompt">Ask me what to do</option>
+                <option value="stop">{t('run.failureStop')}</option>
+                <option value="skip">{t('run.failureSkip')}</option>
+                <option value="prompt">{t('run.failurePrompt')}</option>
               </select>
             </div>
             <div className="field">
-              <label htmlFor="run-autoretries">Auto-retries</label>
+              <label htmlFor="run-autoretries">{t('run.autoRetriesLabel')}</label>
               <input
                 id="run-autoretries"
                 type="number"
@@ -416,7 +417,7 @@ export function RunDialog() {
               />
             </div>
             <div className="field">
-              <label htmlFor="run-autodisable">Remove after N failures</label>
+              <label htmlFor="run-autodisable">{t('run.autoDisableLabel')}</label>
               <input
                 id="run-autodisable"
                 type="number"
@@ -431,22 +432,19 @@ export function RunDialog() {
           </div>
         )}
         <p className="muted" style={{ fontSize: 12, margin: '4px 0 0' }}>
-          Transient errors are auto-retried first. An agent that keeps failing is removed from the
-          circuit after the set number of failures (0 = never) — the rest of the run continues
-          without it. Removal needs “Skip” or “Ask me” mode; “Stop” ends the run on the first
-          hard failure.
+          {t('run.failureHelp')}
         </p>
 
         {conversation.startingAgentId && (
           <p className="muted" style={{ fontSize: 12, margin: '4px 0 0' }}>
-            {routeCount} agent(s) reachable from the starting agent.
+            {t('run.reachable', { n: routeCount })}
           </p>
         )}
       </section>
 
       {issues.length > 0 && (
-        <div className={styles.issues} role="group" aria-label="Configuration issues">
-          {blocking && <p className={styles.issuesHead}>Resolve these before starting:</p>}
+        <div className={styles.issues} role="group" aria-label={t('run.issuesAria')}>
+          {blocking && <p className={styles.issuesHead}>{t('run.resolveBeforeStarting')}</p>}
           {issues.map((issue, i) => (
             <div
               key={`${issue.level}:${issue.agentId ?? ''}:${issue.message}:${i}`}

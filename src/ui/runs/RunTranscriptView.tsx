@@ -1,8 +1,11 @@
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { ConversationRun, TranscriptMessage } from '../../domain/schema';
 import { dirForLanguage } from '../../domain/language';
 import { extractInlineThinking } from '../../providers/openaiAdapter';
 import { useDomainStore } from '../../store/domainStore';
+import { useUiStore } from '../../store/uiStore';
+import { formatTime } from '../../i18n/format';
 import { agentColor } from '../../graph/colors';
 import { MessageMarkdown } from '../transcript/MessageMarkdown';
 import styles from './RunTranscriptView.module.css';
@@ -18,6 +21,7 @@ interface RunTranscriptViewProps {
  * Read-only transcript for a stored conversation run snapshot.
  */
 export function RunTranscriptView({ run, highlightFromIndex, compact }: RunTranscriptViewProps) {
+  const { t } = useTranslation();
   const agents = useDomainStore((s) => s.playground?.agents ?? []);
 
   const colorFor = useMemo(() => {
@@ -28,7 +32,7 @@ export function RunTranscriptView({ run, highlightFromIndex, compact }: RunTrans
   const startIdx = highlightFromIndex ?? run.messageCountAtStart;
 
   if (run.transcript.length === 0) {
-    return <p className="muted">No messages in this run.</p>;
+    return <p className="muted">{t('runs.noMessages')}</p>;
   }
 
   return (
@@ -54,7 +58,9 @@ function RunMessageItem({
   color: string;
   isNewThisVersion: boolean;
 }) {
-  const time = new Date(msg.timestamp).toLocaleTimeString();
+  const { t } = useTranslation();
+  const language = useUiStore((s) => s.language);
+  const time = formatTime(msg.timestamp, language);
   const failed = msg.status === 'failed';
   const dir = dirForLanguage(msg.language);
   const split = extractInlineThinking(msg.content);
@@ -66,7 +72,7 @@ function RunMessageItem({
       <div className={styles.card} dir={dir}>
         <div className={styles.header}>
           <span className={styles.agent}>{msg.agentName}</span>
-          {isNewThisVersion && <span className={styles.versionBadge}>this run</span>}
+          {isNewThisVersion && <span className={styles.versionBadge}>{t('runs.thisRun')}</span>}
           {msg.role && <span className="chip">{msg.role}</span>}
           <span className={styles.meta}>
             {msg.model || '—'} · {time}
@@ -74,7 +80,7 @@ function RunMessageItem({
         </div>
         <div className={styles.body}>
           {failed ? (
-            <span className={styles.err}>Failed: {msg.error}</span>
+            <span className={styles.err}>{t('runs.failedMessage', { error: msg.error })}</span>
           ) : (
             <MessageMarkdown content={visibleContent} />
           )}

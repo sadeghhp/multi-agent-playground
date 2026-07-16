@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { type Theme, getTheme, setTheme } from './prefs';
+import i18n from '../i18n';
+import { type Theme, getTheme, setTheme, type Language, getLanguage, setLanguage } from './prefs';
 import type { FallbackCandidate } from '../usage/fallback';
 import type { BudgetSnapshot } from '../usage/budget';
 
@@ -73,6 +74,8 @@ interface UiState {
   selection: Selection;
   openPanel: OpenPanel;
   theme: Theme;
+  /** Active UI language. Drives translation catalog + document `dir`/`lang`. */
+  language: Language;
   /** Transient banner for warnings/errors surfaced to the user. */
   toast: { kind: 'info' | 'warn' | 'error'; message: string } | null;
   /** In-app confirmation dialog request (replaces window.confirm). */
@@ -89,6 +92,8 @@ interface UiState {
   clearSelection: () => void;
   setPanel: (panel: OpenPanel) => void;
   toggleTheme: () => void;
+  /** Switch UI language; persists the pref and swaps the i18next catalog. */
+  setLanguage: (lang: Language) => void;
   showToast: (kind: 'info' | 'warn' | 'error', message: string) => void;
   dismissToast: () => void;
   /** Open a themed confirm dialog; resolves true if the user confirms. */
@@ -122,6 +127,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   selection: { kind: 'none' },
   openPanel: 'none',
   theme: getTheme(),
+  language: getLanguage(),
   toast: null,
   confirm: null,
   fallbackSuggest: null,
@@ -136,6 +142,12 @@ export const useUiStore = create<UiState>((set, get) => ({
     const next: Theme = get().theme === 'dark' ? 'light' : 'dark';
     setTheme(next);
     set({ theme: next });
+  },
+  setLanguage: (lang) => {
+    if (get().language === lang) return;
+    setLanguage(lang);
+    void i18n.changeLanguage(lang);
+    set({ language: lang });
   },
   showToast: (kind, message) => set({ toast: { kind, message } }),
   requestFitView: () => set((s) => ({ fitViewNonce: s.fitViewNonce + 1 })),

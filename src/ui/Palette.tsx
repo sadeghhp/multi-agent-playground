@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useDomainStore } from '../store/domainStore';
 import { useProviderStore } from '../store/providerStore';
 import { useUiStore } from '../store/uiStore';
@@ -6,6 +7,7 @@ import { createAgent, createAgentFromTemplate, templateList, type TemplateKey } 
 import styles from './Palette.module.css';
 
 export function Palette() {
+  const { t } = useTranslation();
   const playground = useDomainStore((s) => s.playground);
   const addAgent = useDomainStore((s) => s.addAgent);
   const selectAgent = useUiStore((s) => s.selectAgent);
@@ -33,20 +35,20 @@ export function Palette() {
   }
 
   return (
-    <aside className={styles.palette} aria-label="Component palette">
+    <aside className={styles.palette} aria-label={t('palette.paletteLabel')}>
       <section className={styles.section}>
-        <h3 className={styles.heading}>Agents</h3>
+        <h3 className={styles.heading}>{t('palette.agentsHeading')}</h3>
         <button type="button" className={`primary ${styles.block}`} onClick={handleAddBlank} disabled={isRunning}>
-          + Add agent
+          {t('palette.addAgent')}
         </button>
         <button
           type="button"
           className={styles.block}
           onClick={() => setPanel('createAgentAi')}
           disabled={isRunning || !hasEnabledProvider}
-          title={!hasEnabledProvider ? 'Add an enabled provider first' : undefined}
+          title={!hasEnabledProvider ? t('palette.addProviderFirst') : undefined}
         >
-          ✨ Create agent with AI
+          {t('palette.createWithAi')}
         </button>
         <button
           type="button"
@@ -55,52 +57,51 @@ export function Palette() {
           disabled={isRunning || !hasEnabledProvider || enabledAgentCount < 2}
           title={
             !hasEnabledProvider
-              ? 'Add an enabled provider first'
+              ? t('palette.addProviderFirst')
               : enabledAgentCount < 2
-                ? 'Add at least 2 enabled agents first'
-                : 'AI connects your agents into a conversation flow for a subject'
+                ? t('palette.addTwoAgentsFirst')
+                : t('palette.smartArrangeHint')
           }
         >
-          ✨ Smart Arrange
+          {t('palette.smartArrange')}
         </button>
       </section>
 
       <section className={styles.section}>
-        <h3 className={styles.heading}>Templates</h3>
+        <h3 className={styles.heading}>{t('palette.templatesHeading')}</h3>
         <div className={styles.templates}>
           {templateList()
-            .filter((t) => t.key !== 'blank')
-            .map((t) => (
+            .filter((tpl) => tpl.key !== 'blank')
+            .map((tpl) => (
               <button
-                key={t.key}
+                key={tpl.key}
                 type="button"
                 className={styles.template}
-                onClick={() => handleAddTemplate(t.key)}
+                onClick={() => handleAddTemplate(tpl.key)}
                 disabled={isRunning}
               >
-                {t.label}
+                {tpl.label}
               </button>
             ))}
         </div>
       </section>
 
       <section className={styles.section}>
-        <h3 className={styles.heading}>Manage</h3>
+        <h3 className={styles.heading}>{t('palette.manageHeading')}</h3>
         <button type="button" className={styles.block} onClick={() => setPanel('providers')}>
-          Provider manager
+          {t('palette.providerManager')}
         </button>
         <button type="button" className={styles.block} onClick={() => setPanel('playgrounds')}>
-          Saved playgrounds
+          {t('palette.savedPlaygrounds')}
         </button>
         <button type="button" className={styles.block} onClick={() => setPanel('library')}>
-          Agent library
+          {t('palette.agentLibrary')}
         </button>
       </section>
 
       <div className={styles.spacer} />
       <p className={styles.warn}>
-        Provider credentials are stored and used in this browser. Do not use unrestricted
-        production keys.
+        {t('palette.credentialsWarning')}
       </p>
     </aside>
   );

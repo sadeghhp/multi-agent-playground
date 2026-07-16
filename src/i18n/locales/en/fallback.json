@@ -1,0 +1,10 @@
+{
+  "title": "Provider unavailable — switch temporarily?",
+  "keepFailed": "Keep failed",
+  "switch": "Switch for this run",
+  "couldNotReach": "{{agent}} could not reach {{provider}}.",
+  "switchExplain": "Switch to another configured provider for the rest of this run only? Your saved agent settings stay unchanged.",
+  "providerLabel": "Fallback provider",
+  "modelLabel": "Model",
+  "remainingBudget": "Remaining budget — run: {{run}} tok · day: {{day}} tok · fallback: {{fallback}} tok"
+}

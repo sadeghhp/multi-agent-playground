@@ -21,7 +21,8 @@
   font-size: 13px;
 }
 
-.fieldGrid input {
+.fieldGrid input,
+.fieldGrid select {
   font: inherit;
   padding: 6px 8px;
   border: 1px solid var(--border);

@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { useDomainStore } from '../store/domainStore';
 import { useUiStore } from '../store/uiStore';
+import { formatDateTime } from '../i18n/format';
 import {
   PLAYGROUND_SAMPLES,
   SAMPLE_DOMAIN_ORDER,
@@ -12,6 +14,8 @@ import { Modal } from './Modal';
 import styles from './PlaygroundsPanel.module.css';
 
 export function PlaygroundsPanel() {
+  const { t } = useTranslation();
+  const language = useUiStore((s) => s.language);
   const index = useDomainStore((s) => s.index);
   const current = useDomainStore((s) => s.playground);
   const loadPlayground = useDomainStore((s) => s.loadPlayground);
@@ -42,9 +46,9 @@ export function PlaygroundsPanel() {
       (current?.agents.length ?? 0) > 0 || (current?.transcript.length ?? 0) > 0;
     if (hasWork) {
       const ok = await requestConfirm({
-        title: 'Load sample playground',
-        message: `Load "${sample.name}"? Your current playground will be replaced.`,
-        confirmLabel: 'Load sample',
+        title: t('playgrounds.loadSampleTitle'),
+        message: t('playgrounds.loadSampleMessage', { name: sample.name }),
+        confirmLabel: t('playgrounds.loadSampleConfirm'),
       });
       if (!ok) return;
     }
@@ -53,25 +57,25 @@ export function PlaygroundsPanel() {
   }
 
   return (
-    <Modal title="Playgrounds" onClose={() => setPanel('none')} width={560}>
+    <Modal title={t('playgrounds.title')} onClose={() => setPanel('none')} width={560}>
       <section className={styles.section} aria-labelledby="sample-playgrounds-heading">
         <h3 id="sample-playgrounds-heading" className={styles.sectionTitle}>
-          Sample playgrounds
+          {t('playgrounds.samplePlaygrounds')}
         </h3>
         <p className={styles.sectionHint}>
-          Pre-built graphs that show how multi-agent conversations work. Confirm Local
-          (Ollama) under Providers, then press Run.
+          {t('playgrounds.sampleHint')}
           {!isAppOnLocalhost(window.location.origin) && (
             <>
               {' '}
-              Samples default to Ollama on localhost — run the app with{' '}
-              <code>npm run dev</code>, or switch agents to a public HTTPS provider.
+              <Trans i18nKey="playgrounds.sampleHintRemote">
+                Samples default to Ollama on localhost — run the app with <code>npm run dev</code>, or switch agents to a public HTTPS provider.
+              </Trans>
             </>
           )}
         </p>
         {samplesByDomain.map(({ domain, samples }) => (
           <div key={domain} className={styles.domainGroup}>
-            <h4 className={styles.domainLabel}>{domain}</h4>
+            <h4 className={styles.domainLabel} dir="auto">{domain}</h4>
             <ul className={styles.sampleList}>
               {samples.map((sample) => (
                 <li key={sample.id}>
@@ -80,8 +84,8 @@ export function PlaygroundsPanel() {
                     className={styles.sampleCard}
                     onClick={() => loadSample(sample.id)}
                   >
-                    <span className={styles.sampleName}>{sample.name}</span>
-                    <span className={styles.sampleDesc}>{sample.description}</span>
+                    <span className={styles.sampleName} dir="auto">{sample.name}</span>
+                    <span className={styles.sampleDesc} dir="auto">{sample.description}</span>
                   </button>
                 </li>
               ))}
@@ -95,7 +99,7 @@ export function PlaygroundsPanel() {
       <section className={styles.section} aria-labelledby="your-playgrounds-heading">
         <div className={styles.yourHeader}>
           <h3 id="your-playgrounds-heading" className={styles.sectionTitle}>
-            Your playgrounds
+            {t('playgrounds.yourPlaygrounds')}
           </h3>
           <div className={styles.actions}>
             <button
@@ -106,18 +110,18 @@ export function PlaygroundsPanel() {
                 setPanel('none');
               }}
             >
-              + New playground
+              {t('playgrounds.newPlayground')}
             </button>
             {current && (
               <button type="button" onClick={() => duplicatePlayground()}>
-                Duplicate current
+                {t('playgrounds.duplicateCurrent')}
               </button>
             )}
           </div>
         </div>
 
         {index.length === 0 ? (
-          <p className="muted">No saved playgrounds yet.</p>
+          <p className="muted">{t('playgrounds.noSaved')}</p>
         ) : (
           <ul className={styles.list}>
             {index.map((p) => (
@@ -133,24 +137,24 @@ export function PlaygroundsPanel() {
                     setPanel('none');
                   }}
                 >
-                  <span className={styles.name}>{p.name}</span>
-                  <span className={styles.date}>{new Date(p.updatedAt).toLocaleString()}</span>
+                  <span className={styles.name} dir="auto">{p.name}</span>
+                  <span className={styles.date}>{formatDateTime(p.updatedAt, language)}</span>
                 </button>
                 <button
                   type="button"
                   className={`${styles.deleteBtn} danger`}
-                  aria-label={`Delete ${p.name}`}
+                  aria-label={t('playgrounds.deleteAria', { name: p.name })}
                   onClick={async () => {
                     const ok = await requestConfirm({
-                      title: 'Delete playground',
-                      message: `Delete playground "${p.name}"? This cannot be undone.`,
-                      confirmLabel: 'Delete',
+                      title: t('playgrounds.deleteTitle'),
+                      message: t('playgrounds.deleteMessage', { name: p.name }),
+                      confirmLabel: t('common.delete'),
                       danger: true,
                     });
                     if (ok) void deletePlayground(p.id);
                   }}
                 >
-                  Delete
+                  {t('common.delete')}
                 </button>
               </li>
             ))}

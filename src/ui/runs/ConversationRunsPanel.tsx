@@ -1,27 +1,23 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { ConversationRun } from '../../domain/schema';
 import { useDomainStore } from '../../store/domainStore';
 import { useRunHistoryStore } from '../../store/runHistoryStore';
 import { useUiStore } from '../../store/uiStore';
+import { formatDateTime, formatTime } from '../../i18n/format';
 import { Modal } from '../Modal';
 import { RunTranscriptView } from './RunTranscriptView';
 import styles from './ConversationRunsPanel.module.css';
 
 type PanelView = 'list' | 'review' | 'compare';
 
-const STATUS_LABEL: Record<ConversationRun['status'], string> = {
-  running: 'Running',
-  completed: 'Completed',
-  stopped: 'Stopped',
-  error: 'Error',
-  interrupted: 'Interrupted',
-};
-
 function messagesAddedThisRun(run: ConversationRun): number {
   return Math.max(0, run.transcript.length - run.messageCountAtStart);
 }
 
 export function ConversationRunsPanel() {
+  const { t } = useTranslation();
+  const language = useUiStore((s) => s.language);
   const playground = useDomainStore((s) => s.playground);
   const runs = useRunHistoryStore((s) => s.runs);
   const removeRun = useRunHistoryStore((s) => s.removeRun);
@@ -61,7 +57,7 @@ export function ConversationRunsPanel() {
   function startCompare() {
     const ids = [...selectedForCompare];
     if (ids.length !== 2) {
-      showToast('warn', 'Select exactly two runs to compare.');
+      showToast('warn', t('runs.selectTwo'));
       return;
     }
     setCompareIds([ids[0]!, ids[1]!]);
@@ -70,13 +66,13 @@ export function ConversationRunsPanel() {
 
   async function handleDelete(run: ConversationRun) {
     if (run.status === 'running') {
-      showToast('warn', 'Cannot delete a run that is still in progress.');
+      showToast('warn', t('runs.cannotDeleteRunning'));
       return;
     }
     const ok = await requestConfirm({
-      title: 'Delete run',
-      message: `Delete version ${run.version}? This cannot be undone.`,
-      confirmLabel: 'Delete',
+      title: t('runs.deleteTitle'),
+      message: t('runs.deleteMessage', { version: run.version }),
+      confirmLabel: t('common.delete'),
       danger: true,
     });
     if (!ok) return;
@@ -90,17 +86,17 @@ export function ConversationRunsPanel() {
       setReviewRunId(null);
       setView('list');
     }
-    showToast('info', `Deleted run v${run.version}.`);
+    showToast('info', t('runs.deletedRun', { version: run.version }));
   }
 
   return (
     <Modal
       title={
         view === 'list'
-          ? 'Conversation runs'
+          ? t('runs.title')
           : view === 'review'
-            ? `Run v${reviewRun?.version ?? ''}`
-            : 'Compare runs'
+            ? t('runs.reviewTitle', { version: reviewRun?.version ?? '' })
+            : t('runs.compareTitle')
       }
       onClose={close}
       width={view === 'compare' ? 920 : 640}
@@ -115,7 +111,7 @@ export function ConversationRunsPanel() {
               setReviewRunId(null);
             }}
           >
-            ← Back to list
+            {t('runs.backToList')}
           </button>
         </div>
       )}
@@ -124,12 +120,12 @@ export function ConversationRunsPanel() {
         <>
           {playground && (
             <p className={styles.subtitle}>
-              {playground.name} · {runs.length} run{runs.length === 1 ? '' : 's'}
+              <span dir="auto">{playground.name}</span> · {t('runs.runCount', { count: runs.length })}
             </p>
           )}
 
           {runs.length === 0 ? (
-            <p className="muted">No conversation runs yet. Start a run to create version 1.</p>
+            <p className="muted">{t('runs.noRuns')}</p>
           ) : (
             <>
               <div className={styles.compareBar}>
@@ -139,7 +135,7 @@ export function ConversationRunsPanel() {
                   onClick={startCompare}
                   disabled={selectedForCompare.size !== 2}
                 >
-                  Compare selected ({selectedForCompare.size}/2)
+                  {t('runs.compareSelected', { count: selectedForCompare.size })}
                 </button>
               </div>
               <ul className={styles.list}>
@@ -150,24 +146,26 @@ export function ConversationRunsPanel() {
                         type="checkbox"
                         checked={selectedForCompare.has(run.id)}
                         onChange={() => toggleCompareSelect(run.id)}
-                        aria-label={`Select run v${run.version} for compare`}
+                        aria-label={t('runs.selectForCompareAria', { version: run.version })}
                       />
                     </label>
                     <div className={styles.itemBody}>
                       <div className={styles.itemHeader}>
                         <span className={styles.version}>v{run.version}</span>
                         <span className={`${styles.status} ${styles[`status_${run.status}`]}`}>
-                          {STATUS_LABEL[run.status]}
+                          {t(`runs.status.${run.status}`)}
                         </span>
                         <span className={styles.date}>
-                          {new Date(run.startedAt).toLocaleString()}
+                          {formatDateTime(run.startedAt, language)}
                         </span>
                       </div>
                       <div className={styles.itemMeta}>
-                        <span>{run.conversation.subject || '(no subject)'}</span>
+                        <span dir="auto">{run.conversation.subject || t('runs.noSubject')}</span>
                         <span>
-                          {messagesAddedThisRun(run)} message{messagesAddedThisRun(run) === 1 ? '' : 's'} this run
-                          · {run.transcript.length} total
+                          {t('runs.messagesThisRun', {
+                            count: messagesAddedThisRun(run),
+                            total: run.transcript.length,
+                          })}
                         </span>
                       </div>
                     </div>
@@ -180,16 +178,16 @@ export function ConversationRunsPanel() {
                           setView('review');
                         }}
                       >
-                        Review
+                        {t('runs.review')}
                       </button>
                       <button
                         type="button"
                         className={`${styles.deleteBtn} danger`}
                         disabled={run.status === 'running'}
                         onClick={() => void handleDelete(run)}
-                        aria-label={`Delete run v${run.version}`}
+                        aria-label={t('runs.deleteRunAria', { version: run.version })}
                       >
-                        Delete
+                        {t('common.delete')}
                       </button>
                     </div>
                   </li>
@@ -204,26 +202,27 @@ export function ConversationRunsPanel() {
         <div className={styles.review}>
           <div className={styles.runMeta}>
             <span className={`${styles.status} ${styles[`status_${reviewRun.status}`]}`}>
-              {STATUS_LABEL[reviewRun.status]}
+              {t(`runs.status.${reviewRun.status}`)}
             </span>
             <span>
-              Started {new Date(reviewRun.startedAt).toLocaleString()}
-              {reviewRun.endedAt != null && ` · Ended ${new Date(reviewRun.endedAt).toLocaleString()}`}
+              {t('runs.started', { when: formatDateTime(reviewRun.startedAt, language) })}
+              {reviewRun.endedAt != null &&
+                t('runs.ended', { when: formatDateTime(reviewRun.endedAt, language) })}
             </span>
             {reviewRun.parentRunId && (
-              <span className="muted">Continues from previous run</span>
+              <span className="muted">{t('runs.continuesFromPrevious')}</span>
             )}
           </div>
 
           {reviewRun.events.length > 0 && (
             <details className={styles.events}>
-              <summary>Execution path ({reviewRun.events.length} events)</summary>
+              <summary>{t('runs.executionPath', { count: reviewRun.events.length })}</summary>
               <ol className={styles.eventList}>
                 {reviewRun.events.map((e) => (
                   <li key={e.id}>
                     <span className={styles.eventKind}>{e.kind}</span>
-                    <span>{e.message}</span>
-                    <span className={styles.eventTime}>{new Date(e.at).toLocaleTimeString()}</span>
+                    <span dir="auto">{e.message}</span>
+                    <span className={styles.eventTime}>{formatTime(e.at, language)}</span>
                   </li>
                 ))}
               </ol>
@@ -243,9 +242,9 @@ export function ConversationRunsPanel() {
               <header className={styles.compareHeader}>
                 <strong>v{run.version}</strong>
                 <span className={`${styles.status} ${styles[`status_${run.status}`]}`}>
-                  {STATUS_LABEL[run.status]}
+                  {t(`runs.status.${run.status}`)}
                 </span>
-                <span className={styles.date}>{new Date(run.startedAt).toLocaleString()}</span>
+                <span className={styles.date}>{formatDateTime(run.startedAt, language)}</span>
               </header>
               <div className={styles.transcriptScroll}>
                 <RunTranscriptView run={run} compact />

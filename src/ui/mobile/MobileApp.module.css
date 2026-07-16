@@ -158,7 +158,7 @@
   text-align: start;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-left: 4px solid var(--agent-color, var(--border));
+  border-inline-start: 4px solid var(--agent-color, var(--border));
   border-radius: var(--radius-md);
 }
 .agentDot {

@@ -35,7 +35,7 @@
 
 .sampleCard {
   width: 100%;
-  text-align: left;
+  text-align: start;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -87,13 +87,14 @@
   gap: 8px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 4px 6px 4px 10px;
+  padding-block: 4px;
+  padding-inline: 10px 6px;
 }
 .active { border-color: var(--accent); }
 
 .open {
   flex: 1;
-  text-align: left;
+  text-align: start;
   border: none;
   background: transparent;
   display: flex;

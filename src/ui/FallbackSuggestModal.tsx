@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { formatNumber } from '../i18n/format';
 import { useUiStore } from '../store/uiStore';
 import { Modal } from './Modal';
 
@@ -7,6 +9,8 @@ import { Modal } from './Modal';
  * Never auto-switches; user must confirm. Caps are shown so cost stays visible.
  */
 export function FallbackSuggestModal() {
+  const { t } = useTranslation();
+  const language = useUiStore((s) => s.language);
   const suggest = useUiStore((s) => s.fallbackSuggest);
   const resolve = useUiStore((s) => s.resolveFallbackSuggestion);
 
@@ -33,13 +37,13 @@ export function FallbackSuggestModal() {
 
   return (
     <Modal
-      title="Provider unavailable — switch temporarily?"
+      title={t('fallback.title')}
       onClose={() => resolve(null)}
       width={520}
       footer={
         <>
           <button type="button" className="secondary" onClick={() => resolve(null)}>
-            Keep failed
+            {t('fallback.keepFailed')}
           </button>
           <button
             type="button"
@@ -50,26 +54,26 @@ export function FallbackSuggestModal() {
               resolve({ providerId: activeProvider.providerId, model: activeModel });
             }}
           >
-            Switch for this run
+            {t('fallback.switch')}
           </button>
         </>
       }
     >
-      <p>
-        <strong>{suggest.agentName}</strong> could not reach{' '}
-        <strong>{suggest.failedProviderName}</strong>
-        {suggest.failedModel ? ` (${suggest.failedModel})` : ''}.
+      <p dir="auto">
+        {t('fallback.couldNotReach', {
+          agent: suggest.agentName,
+          provider: suggest.failedProviderName + (suggest.failedModel ? ` (${suggest.failedModel})` : ''),
+        })}
       </p>
-      <p className="muted" style={{ marginTop: 8 }}>
+      <p className="muted" style={{ marginTop: 8 }} dir="auto">
         {suggest.errorSummary}
       </p>
       <p style={{ marginTop: 14 }}>
-        Switch to another configured provider for the <em>rest of this run only</em>? Your saved
-        agent settings stay unchanged.
+        {t('fallback.switchExplain')}
       </p>
 
       <label style={{ display: 'block', marginTop: 16 }}>
-        Fallback provider
+        {t('fallback.providerLabel')}
         <select
           value={activeProvider?.providerId ?? ''}
           onChange={(e) => {
@@ -88,7 +92,7 @@ export function FallbackSuggestModal() {
       </label>
 
       <label style={{ display: 'block', marginTop: 12 }}>
-        Model
+        {t('fallback.modelLabel')}
         <select
           value={activeModel}
           onChange={(e) => setModel(e.target.value)}
@@ -103,9 +107,11 @@ export function FallbackSuggestModal() {
       </label>
 
       <div className="muted" style={{ marginTop: 16, fontSize: 13 }}>
-        Remaining budget — run: {suggest.budget.remainingRun.toLocaleString()} tok · day:{' '}
-        {suggest.budget.remainingDay.toLocaleString()} tok · fallback:{' '}
-        {suggest.budget.remainingFallback.toLocaleString()} tok
+        {t('fallback.remainingBudget', {
+          run: formatNumber(suggest.budget.remainingRun, language),
+          day: formatNumber(suggest.budget.remainingDay, language),
+          fallback: formatNumber(suggest.budget.remainingFallback, language),
+        })}
       </div>
     </Modal>
   );

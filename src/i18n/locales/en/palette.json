@@ -1,0 +1,16 @@
+{
+  "paletteLabel": "Component palette",
+  "agentsHeading": "Agents",
+  "addAgent": "+ Add agent",
+  "createWithAi": "✨ Create agent with AI",
+  "smartArrange": "✨ Smart Arrange",
+  "addProviderFirst": "Add an enabled provider first",
+  "addTwoAgentsFirst": "Add at least 2 enabled agents first",
+  "smartArrangeHint": "AI connects your agents into a conversation flow for a subject",
+  "templatesHeading": "Templates",
+  "manageHeading": "Manage",
+  "providerManager": "Provider manager",
+  "savedPlaygrounds": "Saved playgrounds",
+  "agentLibrary": "Agent library",
+  "credentialsWarning": "Provider credentials are stored and used in this browser. Do not use unrestricted production keys."
+}

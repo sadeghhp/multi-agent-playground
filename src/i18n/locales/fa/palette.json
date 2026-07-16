@@ -1,0 +1,16 @@
+{
+  "paletteLabel": "پالت اجزا",
+  "agentsHeading": "عامل‌ها",
+  "addAgent": "+ افزودن عامل",
+  "createWithAi": "✨ ساخت عامل با هوش مصنوعی",
+  "smartArrange": "✨ چیدمان هوشمند",
+  "addProviderFirst": "ابتدا یک ارائه‌دهنده فعال اضافه کنید",
+  "addTwoAgentsFirst": "ابتدا حداقل ۲ عامل فعال اضافه کنید",
+  "smartArrangeHint": "هوش مصنوعی عامل‌های شما را برای یک موضوع به یک جریان گفتگو متصل می‌کند",
+  "templatesHeading": "قالب‌ها",
+  "manageHeading": "مدیریت",
+  "providerManager": "مدیر ارائه‌دهندگان",
+  "savedPlaygrounds": "زمین‌های بازی ذخیره‌شده",
+  "agentLibrary": "کتابخانه عامل‌ها",
+  "credentialsWarning": "اعتبارنامه‌های ارائه‌دهنده در این مرورگر ذخیره و استفاده می‌شوند. از کلیدهای تولیدی نامحدود استفاده نکنید."
+}

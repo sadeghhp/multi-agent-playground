@@ -5,6 +5,14 @@
   background: var(--canvas-bg);
 }
 
+/* The node graph is a coordinate space, not text layout: keep the React Flow
+ * pane left-to-right even under a Persian (RTL) document so pan/zoom, node
+ * positions, and the source→target handle sides never flip. Only the overlay
+ * chrome (empty-state card, view buttons) below follows the document direction. */
+.canvas :global(.react-flow) {
+  direction: ltr;
+}
+
 .canvas[data-running] {
   cursor: not-allowed;
 }
@@ -67,7 +75,7 @@
 .viewButtons {
   position: absolute;
   top: 12px;
-  right: 12px;
+  inset-inline-end: 12px;
   z-index: 10;
   display: flex;
   gap: 6px;

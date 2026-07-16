@@ -6,9 +6,12 @@ import {
   useRef,
   useState,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useDomainStore } from '../store/domainStore';
 import { useProviderStore } from '../store/providerStore';
 import { useRuntimeStore } from '../store/runtimeStore';
+import { useUiStore } from '../store/uiStore';
+import { formatDuration, formatNumber, formatTime } from '../i18n/format';
 import { agentColor } from '../graph/colors';
 import { continueRun, retryAgentTurn } from '../orchestrator/orchestrator';
 import { hasBlockingErrors, validateForRun } from '../orchestrator/validate';
@@ -19,17 +22,19 @@ import styles from './BottomPanel.module.css';
 
 type Tab = 'transcript' | 'log' | 'errors';
 
-const RUN_STATUS_LABEL: Record<string, string> = {
-  idle: 'Idle',
-  running: 'Running…',
-  paused: 'Paused',
-  stopped: 'Stopped',
-  completed: 'Completed',
-  error: 'Error',
-  interrupted: 'Interrupted',
+const RUN_STATUS_KEY: Record<string, string> = {
+  idle: 'bottomPanel.statusIdle',
+  running: 'bottomPanel.statusRunning',
+  paused: 'bottomPanel.statusPaused',
+  stopped: 'bottomPanel.statusStopped',
+  completed: 'bottomPanel.statusCompleted',
+  error: 'bottomPanel.statusError',
+  interrupted: 'bottomPanel.statusInterrupted',
 };
 
 export function BottomPanel() {
+  const { t } = useTranslation();
+  const language = useUiStore((s) => s.language);
   const playground = useDomainStore((s) => s.playground);
   const clearTranscript = useDomainStore((s) => s.clearTranscript);
   const collapsed = playground?.ui.bottomPanelCollapsed ?? false;
@@ -132,16 +137,16 @@ export function BottomPanel() {
   const showJumpToLatest = tab === 'transcript' && !collapsed && !atBottom && (transcript.length > 0 || !!liveAgent);
 
   const TABS: { key: Tab; label: string; count: number }[] = [
-    { key: 'transcript', label: 'Transcript', count: transcript.length },
-    { key: 'log', label: 'Event log', count: events.length },
-    { key: 'errors', label: 'Errors', count: errors.length },
+    { key: 'transcript', label: t('bottomPanel.tabTranscript'), count: transcript.length },
+    { key: 'log', label: t('bottomPanel.tabLog'), count: events.length },
+    { key: 'errors', label: t('bottomPanel.tabErrors'), count: errors.length },
   ];
 
   // Arrow-key navigation across the tablist (WAI-ARIA tabs pattern).
   function onTabKeyDown(e: ReactKeyboardEvent) {
     if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft' && e.key !== 'Home' && e.key !== 'End') return;
     e.preventDefault();
-    const i = TABS.findIndex((t) => t.key === tab);
+    const i = TABS.findIndex((tb) => tb.key === tab);
     const next =
       e.key === 'Home' ? 0
       : e.key === 'End' ? TABS.length - 1
@@ -152,41 +157,41 @@ export function BottomPanel() {
   }
 
   return (
-    <section className={styles.panel} data-collapsed={collapsed || undefined} aria-label="Execution panel">
+    <section className={styles.panel} data-collapsed={collapsed || undefined} aria-label={t('bottomPanel.panelAria')}>
       <header className={styles.header}>
-        <div className={styles.tabs} role="tablist" aria-label="Execution views">
-          {TABS.map((t) => (
+        <div className={styles.tabs} role="tablist" aria-label={t('bottomPanel.tablistAria')}>
+          {TABS.map((tb) => (
             <button
-              key={t.key}
+              key={tb.key}
               role="tab"
-              id={`bp-tab-${t.key}`}
-              aria-controls={`bp-panel-${t.key}`}
-              aria-selected={tab === t.key}
-              tabIndex={tab === t.key ? 0 : -1}
-              className={tab === t.key ? styles.tabActive : ''}
-              onClick={() => setTab(t.key)}
+              id={`bp-tab-${tb.key}`}
+              aria-controls={`bp-panel-${tb.key}`}
+              aria-selected={tab === tb.key}
+              tabIndex={tab === tb.key ? 0 : -1}
+              className={tab === tb.key ? styles.tabActive : ''}
+              onClick={() => setTab(tb.key)}
               onKeyDown={onTabKeyDown}
             >
-              {t.label} ({t.count})
+              {tb.label} ({formatNumber(tb.count, language)})
             </button>
           ))}
         </div>
         <div className={styles.headerRight}>
           {transcript.length > 0 && (
             <span className={styles.stats}>
-              {stats.duration > 0 && `${(stats.duration / 1000).toFixed(1)}s`}
-              {stats.hasTokens && ` · ~${stats.tokens} tok`}
+              {stats.duration > 0 && formatDuration(stats.duration, language)}
+              {stats.hasTokens && t('bottomPanel.tokensStat', { tokens: formatNumber(stats.tokens, language) })}
             </span>
           )}
           <span className={`${styles.status} ${styles[`status_${status}`] ?? ''}`}>
-            {RUN_STATUS_LABEL[status] ?? status}{status === 'running' ? ` · turn ${currentTurn}` : ''}
+            {RUN_STATUS_KEY[status] ? t(RUN_STATUS_KEY[status]) : status}{status === 'running' ? t('bottomPanel.turnSuffix', { turn: currentTurn }) : ''}
           </span>
           {tab === 'transcript' && transcript.length > 0 && (
-            <button type="button" onClick={() => clearTranscript()} disabled={status === 'running'}>Clear</button>
+            <button type="button" onClick={() => clearTranscript()} disabled={status === 'running'}>{t('bottomPanel.clear')}</button>
           )}
           <button
             type="button"
-            aria-label={collapsed ? 'Expand panel' : 'Collapse panel'}
+            aria-label={collapsed ? t('bottomPanel.expand') : t('bottomPanel.collapse')}
             onClick={() => updateUiLayout({ bottomPanelCollapsed: !collapsed })}
           >
             {collapsed ? '▲' : '▼'}
@@ -206,7 +211,7 @@ export function BottomPanel() {
         >
           {tab === 'transcript' && (
             transcript.length === 0 && !liveAgent ? (
-              <p className={styles.empty}>No conversation yet. Configure agents, connect them, and press Run.</p>
+              <p className={styles.empty}>{t('bottomPanel.emptyTranscript')}</p>
             ) : (
               <>
                 {transcript.map((msg) => <Message key={msg.id} msg={msg} color={colorFor(msg.agentId)} />)}
@@ -226,14 +231,14 @@ export function BottomPanel() {
 
           {tab === 'log' && (
             events.length === 0 ? (
-              <p className={styles.empty}>No events yet.</p>
+              <p className={styles.empty}>{t('bottomPanel.emptyLog')}</p>
             ) : (
               <ul className={styles.log}>
                 {events.map((e) => (
                   <li key={e.id}>
-                    <span className={styles.logTime}>{new Date(e.at).toLocaleTimeString()}</span>
+                    <span className={styles.logTime}>{formatTime(e.at, language)}</span>
                     <span className="chip">{e.kind}</span>
-                    <span>{e.message}</span>
+                    <span dir="auto">{e.message}</span>
                   </li>
                 ))}
               </ul>
@@ -242,27 +247,27 @@ export function BottomPanel() {
 
           {tab === 'errors' && (
             errors.length === 0 ? (
-              <p className={styles.empty}>No errors.</p>
+              <p className={styles.empty}>{t('bottomPanel.emptyErrors')}</p>
             ) : (
               errors.map((err) => (
                 <div key={err.id} className={styles.errorItem}>
-                  <span className={styles.logTime}>{new Date(err.at).toLocaleTimeString()}</span>{' '}
+                  <span className={styles.logTime}>{formatTime(err.at, language)}</span>{' '}
                   <strong>[{err.level}] {err.summary}</strong>
                   {err.provider && <span className="muted"> · {err.provider}</span>}
-                  {err.retryEligible && <span className="chip"> retry-eligible</span>}
+                  {err.retryEligible && <span className="chip"> {t('bottomPanel.retryEligible')}</span>}
                   {err.errorKind && <span className="chip">{err.errorKind}</span>}
                   {err.agentId && status !== 'running' && status !== 'paused' && (
                     <button
                       type="button"
                       className="secondary"
-                      style={{ marginLeft: 8 }}
+                      style={{ marginInlineStart: 8 }}
                       onClick={() => retryAgentTurn(err.agentId!)}
-                      title="Re-run this agent's turn and continue from there"
+                      title={t('bottomPanel.retryTitle')}
                     >
-                      Retry
+                      {t('bottomPanel.retry')}
                     </button>
                   )}
-                  {err.detail && <div className={styles.errorDetail}>{err.detail}</div>}
+                  {err.detail && <div className={styles.errorDetail} dir="auto">{err.detail}</div>}
                 </div>
               ))
             )
@@ -276,20 +281,21 @@ export function BottomPanel() {
           className={`${styles.jumpBtn} primary`}
           onClick={() => { scrollToBottom('smooth'); setAtBottom(true); }}
         >
-          ↓ Jump to latest
+          {t('bottomPanel.jumpToLatest')}
         </button>
       )}
 
       {!collapsed && tab === 'transcript' && status !== 'running' && transcript.length > 0 && (
         <form className={styles.followUp} onSubmit={handleContinue}>
           {suggestions.length > 0 && (
-            <div className={styles.mentionSuggestions} role="listbox" aria-label="Address an agent">
+            <div className={styles.mentionSuggestions} role="listbox" aria-label={t('bottomPanel.addressAgentAria')}>
               {suggestions.map((a) => (
                 <button
                   key={a.id}
                   type="button"
                   role="option"
                   aria-selected={false}
+                  dir="auto"
                   onClick={() => setFollowUp(`@${a.name} `)}
                 >
                   @{a.name}
@@ -298,23 +304,23 @@ export function BottomPanel() {
             </div>
           )}
           {mention && (
-            <span className="chip" title={`Only ${mention.target.name} is asked to answer; the others see it as context.`}>
-              To: {mention.target.name}
+            <span className="chip" dir="auto" title={t('bottomPanel.mentionTitle', { name: mention.target.name })}>
+              {t('bottomPanel.mentionTo', { name: mention.target.name })}
             </span>
           )}
           <input
             type="text"
             value={followUp}
             onChange={(e) => setFollowUp(e.target.value)}
-            placeholder="Add your input to continue the conversation — start with @AgentName to address one agent directly…"
-            aria-label="Message to continue the conversation"
+            placeholder={t('bottomPanel.followUpPlaceholder')}
+            aria-label={t('bottomPanel.followUpAria')}
           />
           <button
             type="submit"
             className="primary"
             disabled={!canContinue || !followUp.trim() || (!!mention && !mention.message)}
           >
-            Continue
+            {t('bottomPanel.continue')}
           </button>
         </form>
       )}

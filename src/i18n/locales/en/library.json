@@ -1,0 +1,14 @@
+{
+  "title": "Agent library",
+  "intro": "Reusable agents you've saved. Add one to the current playground, or dispose of it. Save an agent from its inspector panel.",
+  "noSaved": "No saved agents yet.",
+  "untitledAgent": "Untitled agent",
+  "savedAt": "saved {{when}}",
+  "addToPlayground": "Add to playground",
+  "cannotAddRunning": "Cannot add agents while a conversation is running",
+  "openPlaygroundFirst": "Open or create a playground first",
+  "disposeAria": "Dispose {{name}}",
+  "dispose": "Dispose",
+  "disposeTitle": "Dispose saved agent",
+  "disposeMessage": "Dispose saved agent \"{{name}}\"? This removes it from the library."
+}

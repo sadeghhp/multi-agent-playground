@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Agent, AgentKind, ConnectionType, PersonaCitationStyle, PersonaMode, Skill } from '../../domain/schema';
 import { KIND_LABEL, isTerminalKind } from '../../domain/agentKind';
 import { useDomainStore } from '../../store/domainStore';
@@ -32,6 +33,7 @@ const PREVIEW_DEBOUNCE_MS = 300;
 const COLORS: Agent['colorCategory'][] = ['slate', 'blue', 'green', 'amber', 'red', 'violet', 'teal'];
 
 export function AgentInspector({ agent }: { agent: Agent }) {
+  const { t } = useTranslation();
   const playground = useDomainStore((s) => s.playground);
   const update = useDomainStore((s) => s.updateAgent);
   const duplicate = useDomainStore((s) => s.duplicateAgentById);
@@ -65,11 +67,11 @@ export function AgentInspector({ agent }: { agent: Agent }) {
 
   // Why the enhancer is unavailable, if it is — surfaced as a hint next to the button.
   const enhanceBlockedReason = !selectedProvider
-    ? 'Assign a provider to enable AI enhancement.'
+    ? t('inspector.enhanceBlockedNoProvider')
     : !selectedProvider.enabled
-      ? 'The assigned provider is disabled.'
+      ? t('inspector.enhanceBlockedProviderDisabled')
       : !agent.llm.model.trim()
-        ? 'Select a model to enable AI enhancement.'
+        ? t('inspector.enhanceBlockedNoModel')
         : null;
   const canEnhance = !enhanceBlockedReason && !enhancing;
 
@@ -139,9 +141,9 @@ export function AgentInspector({ agent }: { agent: Agent }) {
       return;
     }
     setEnrichRecoveryError(
-      recovered.errorDetail
-        ? `Recovery failed: ${recovered.errorDetail}`
-        : `Recovery failed: ${recovered.errorSummary}`,
+      t('inspector.recoveryFailed', {
+        detail: recovered.errorDetail ?? recovered.errorSummary,
+      }),
     );
   }
 
@@ -310,7 +312,7 @@ export function AgentInspector({ agent }: { agent: Agent }) {
 
   function handleExportSkills() {
     if (agent.skills.length === 0) {
-      showToast('warn', 'This agent has no skills to export.');
+      showToast('warn', t('inspector.noSkillsToExport'));
       return;
     }
     downloadJson(`${agent.name || 'agent'}-skills`, exportSkillSet(agent.skills));
@@ -318,7 +320,7 @@ export function AgentInspector({ agent }: { agent: Agent }) {
   async function handleImportSkills(file: File) {
     const result = importSkillSet(await file.text());
     if (!result.ok) {
-      showToast('error', result.error ?? 'Import failed.');
+      showToast('error', result.error ?? t('inspector.importFailed'));
       return;
     }
     // Imported skills are enabled and unlinked (their ids come from another set).
@@ -330,7 +332,7 @@ export function AgentInspector({ agent }: { agent: Agent }) {
       enabled: true,
     }));
     patch({ skills: [...agent.skills, ...imported] });
-    showToast('info', `Imported ${imported.length} skill${imported.length === 1 ? '' : 's'}.`);
+    showToast('info', t('inspector.importedSkills', { count: imported.length }));
   }
 
   function handleDuplicate() {
@@ -341,18 +343,18 @@ export function AgentInspector({ agent }: { agent: Agent }) {
   async function handleSaveToLibrary() {
     // Snapshot the agent's current config into the cross-playground library.
     await saveToLibrary(agent);
-    showToast('info', `Saved "${agent.name}" to the agent library.`);
+    showToast('info', t('inspector.savedToLibrary', { name: agent.name }));
   }
 
   async function handleDelete() {
     const hasConnections =
       playground?.connections.some((c) => c.source === agent.id || c.target === agent.id) ?? false;
     const ok = await requestConfirm({
-      title: 'Delete agent',
+      title: t('inspector.deleteAgentTitle'),
       message: hasConnections
-        ? `Delete "${agent.name}"? Its connections will be removed. Transcript history is preserved.`
-        : `Delete "${agent.name}"? Transcript history is preserved.`,
-      confirmLabel: 'Delete',
+        ? t('inspector.deleteAgentMessageWithConnections', { name: agent.name })
+        : t('inspector.deleteAgentMessage', { name: agent.name }),
+      confirmLabel: t('common.delete'),
       danger: true,
     });
     if (!ok) return;
@@ -412,7 +414,7 @@ export function AgentInspector({ agent }: { agent: Agent }) {
 
   return (
     <fieldset className={styles.body} disabled={isRunning}>
-      {isRunning && <p className={styles.hint}>Editing is locked while a conversation is running.</p>}
+      {isRunning && <p className={styles.hint}>{t('inspector.editingLocked')}</p>}
       <div className={styles.actions}>
         <label className={styles.enableToggle}>
           <input
@@ -420,12 +422,12 @@ export function AgentInspector({ agent }: { agent: Agent }) {
             checked={agent.runtime.enabled}
             onChange={(e) => patchRuntime({ enabled: e.target.checked })}
           />
-          Enabled
+          {t('inspector.enabled')}
         </label>
         <div className={styles.actionButtons}>
-          <button type="button" onClick={() => void handleSaveToLibrary()}>Save to library</button>
-          <button type="button" onClick={handleDuplicate}>Duplicate</button>
-          <button type="button" className="danger" onClick={handleDelete}>Delete</button>
+          <button type="button" onClick={() => void handleSaveToLibrary()}>{t('inspector.saveToLibrary')}</button>
+          <button type="button" onClick={handleDuplicate}>{t('inspector.duplicate')}</button>
+          <button type="button" className="danger" onClick={handleDelete}>{t('common.delete')}</button>
         </div>
       </div>
 
@@ -439,15 +441,13 @@ export function AgentInspector({ agent }: { agent: Agent }) {
         </div>
       )}
 
-      <Section title="Enrich with AI">
+      <Section title={t('inspector.enrichWithAiTitle')}>
         <p className={styles.hint}>
-          Tell the AI something new about this agent — a decision it should follow, a
-          capability it turned out to need, a correction — and it will mature the role,
-          instruction, characteristics, and skills to match. Review before applying.
+          {t('inspector.enrichHint')}
         </p>
         <textarea
           rows={3}
-          placeholder="e.g. This agent should now double-check any numeric claims against the source before repeating them."
+          placeholder={t('inspector.enrichPlaceholder')}
           value={enrichInfo}
           onChange={(e) => setEnrichInfo(e.target.value)}
         />
@@ -456,9 +456,9 @@ export function AgentInspector({ agent }: { agent: Agent }) {
             type="button"
             onClick={() => void handleEnrich()}
             disabled={!canEnhance || !enrichInfo.trim() || enriching}
-            title={enhanceBlockedReason ?? 'Mature this agent using the assigned provider'}
+            title={enhanceBlockedReason ?? t('inspector.enrichTitle')}
           >
-            {enriching ? 'Enriching…' : '🌱 Enrich with AI'}
+            {enriching ? t('inspector.enriching') : t('inspector.enrichButton')}
           </button>
           {enhanceBlockedReason && !enriching && (
             <span className={styles.enhanceStatus}>{enhanceBlockedReason}</span>
@@ -472,14 +472,14 @@ export function AgentInspector({ agent }: { agent: Agent }) {
             {enrichError.rawText && (
               <div className={styles.rawWrap}>
                 <button type="button" onClick={() => setEnrichShowRaw((v) => !v)}>
-                  {enrichShowRaw ? 'Hide' : 'Show'} raw response
+                  {enrichShowRaw ? t('inspector.hideRawResponse') : t('inspector.showRawResponse')}
                 </button>
                 {enrichError.errorKind === 'invalid-json' && (
                   <button type="button" onClick={handleRecoverEnrichDraft}>
-                    Recover draft
+                    {t('inspector.recoverDraft')}
                   </button>
                 )}
-                {enrichShowRaw && <pre className={styles.preview}>{enrichError.rawText}</pre>}
+                {enrichShowRaw && <pre className={styles.preview} dir="auto">{enrichError.rawText}</pre>}
                 {enrichRecoveryError && <div className={styles.recoveryErr}>{enrichRecoveryError}</div>}
               </div>
             )}
@@ -488,33 +488,33 @@ export function AgentInspector({ agent }: { agent: Agent }) {
 
         {enrichProposal && (
           <div className={styles.enhanceResult}>
-            <p className={styles.enhanceResultHead}>Suggested update — review before applying</p>
-            <pre className={styles.preview}>{formatEnrichPreview(enrichProposal)}</pre>
+            <p className={styles.enhanceResultHead}>{t('inspector.suggestedUpdate')}</p>
+            <pre className={styles.preview} dir="auto">{formatEnrichPreview(enrichProposal)}</pre>
             <div className={styles.enhanceActions}>
-              <button type="button" className="primary" onClick={applyEnrichment}>Apply</button>
-              <button type="button" onClick={() => setEnrichProposal(null)}>Discard</button>
+              <button type="button" className="primary" onClick={applyEnrichment}>{t('inspector.apply')}</button>
+              <button type="button" onClick={() => setEnrichProposal(null)}>{t('inspector.discard')}</button>
             </div>
           </div>
         )}
       </Section>
 
-      <Section title="Identity" defaultOpen>
+      <Section title={t('inspector.identityTitle')} defaultOpen>
         <div className="field">
-          <label htmlFor="ag-name">Name</label>
-          <input id="ag-name" value={agent.name} onChange={(e) => patch({ name: e.target.value })} />
+          <label htmlFor="ag-name">{t('inspector.nameLabel')}</label>
+          <input id="ag-name" value={agent.name} onChange={(e) => patch({ name: e.target.value })} dir="auto" />
         </div>
         <div className="field">
-          <label htmlFor="ag-desc">Description</label>
-          <input id="ag-desc" value={agent.description} onChange={(e) => patch({ description: e.target.value })} />
+          <label htmlFor="ag-desc">{t('inspector.descriptionLabel')}</label>
+          <input id="ag-desc" value={agent.description} onChange={(e) => patch({ description: e.target.value })} dir="auto" />
         </div>
         <div className="field">
-          <label>Color</label>
+          <label>{t('inspector.colorLabel')}</label>
           <div className={styles.colors}>
             {COLORS.map((c) => (
               <button
                 key={c}
                 type="button"
-                aria-label={c}
+                aria-label={t(`inspector.color_${c}`)}
                 aria-pressed={agent.colorCategory === c}
                 className={`${styles.swatch} ${styles[`sw_${c}`]} ${agent.colorCategory === c ? styles.swActive : ''}`}
                 onClick={() => patch({ colorCategory: c })}
@@ -524,54 +524,56 @@ export function AgentInspector({ agent }: { agent: Agent }) {
         </div>
       </Section>
 
-      <Section title="Persona" defaultOpen>
+      <Section title={t('inspector.personaTitle')} defaultOpen>
         <p className={styles.hint}>
-          Role agents play a specialist. Digital shadows speak in first person as a
-          named real person, citing their public work in character.
+          {t('inspector.personaHint')}
         </p>
         <div className="field">
-          <label htmlFor="ag-persona-mode">Persona mode</label>
+          <label htmlFor="ag-persona-mode">{t('inspector.personaModeLabel')}</label>
           <select
             id="ag-persona-mode"
             value={agent.personaMode}
             onChange={(e) => patchPersonaMode(e.target.value as PersonaMode)}
           >
-            <option value="role">Role agent</option>
-            <option value="digital-shadow">Digital shadow</option>
+            <option value="role">{t('inspector.personaRoleAgent')}</option>
+            <option value="digital-shadow">{t('inspector.personaDigitalShadow')}</option>
           </select>
         </div>
         {agent.personaMode === 'digital-shadow' && (
           <>
             <div className="field">
-              <label htmlFor="ag-persona-real">Real person name</label>
+              <label htmlFor="ag-persona-real">{t('inspector.realPersonNameLabel')}</label>
               <input
                 id="ag-persona-real"
                 value={agent.persona?.realName ?? ''}
                 onChange={(e) => patchPersona({ realName: e.target.value })}
-                placeholder="Thomas Nagel"
+                placeholder={t('inspector.realPersonNamePlaceholder')}
+                dir="auto"
               />
             </div>
             <div className="field">
-              <label htmlFor="ag-persona-known">Known for</label>
+              <label htmlFor="ag-persona-known">{t('inspector.knownForLabel')}</label>
               <input
                 id="ag-persona-known"
                 value={agent.persona?.knownFor ?? ''}
                 onChange={(e) => patchPersona({ knownFor: e.target.value })}
-                placeholder="Philosophy of mind; the hard problem of experience"
+                placeholder={t('inspector.knownForPlaceholder')}
+                dir="auto"
               />
             </div>
             <div className="field">
-              <label htmlFor="ag-persona-stance">Stance notes</label>
+              <label htmlFor="ag-persona-stance">{t('inspector.stanceNotesLabel')}</label>
               <textarea
                 id="ag-persona-stance"
                 rows={4}
                 value={agent.persona?.stanceNotes ?? ''}
                 onChange={(e) => patchPersona({ stanceNotes: e.target.value })}
-                placeholder="Core public positions (bullet list)…"
+                placeholder={t('inspector.stanceNotesPlaceholder')}
+                dir="auto"
               />
             </div>
             <div className="field">
-              <label htmlFor="ag-persona-cite">Citation style</label>
+              <label htmlFor="ag-persona-cite">{t('inspector.citationStyleLabel')}</label>
               <select
                 id="ag-persona-cite"
                 value={agent.persona?.citationStyle ?? 'in-character'}
@@ -579,66 +581,61 @@ export function AgentInspector({ agent }: { agent: Agent }) {
                   patchPersona({ citationStyle: e.target.value as PersonaCitationStyle })
                 }
               >
-                <option value="in-character">In-character (I argued in…)</option>
-                <option value="attributed">Attributed (X wrote…; as shadow…)</option>
+                <option value="in-character">{t('inspector.citationInCharacter')}</option>
+                <option value="attributed">{t('inspector.citationAttributed')}</option>
               </select>
             </div>
           </>
         )}
       </Section>
 
-      <Section title="Role & instruction" defaultOpen>
+      <Section title={t('inspector.roleInstructionTitle')} defaultOpen>
         <div className="field">
-          <label htmlFor="ag-kind">Type</label>
+          <label htmlFor="ag-kind">{t('inspector.typeLabel')}</label>
           <select
             id="ag-kind"
             value={agent.kind}
             onChange={(e) => patch({ kind: e.target.value as AgentKind })}
           >
-            <option value="participant">{KIND_LABEL.participant} — speaks in graph order</option>
-            <option value="moderator">{KIND_LABEL.moderator} — facilitates, sees the whole discussion</option>
-            <option value="summarizer">{KIND_LABEL.summarizer} — runs in wrap-up</option>
-            <option value="finalizer">{KIND_LABEL.finalizer} — runs last, in wrap-up</option>
+            <option value="participant">{t('inspector.kindParticipantOption', { label: KIND_LABEL.participant })}</option>
+            <option value="moderator">{t('inspector.kindModeratorOption', { label: KIND_LABEL.moderator })}</option>
+            <option value="summarizer">{t('inspector.kindSummarizerOption', { label: KIND_LABEL.summarizer })}</option>
+            <option value="finalizer">{t('inspector.kindFinalizerOption', { label: KIND_LABEL.finalizer })}</option>
           </select>
           {isTerminalKind(agent.kind) && (
             <p className={styles.hint}>
-              Runs automatically in the wrap-up phase, after the discussion ends —
-              you don't need to wire edges into it, and any incoming edges are
-              ignored for scheduling. {agent.kind === 'finalizer'
-                ? 'Finalizers run after summarizers and produce the final word.'
-                : 'Summarizers run before finalizers.'}
+              {agent.kind === 'finalizer'
+                ? t('inspector.terminalKindHintFinalizer')
+                : t('inspector.terminalKindHintSummarizer')}
             </p>
           )}
           {agent.kind === 'moderator' && (
             <p className={styles.hint}>
-              Scheduled by graph edges like a participant, but always sees the full
-              transcript and carries a facilitation contract. Wire it in wherever
-              you want it to intervene (e.g. after each round). Grant it
-              orchestration tools (Tools section) to let it direct questions at
-              agents, redirect the topic, or end the discussion.
+              {t('inspector.moderatorHint')}
             </p>
           )}
         </div>
         <div className="field">
-          <label htmlFor="ag-role">Role</label>
-          <input id="ag-role" value={agent.role} onChange={(e) => patch({ role: e.target.value })} placeholder="Skeptical reviewer" />
+          <label htmlFor="ag-role">{t('inspector.roleLabel')}</label>
+          <input id="ag-role" value={agent.role} onChange={(e) => patch({ role: e.target.value })} placeholder={t('inspector.rolePlaceholder')} dir="auto" />
         </div>
         <div className="field">
-          <label htmlFor="ag-sys">System instruction</label>
+          <label htmlFor="ag-sys">{t('inspector.systemInstructionLabel')}</label>
           <textarea
             id="ag-sys"
             rows={4}
             value={agent.systemInstruction}
             onChange={(e) => patch({ systemInstruction: e.target.value })}
+            dir="auto"
           />
           <div className={styles.enhanceBar}>
             <button
               type="button"
               onClick={handleEnhance}
               disabled={!canEnhance}
-              title={enhanceBlockedReason ?? 'Rewrite this instruction using the assigned provider'}
+              title={enhanceBlockedReason ?? t('inspector.enhanceTitle')}
             >
-              {enhancing ? 'Enhancing…' : '✨ Enhance with AI'}
+              {enhancing ? t('inspector.enhancing') : t('inspector.enhanceButton')}
             </button>
             {enhanceBlockedReason && !enhancing && (
               <span className={styles.enhanceStatus}>{enhanceBlockedReason}</span>
@@ -654,17 +651,17 @@ export function AgentInspector({ agent }: { agent: Agent }) {
 
           {enhanceProposal !== null && (
             <div className={styles.enhanceResult}>
-              <p className={styles.enhanceResultHead}>Suggested instruction — review before applying</p>
-              <pre className={styles.preview}>{enhanceProposal}</pre>
+              <p className={styles.enhanceResultHead}>{t('inspector.suggestedInstruction')}</p>
+              <pre className={styles.preview} dir="auto">{enhanceProposal}</pre>
               <div className={styles.enhanceActions}>
-                <button type="button" className="primary" onClick={applyEnhancement}>Apply</button>
-                <button type="button" onClick={() => setEnhanceProposal(null)}>Discard</button>
+                <button type="button" className="primary" onClick={applyEnhancement}>{t('inspector.apply')}</button>
+                <button type="button" onClick={() => setEnhanceProposal(null)}>{t('inspector.discard')}</button>
               </div>
             </div>
           )}
         </div>
         <div className="field">
-          <label htmlFor="ag-lang">Language</label>
+          <label htmlFor="ag-lang">{t('inspector.languageLabel')}</label>
           <select
             id="ag-lang"
             value={agent.language}
@@ -677,15 +674,15 @@ export function AgentInspector({ agent }: { agent: Agent }) {
         </div>
       </Section>
 
-      <Section title="Characteristics">
+      <Section title={t('inspector.characteristicsTitle')}>
         <div className="field">
-          <label htmlFor="ag-tone">Tone</label>
-          <input id="ag-tone" value={agent.characteristics.tone} onChange={(e) => patchChar({ tone: e.target.value })} />
+          <label htmlFor="ag-tone">{t('inspector.toneLabel')}</label>
+          <input id="ag-tone" value={agent.characteristics.tone} onChange={(e) => patchChar({ tone: e.target.value })} dir="auto" />
         </div>
         {(['verbosity', 'creativity', 'assertiveness', 'skepticism', 'cooperation'] as const).map((key) => (
           <div className="field" key={key}>
             <label htmlFor={`ag-${key}`}>
-              {key[0].toUpperCase() + key.slice(1)}: {agent.characteristics[key]}
+              {t(`inspector.char_${key}`, { value: agent.characteristics[key] })}
             </label>
             <input
               id={`ag-${key}`}
@@ -699,8 +696,8 @@ export function AgentInspector({ agent }: { agent: Agent }) {
         ))}
       </Section>
 
-      <Section title={`Skills (${agent.skills.filter((s) => s.enabled).length}/${agent.skills.length})`}>
-        <p className={styles.hint}>Declared capabilities merged into the prompt — not executable tools.</p>
+      <Section title={t('inspector.skillsTitle', { enabled: agent.skills.filter((s) => s.enabled).length, total: agent.skills.length })}>
+        <p className={styles.hint}>{t('inspector.skillsHint')}</p>
         {agent.skills.map((skill, idx) => {
           const linked = skill.libraryId ? library.find((s) => s.id === skill.libraryId) : undefined;
           return (
@@ -708,71 +705,74 @@ export function AgentInspector({ agent }: { agent: Agent }) {
               <div className={styles.skillHead}>
                 <input
                   type="checkbox"
-                  aria-label="Skill enabled"
+                  aria-label={t('inspector.skillEnabledAria')}
                   checked={skill.enabled}
                   onChange={(e) => patchSkillAt(idx, { enabled: e.target.checked })}
                 />
                 <input
                   value={skill.name}
-                  aria-label="Skill name"
-                  placeholder="skill name"
+                  aria-label={t('inspector.skillNameAria')}
+                  placeholder={t('inspector.skillNamePlaceholder')}
                   onChange={(e) => patchSkillAt(idx, { name: e.target.value })}
+                  dir="auto"
                 />
-                <button type="button" aria-label="Move skill up" disabled={idx === 0} onClick={() => moveSkill(idx, -1)}>↑</button>
-                <button type="button" aria-label="Move skill down" disabled={idx === agent.skills.length - 1} onClick={() => moveSkill(idx, 1)}>↓</button>
-                <button type="button" aria-label="Duplicate skill" onClick={() => duplicateSkill(idx)}>⧉</button>
-                <button type="button" className="danger" aria-label="Remove skill" onClick={() => removeSkill(skill.id)}>✕</button>
+                <button type="button" aria-label={t('inspector.moveSkillUp')} disabled={idx === 0} onClick={() => moveSkill(idx, -1)}>↑</button>
+                <button type="button" aria-label={t('inspector.moveSkillDown')} disabled={idx === agent.skills.length - 1} onClick={() => moveSkill(idx, 1)}>↓</button>
+                <button type="button" aria-label={t('inspector.duplicateSkill')} onClick={() => duplicateSkill(idx)}>⧉</button>
+                <button type="button" className="danger" aria-label={t('inspector.removeSkill')} onClick={() => removeSkill(skill.id)}>✕</button>
               </div>
               {linked && (
                 <div className={styles.skillLink}>
-                  <span className="chip">from library: {linked.name}</span>
-                  <button type="button" onClick={() => resyncSkill(idx)}>Re-sync from library</button>
+                  <span className="chip" dir="auto">{t('inspector.fromLibrary', { name: linked.name })}</span>
+                  <button type="button" onClick={() => resyncSkill(idx)}>{t('inspector.resyncFromLibrary')}</button>
                 </div>
               )}
               <input
                 value={skill.description}
-                aria-label="Skill description"
-                placeholder="Short description"
+                aria-label={t('inspector.skillDescriptionAria')}
+                placeholder={t('inspector.skillDescriptionPlaceholder')}
                 onChange={(e) => patchSkillAt(idx, { description: e.target.value })}
+                dir="auto"
               />
               <textarea
                 rows={2}
-                aria-label="Skill instruction"
-                placeholder="Optional instruction text"
+                aria-label={t('inspector.skillInstructionAria')}
+                placeholder={t('inspector.skillInstructionPlaceholder')}
                 value={skill.instruction}
                 onChange={(e) => patchSkillAt(idx, { instruction: e.target.value })}
+                dir="auto"
               />
             </div>
           );
         })}
         <div className={styles.skillActions}>
           <select
-            aria-label="Add skill from library"
+            aria-label={t('inspector.addSkillFromLibraryAria')}
             value=""
             onChange={(e) => {
               addFromLibrary(e.target.value);
               e.target.value = '';
             }}
           >
-            <option value="">+ Add from library…</option>
+            <option value="">{t('inspector.addFromLibraryOption')}</option>
             {library.length > 0 && (
-              <optgroup label="Library">
+              <optgroup label={t('inspector.libraryOptgroup')}>
                 {library.map((s) => (
                   <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
               </optgroup>
             )}
-            <optgroup label="Presets">
+            <optgroup label={t('inspector.presetsOptgroup')}>
               {SKILL_PRESETS.filter((p) => !library.some((s) => s.name === p.name)).map((p) => (
                 <option key={p.name} value={`preset:${p.name}`}>{p.name}</option>
               ))}
             </optgroup>
           </select>
-          <button type="button" onClick={addBlankSkill}>+ Blank skill</button>
+          <button type="button" onClick={addBlankSkill}>{t('inspector.blankSkill')}</button>
         </div>
         <div className={styles.skillActions}>
-          <button type="button" onClick={handleExportSkills}>Export skills</button>
-          <button type="button" onClick={() => skillFileInput.current?.click()}>Import skills</button>
+          <button type="button" onClick={handleExportSkills}>{t('inspector.exportSkills')}</button>
+          <button type="button" onClick={() => skillFileInput.current?.click()}>{t('inspector.importSkills')}</button>
           <input
             ref={skillFileInput}
             type="file"
@@ -788,71 +788,70 @@ export function AgentInspector({ agent }: { agent: Agent }) {
       </Section>
 
       <Section
-        title={`Tools (${agent.tools.filter((t) => toolAvailable(t)).length + grantedControlToolIds(agent).length})`}
+        title={t('inspector.toolsTitle', { count: agent.tools.filter((tl) => toolAvailable(tl)).length + grantedControlToolIds(agent).length })}
       >
         {CONTROL_TOOL_IDS_BY_KIND[agent.kind].length > 0 && (
           <>
             <p className={styles.hint}>
-              Orchestration tools — let this {agent.kind} influence the conversation flow
-              (directed questions get an immediate out-of-turn answer).
+              {t('inspector.orchestrationHint', { kind: agent.kind })}
             </p>
             {CONTROL_TOOL_IDS_BY_KIND[agent.kind].map((toolId) => (
               <label key={toolId} className={styles.toolRow}>
                 <input
                   type="checkbox"
-                  aria-label={`${CONTROL_TOOL_META[toolId].name} enabled`}
+                  aria-label={t('inspector.toolEnabledAria', { name: CONTROL_TOOL_META[toolId].name })}
                   checked={agent.tools.includes(toolId)}
                   onChange={(e) =>
                     patch({
                       tools: e.target.checked
                         ? [...agent.tools, toolId]
-                        : agent.tools.filter((t) => t !== toolId),
+                        : agent.tools.filter((tl) => tl !== toolId),
                     })
                   }
                 />
                 <span>
-                  <strong>{CONTROL_TOOL_META[toolId].name}</strong>
+                  <strong dir="auto">{CONTROL_TOOL_META[toolId].name}</strong>
                   <br />
-                  <span className={styles.hint}>{CONTROL_TOOL_META[toolId].description}</span>
+                  <span className={styles.hint} dir="auto">{CONTROL_TOOL_META[toolId].description}</span>
                 </span>
               </label>
             ))}
           </>
         )}
         <p className={styles.hint}>
-          Executable tools the agent can call mid-turn to fetch real facts and sources.
+          {t('inspector.executableToolsHint')}
         </p>
         {Object.values(TOOLS).map((tool) => (
           <label key={tool.id} className={styles.toolRow}>
             <input
               type="checkbox"
-              aria-label={`${tool.name} enabled`}
+              aria-label={t('inspector.toolEnabledAria', { name: tool.name })}
               checked={agent.tools.includes(tool.id)}
               onChange={(e) =>
                 patch({
                   tools: e.target.checked
                     ? [...agent.tools, tool.id]
-                    : agent.tools.filter((t) => t !== tool.id),
+                    : agent.tools.filter((tl) => tl !== tool.id),
                 })
               }
             />
             <span>
-              <strong>{tool.name}</strong>
+              <strong dir="auto">{tool.name}</strong>
               {tool.id === 'web_search' && !toolAvailable('web_search') && (
-                <span className="chip"> needs API key</span>
+                <span className="chip">{t('inspector.needsApiKey')}</span>
               )}
               <br />
-              <span className={styles.hint}>{tool.description}</span>
+              <span className={styles.hint} dir="auto">{tool.description}</span>
             </span>
           </label>
         ))}
         <div className="field">
-          <label htmlFor="ag-tavily-key">Web search key (Tavily)</label>
+          <label htmlFor="ag-tavily-key">{t('inspector.webSearchKeyLabel')}</label>
           <div className={styles.skillHead}>
             <input
               id="ag-tavily-key"
               type="password"
-              placeholder={toolAvailable('web_search') ? 'Key saved for this session' : 'tvly-…'}
+              placeholder={toolAvailable('web_search') ? t('inspector.webSearchKeySavedPlaceholder') : 'tvly-…'}
               value={tavilyKeyDraft}
               onChange={(e) => setTavilyKeyDraft(e.target.value)}
               onBlur={() => {
@@ -861,7 +860,7 @@ export function AgentInspector({ agent }: { agent: Agent }) {
                 if (tavilyKeyDraft.trim()) {
                   setTavilyKey(tavilyKeyDraft);
                   setTavilyKeyDraft('');
-                  showToast('info', 'Web search key saved for this session.');
+                  showToast('info', t('inspector.webSearchKeySaved'));
                 }
               }}
             />
@@ -872,122 +871,121 @@ export function AgentInspector({ agent }: { agent: Agent }) {
                 onClick={() => {
                   setTavilyKey('');
                   setTavilyKeyDraft('');
-                  showToast('info', 'Web search key cleared.');
+                  showToast('info', t('inspector.webSearchKeyCleared'));
                 }}
               >
-                Clear
+                {t('inspector.clear')}
               </button>
             )}
           </div>
           <p className={styles.hint}>
-            App-wide; stored only in this browser session, never in playgrounds or exports.
+            {t('inspector.webSearchKeyHint')}
           </p>
         </div>
       </Section>
 
-      <Section title="Provider & model" defaultOpen>
+      <Section title={t('inspector.providerModelTitle')} defaultOpen>
         <div className="field">
-          <label htmlFor="ag-provider">Provider</label>
+          <label htmlFor="ag-provider">{t('inspector.providerLabel')}</label>
           <select
             id="ag-provider"
             value={agent.llm.providerId ?? ''}
             onChange={(e) => patchLlm({ providerId: e.target.value || null })}
           >
-            <option value="">— none —</option>
+            <option value="">{t('inspector.providerNoneOption')}</option>
             {providers.map((p) => (
-              <option key={p.id} value={p.id}>{p.displayName}{!p.enabled ? ' (disabled)' : ''}</option>
+              <option key={p.id} value={p.id}>{p.enabled ? p.displayName : t('inspector.providerDisabledOption', { name: p.displayName })}</option>
             ))}
           </select>
         </div>
         <div className="field">
-          <label htmlFor="ag-model">Model</label>
+          <label htmlFor="ag-model">{t('inspector.modelLabel')}</label>
           {selectedProvider && selectedProvider.models.length > 0 ? (
             <select id="ag-model" value={agent.llm.model} onChange={(e) => patchLlm({ model: e.target.value })}>
-              <option value="">— select —</option>
+              <option value="">{t('inspector.modelSelectOption')}</option>
               {selectedProvider.models.map((m) => (
                 <option key={m} value={m}>{m}</option>
               ))}
             </select>
           ) : (
-            <input id="ag-model" value={agent.llm.model} onChange={(e) => patchLlm({ model: e.target.value })} placeholder="model id" />
+            <input id="ag-model" value={agent.llm.model} onChange={(e) => patchLlm({ model: e.target.value })} placeholder={t('inspector.modelPlaceholder')} dir="auto" />
           )}
         </div>
       </Section>
 
-      <Section title="Generation settings">
+      <Section title={t('inspector.generationSettingsTitle')}>
         <div className="field-row">
           <div className="field">
-            <label htmlFor="ag-temp">Temperature: {agent.llm.temperature}</label>
+            <label htmlFor="ag-temp">{t('inspector.temperatureLabel', { value: agent.llm.temperature })}</label>
             <input id="ag-temp" type="range" min={0} max={2} step={0.1} value={agent.llm.temperature} onChange={(e) => patchLlm({ temperature: Number(e.target.value) })} />
           </div>
         </div>
         <div className="field-row">
           <div className="field">
-            <label htmlFor="ag-maxtok">Max output tokens</label>
+            <label htmlFor="ag-maxtok">{t('inspector.maxOutputTokensLabel')}</label>
             <input id="ag-maxtok" type="number" min={1} value={agent.llm.maxOutputTokens} onChange={(e) => { const n = parseBoundedInt(e.target.value, 1); if (n !== null) patchLlm({ maxOutputTokens: n }); }} />
           </div>
           <div className="field">
-            <label htmlFor="ag-topp">Top-p (optional)</label>
+            <label htmlFor="ag-topp">{t('inspector.topPLabel')}</label>
             <input id="ag-topp" type="number" min={0} max={1} step={0.05} value={agent.llm.topP ?? ''} onChange={(e) => { if (e.target.value === '') { patchLlm({ topP: undefined }); return; } const n = Number(e.target.value); if (Number.isFinite(n) && n >= 0 && n <= 1) patchLlm({ topP: n }); }} />
           </div>
         </div>
       </Section>
 
-      <Section title="Runtime limits">
+      <Section title={t('inspector.runtimeLimitsTitle')}>
         <div className="field-row">
           <div className="field">
-            <label htmlFor="ag-maxresp">Max responses / run</label>
+            <label htmlFor="ag-maxresp">{t('inspector.maxResponsesLabel')}</label>
             <input id="ag-maxresp" type="number" min={1} value={agent.runtime.maxResponsesPerRun} onChange={(e) => { const n = parseBoundedInt(e.target.value, 1); if (n !== null) patchRuntime({ maxResponsesPerRun: n }); }} />
           </div>
           <div className="field">
-            <label htmlFor="ag-hist">History window</label>
+            <label htmlFor="ag-hist">{t('inspector.historyWindowLabel')}</label>
             <input id="ag-hist" type="number" min={1} value={agent.runtime.historyWindow} onChange={(e) => { const n = parseBoundedInt(e.target.value, 1); if (n !== null) patchRuntime({ historyWindow: n }); }} />
           </div>
         </div>
         <label className={styles.enableToggle}>
           <input type="checkbox" checked={agent.runtime.includeHistory} onChange={(e) => patchRuntime({ includeHistory: e.target.checked })} />
-          Include conversation history
+          {t('inspector.includeHistoryLabel')}
         </label>
       </Section>
 
-      <Section title={`Connections (${outgoing.length} outgoing)`}>
-        <p className={styles.hint}>Directed edges from this agent. A button alternative to dragging between nodes.</p>
-        {outgoing.length === 0 && <p className="muted" style={{ fontSize: 12 }}>No outgoing connections.</p>}
+      <Section title={t('inspector.connectionsTitle', { count: outgoing.length })}>
+        <p className={styles.hint}>{t('inspector.connectionsHint')}</p>
+        {outgoing.length === 0 && <p className="muted" style={{ fontSize: 12 }}>{t('inspector.noOutgoingConnections')}</p>}
         {outgoing.map((c) => {
           const target = playground.agents.find((a) => a.id === c.target);
           return (
             <div key={c.id} className={styles.connItem}>
               <button type="button" className={styles.connLink} onClick={() => selectConnection(c.id)}>
-                → {target?.name ?? 'deleted'} <span className="chip">{c.type}</span>
+                → <span dir="auto">{target?.name ?? t('inspector.deleted')}</span> <span className="chip">{c.type}</span>
               </button>
-              <button type="button" className="danger" aria-label="Remove connection" onClick={() => removeConnection(c.id)}>✕</button>
+              <button type="button" className="danger" aria-label={t('inspector.removeConnection')} onClick={() => removeConnection(c.id)}>✕</button>
             </div>
           );
         })}
         {availableTargets.length > 0 && (
           <div className={styles.connAdd}>
-            <select aria-label="Connection target" value={newTarget} onChange={(e) => setNewTarget(e.target.value)}>
-              <option value="">Connect to…</option>
+            <select aria-label={t('inspector.connectionTargetAria')} value={newTarget} onChange={(e) => setNewTarget(e.target.value)}>
+              <option value="">{t('inspector.connectToOption')}</option>
               {availableTargets.map((a) => (
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
             </select>
-            <select aria-label="Connection type" value={newType} onChange={(e) => setNewType(e.target.value as ConnectionType)}>
-              <option value="conversation">talk</option>
-              <option value="review">review</option>
-              <option value="handoff">handoff</option>
+            <select aria-label={t('inspector.connectionType')} value={newType} onChange={(e) => setNewType(e.target.value as ConnectionType)}>
+              <option value="conversation">{t('inspector.connTypeTalk')}</option>
+              <option value="review">{t('inspector.connTypeReview')}</option>
+              <option value="handoff">{t('inspector.connTypeHandoff')}</option>
             </select>
-            <button type="button" onClick={handleAddConnection} disabled={!newTarget}>Add</button>
+            <button type="button" onClick={handleAddConnection} disabled={!newTarget}>{t('common.add')}</button>
           </div>
         )}
       </Section>
 
-      <Section title="Effective prompt (preview)">
+      <Section title={t('inspector.effectivePromptTitle')}>
         <p className={styles.hint}>
-          Read-only. Shows how this agent's configuration becomes a model instruction.
-          {' '}Estimated context: ~{estTokens} tokens (character-based estimate).
+          {t('inspector.effectivePromptHint', { tokens: estTokens })}
         </p>
-        <pre className={styles.preview}>{preview}</pre>
+        <pre className={styles.preview} dir="auto">{preview}</pre>
       </Section>
     </fieldset>
   );

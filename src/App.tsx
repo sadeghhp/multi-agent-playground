@@ -1,8 +1,10 @@
 import { useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from './i18n';
 import { useDomainStore } from './store/domainStore';
 import { useProviderStore } from './store/providerStore';
 import { useUiStore } from './store/uiStore';
-import { getSelectedPlaygroundId } from './store/prefs';
+import { getSelectedPlaygroundId, directionFor } from './store/prefs';
 import { Toolbar } from './ui/Toolbar';
 import { Palette } from './ui/Palette';
 import { Inspector } from './ui/Inspector';
@@ -34,7 +36,9 @@ import { MobileApp } from './ui/mobile/MobileApp';
 import styles from './App.module.css';
 
 export default function App() {
+  const { t } = useTranslation();
   const theme = useUiStore((s) => s.theme);
+  const language = useUiStore((s) => s.language);
   const openPanel = useUiStore((s) => s.openPanel);
   const isMobile = useIsMobile();
   const playground = useDomainStore((s) => s.playground);
@@ -51,6 +55,13 @@ export default function App() {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
+  // Reflect the chosen language onto <html> so `dir`/`lang` drive RTL layout,
+  // font selection, and native form-control direction across the whole document.
+  useEffect(() => {
+    document.documentElement.setAttribute('lang', language);
+    document.documentElement.setAttribute('dir', directionFor(language));
+  }, [language]);
+
   // Surface dropped (corrupt/unreadable) stored records to the user, once, so a
   // silently skipped playground/run isn't visible only in the console.
   useEffect(() => {
@@ -58,7 +69,7 @@ export default function App() {
     setRecordDropListener((detail) => {
       if (warned) return;
       warned = true;
-      useUiStore.getState().showToast('warn', `${detail} See the console for details.`);
+      useUiStore.getState().showToast('warn', i18n.t('app.recordDropWarning', { detail }));
     });
     return () => setRecordDropListener(null);
   }, []);
@@ -99,12 +110,12 @@ export default function App() {
         <MobileApp />
       ) : (
         <>
-          <a href="#main" className="skip-link">Skip to canvas</a>
+          <a href="#main" className="skip-link">{t('app.skipToCanvas')}</a>
           <Toolbar />
           <div className={styles.body}>
             <Palette />
-            <main id="main" tabIndex={-1} className={styles.center} aria-label="Graph canvas">
-              {playground ? <GraphCanvas /> : <div className={styles.loading}>Loading…</div>}
+            <main id="main" tabIndex={-1} className={styles.center} aria-label={t('app.graphCanvas')}>
+              {playground ? <GraphCanvas /> : <div className={styles.loading}>{t('app.loading')}</div>}
             </main>
             <Inspector />
           </div>

@@ -11,7 +11,7 @@ import { dirForLanguage } from '../../domain/language';
 import { extractInlineThinking } from '../../providers/openaiAdapter';
 import {
   generateConversationInsight,
-  pickInsightAgent,
+  resolveInsightTarget,
   type InsightKind,
 } from '../../agents/conversationInsights';
 import { continueRun, startRun } from '../../orchestrator/orchestrator';
@@ -19,11 +19,14 @@ import { hasBlockingErrors, validateForRun } from '../../orchestrator/validate';
 import { addressableAgents, parseMention } from '../addressing';
 import { useDomainStore } from '../../store/domainStore';
 import { useProviderStore } from '../../store/providerStore';
+import { useLlmSettingsStore } from '../../store/llmSettingsStore';
 import { useRuntimeStore } from '../../store/runtimeStore';
 import { useUiStore } from '../../store/uiStore';
 import { agentColor } from '../../graph/colors';
+import { useTranslation } from 'react-i18next';
+import type { Language } from '../../store/prefs';
+import { formatDuration, formatNumber, formatTime } from '../../i18n/format';
 import { MessageMarkdown } from '../transcript/MessageMarkdown';
-import { formatDuration } from '../formatDuration';
 import { downloadText } from '../fileDownload';
 import {
   conversationToJson,
@@ -40,8 +43,8 @@ function agentInitial(name: string): string {
 }
 
 /** Compact token count for the header stats (e.g. 12.4k). */
-function formatTokens(n: number): string {
-  return n >= 10_000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+function formatTokens(n: number, lang: Language): string {
+  return n >= 10_000 ? `${formatNumber(Math.round(n / 100) / 10, lang)}k` : formatNumber(n, lang);
 }
 
 const EXPORT_FORMATS = [
@@ -69,6 +72,8 @@ interface InsightState {
  * `openPanel === 'timeline'`; the live BottomPanel transcript is untouched.
  */
 export function TimelinePage() {
+  const { t } = useTranslation();
+  const language = useUiStore((s) => s.language);
   const playground = useDomainStore((s) => s.playground);
   const setPanel = useUiStore((s) => s.setPanel);
   const close = () => setPanel('none');
@@ -81,6 +86,7 @@ export function TimelinePage() {
     s.activeAgentId ? s.streamingReasoning[s.activeAgentId] : undefined,
   );
   const providers = useProviderStore((s) => s.providers);
+  const llmSettings = useLlmSettingsStore((s) => s.settings);
 
   const transcript = playground?.transcript ?? [];
   const groups = useMemo(() => groupByTurn(transcript), [transcript]);
@@ -133,12 +139,12 @@ export function TimelinePage() {
   const [moreTurns, setMoreTurns] = useState(2);
   // Surface the actual blocker rather than a single canned line.
   const continueTitle = canRunMore
-    ? `Let the agents talk for up to ${moreTurns} more turn${moreTurns === 1 ? '' : 's'}`
+    ? t('timeline.continueTitle', { count: moreTurns })
     : !idle
-      ? 'Available once the run finishes'
+      ? t('timeline.continueBlockedRunning')
       : !graphOk
-        ? 'Fix configuration issues to continue'
-        : 'Available once there is a conversation';
+        ? t('timeline.continueBlockedConfig')
+        : t('timeline.continueBlockedEmpty');
 
   const turnOptions = useMemo(() => {
     const opts = new Set(BASE_TURN_OPTIONS);
@@ -164,28 +170,27 @@ export function TimelinePage() {
     setAtBottom(true);
   }
 
-  // On-demand summary/review: borrows an existing agent's provider+model (a
-  // summarizer if the playground has one) and never touches the transcript.
-  const insightAgent = useMemo(
-    () => (playground ? pickInsightAgent(playground, providers) : null),
-    [playground, providers],
+  // On-demand summary/review: runs against the provider/model configured in
+  // Settings, or (when unset) borrows a suitable agent's. Never touches the
+  // transcript. Recomputed when the settings target changes so the buttons and
+  // the actual call always agree on where the insight will run.
+  const insightTarget = useMemo(
+    () => (playground ? resolveInsightTarget(playground, providers, llmSettings) : null),
+    [playground, providers, llmSettings],
   );
-  const insightProvider = insightAgent
-    ? providers.find((p) => p.id === insightAgent.llm.providerId) ?? null
-    : null;
-  const canInsight = transcript.length > 0 && !!insightProvider;
+  const canInsight = transcript.length > 0 && !!insightTarget;
 
   const [insight, setInsight] = useState<InsightState | null>(null);
   const insightAbort = useRef<AbortController | null>(null);
   useEffect(() => () => insightAbort.current?.abort(), []);
 
   async function runInsight(kind: InsightKind) {
-    if (!playground || !insightAgent || !insightProvider) return;
+    if (!playground || !insightTarget) return;
     insightAbort.current?.abort();
     const controller = new AbortController();
     insightAbort.current = controller;
     setInsight({ kind, status: 'loading' });
-    const res = await generateConversationInsight(kind, playground, insightAgent, insightProvider, {
+    const res = await generateConversationInsight(kind, playground, insightTarget, {
       signal: controller.signal,
     });
     if (controller.signal.aborted) return;
@@ -312,7 +317,7 @@ export function TimelinePage() {
       className={styles.overlay}
       role="dialog"
       aria-modal="true"
-      aria-label="Conversation timeline"
+      aria-label={t('timeline.eyebrow')}
       onMouseDown={(e) => {
         // Backdrop click (only when the press starts on the overlay itself) closes.
         if (e.target === e.currentTarget) close();
@@ -321,32 +326,35 @@ export function TimelinePage() {
       <div className={styles.panel} ref={panelRef} tabIndex={-1}>
         <header className={styles.header}>
           <div className={styles.titleBlock}>
-            <span className={styles.eyebrow}>Conversation timeline</span>
-            <h1 className={styles.title}>{playground?.name || 'Untitled playground'}</h1>
+            <span className={styles.eyebrow}>{t('timeline.eyebrow')}</span>
+            <h1 className={styles.title} dir="auto">{playground?.name || t('timeline.untitledPlayground')}</h1>
           </div>
           <div className={styles.headerRight}>
             {transcript.length > 0 && (
               <div className={styles.stats}>
                 <span className={styles.stat}>
-                  <strong>{stats.turns}</strong> turn{stats.turns === 1 ? '' : 's'}
+                  <strong>{formatNumber(stats.turns, language)}</strong>{' '}
+                  {t('timeline.turnsLabel', { count: stats.turns })}
                 </span>
                 <span className={styles.stat}>
-                  <strong>{stats.messages}</strong> message{stats.messages === 1 ? '' : 's'}
+                  <strong>{formatNumber(stats.messages, language)}</strong>{' '}
+                  {t('timeline.messagesLabel', { count: stats.messages })}
                 </span>
                 {stats.duration > 0 && (
                   <span className={styles.stat}>
-                    <strong>{formatDuration(stats.duration)}</strong>
+                    <strong>{formatDuration(stats.duration, language)}</strong>
                   </span>
                 )}
                 {stats.hasTokens && (
                   <span className={styles.stat}>
-                    <strong>~{formatTokens(stats.tokens)}</strong> tok
+                    <strong>~{formatTokens(stats.tokens, language)}</strong>{' '}
+                    {t('timeline.tokensLabel')}
                   </span>
                 )}
               </div>
             )}
             {copyState && (
-              <span className="chip">{copyState === 'ok' ? 'Copied ✓' : 'Copy failed'}</span>
+              <span className="chip">{copyState === 'ok' ? t('timeline.copied') : t('timeline.copyFailed')}</span>
             )}
             <div className={styles.exportWrap} ref={exportWrapRef}>
               <button
@@ -357,23 +365,23 @@ export function TimelinePage() {
                 disabled={transcript.length === 0}
                 onClick={() => setExportOpen((v) => !v)}
               >
-                Export ▾
+                {t('timeline.export')}
               </button>
               {exportOpen && (
-                <div className={styles.exportMenu} role="menu" aria-label="Export conversation">
+                <div className={styles.exportMenu} role="menu" aria-label={t('timeline.exportMenuLabel')}>
                   {EXPORT_FORMATS.map((f) => (
                     <button key={f.key} type="button" role="menuitem" onClick={() => handleExport(f.key)}>
-                      {f.label}
+                      {t(`timeline.exportFormat.${f.key}`)}
                     </button>
                   ))}
                   <div className={styles.exportSep} role="separator" />
                   <button type="button" role="menuitem" onClick={handleCopyMarkdown}>
-                    Copy as Markdown
+                    {t('timeline.copyAsMarkdown')}
                   </button>
                 </div>
               )}
             </div>
-            <button type="button" className="icon ghost" onClick={close} aria-label="Close timeline">
+            <button type="button" className="icon ghost" onClick={close} aria-label={t('timeline.closeTimeline')}>
               ✕
             </button>
           </div>
@@ -389,20 +397,20 @@ export function TimelinePage() {
               <div className={styles.emptySpine} aria-hidden="true">
                 <span /><span /><span />
               </div>
-              <p className={styles.emptyTitle}>No conversation yet.</p>
-              <p className={styles.emptyHint}>Configure agents, connect them, and press Run.</p>
+              <p className={styles.emptyTitle}>{t('timeline.emptyTitle')}</p>
+              <p className={styles.emptyHint}>{t('timeline.emptyHint')}</p>
             </div>
           ) : (
             <ol className={styles.timeline}>
               {groups.map((group, gi) => (
                 <li key={gi} className={styles.turnGroup}>
                   {isInterjectionGroup(group) ? (
-                    <div className={styles.interjectDivider} aria-label="Interjection">
-                      <span className={styles.interjectLabel}>💬 Interjection</span>
+                    <div className={styles.interjectDivider} aria-label={t('timeline.interjectionAria')}>
+                      <span className={styles.interjectLabel}>{t('timeline.interjectionLabel')}</span>
                     </div>
                   ) : (
-                    <div className={styles.turnDivider} aria-label={`Turn ${group.turn}`}>
-                      <span className={styles.turnLabel}>Turn {group.turn}</span>
+                    <div className={styles.turnDivider} aria-label={t('timeline.turn', { turn: group.turn })}>
+                      <span className={styles.turnLabel}>{t('timeline.turn', { turn: group.turn })}</span>
                     </div>
                   )}
                   {group.messages.map((msg) => (
@@ -420,8 +428,8 @@ export function TimelinePage() {
               ))}
               {needsNewLiveGroup && liveAgent && (
                 <li className={styles.turnGroup}>
-                  <div className={styles.turnDivider} aria-label={`Turn ${currentTurn}`}>
-                    <span className={styles.turnLabel}>Turn {currentTurn}</span>
+                  <div className={styles.turnDivider} aria-label={t('timeline.turn', { turn: currentTurn })}>
+                    <span className={styles.turnLabel}>{t('timeline.turn', { turn: currentTurn })}</span>
                   </div>
                   <TimelineLiveItem
                     agent={liveAgent}
@@ -440,7 +448,7 @@ export function TimelinePage() {
               className={`${styles.jumpBtn} primary`}
               onClick={() => { scrollToBottom('smooth'); setAtBottom(true); }}
             >
-              ↓ Jump to latest
+              {t('timeline.jumpToLatest')}
             </button>
           )}
         </div>
@@ -450,11 +458,11 @@ export function TimelinePage() {
             {insight && (
               <section
                 className={styles.insight}
-                aria-label={insight.kind === 'summary' ? 'Conversation summary' : 'Conversation review'}
+                aria-label={insight.kind === 'summary' ? t('timeline.summaryAria') : t('timeline.reviewAria')}
               >
                 <div className={styles.insightHeader}>
-                  <strong>{insight.kind === 'summary' ? 'Summary' : 'Review'}</strong>
-                  {insight.model && <span className={styles.insightMeta}>{insight.model}</span>}
+                  <strong>{insight.kind === 'summary' ? t('timeline.summary') : t('timeline.review')}</strong>
+                  {insight.model && <span className={styles.insightMeta} dir="auto">{insight.model}</span>}
                   <span className={styles.insightSpacer} />
                   {insight.status === 'done' && insight.text && (
                     <>
@@ -463,7 +471,7 @@ export function TimelinePage() {
                         className="ghost"
                         onClick={() => void copyToClipboard(insight.text!)}
                       >
-                        Copy
+                        {t('timeline.copy')}
                       </button>
                       <button
                         type="button"
@@ -478,7 +486,7 @@ export function TimelinePage() {
                           )
                         }
                       >
-                        Download
+                        {t('timeline.download')}
                       </button>
                     </>
                   )}
@@ -486,7 +494,7 @@ export function TimelinePage() {
                     type="button"
                     className="icon ghost"
                     onClick={closeInsight}
-                    aria-label={`Close ${insight.kind}`}
+                    aria-label={insight.kind === 'summary' ? t('timeline.closeSummary') : t('timeline.closeReview')}
                   >
                     ✕
                   </button>
@@ -494,11 +502,13 @@ export function TimelinePage() {
                 <div className={styles.insightBody}>
                   {insight.status === 'loading' && (
                     <span className={styles.insightLoading}>
-                      Generating {insight.kind === 'summary' ? 'summary' : 'review'}…
+                      {insight.kind === 'summary'
+                        ? t('timeline.generatingSummary')
+                        : t('timeline.generatingReview')}
                     </span>
                   )}
                   {insight.status === 'error' && (
-                    <span className={styles.errText}>{insight.error ?? 'Generation failed.'}</span>
+                    <span className={styles.errText} dir="auto">{insight.error ?? t('timeline.generationFailed')}</span>
                   )}
                   {insight.status === 'done' && insight.text && <MessageMarkdown content={insight.text} />}
                 </div>
@@ -520,17 +530,17 @@ export function TimelinePage() {
                   // continue monotonically (see orchestrator startTurn).
                   onClick={() => void startRun({ maxTurns: moreTurns })}
                 >
-                  ▶ Continue
+                  {t('timeline.continue')}
                 </button>
                 <select
                   value={moreTurns}
                   onChange={(e) => setMoreTurns(Number(e.target.value))}
                   disabled={!canRunMore}
-                  aria-label="How many more turns to run"
+                  aria-label={t('timeline.moreTurnsAria')}
                 >
                   {turnOptions.map((n) => (
                     <option key={n} value={n}>
-                      +{n} turn{n === 1 ? '' : 's'}
+                      {t('timeline.turnOption', { count: n })}
                     </option>
                   ))}
                 </select>
@@ -540,19 +550,19 @@ export function TimelinePage() {
                   type="button"
                   className="secondary"
                   disabled={!canInsight || insight?.status === 'loading'}
-                  title={canInsight ? 'Generate a concise summary of the conversation' : 'Needs a configured agent provider'}
+                  title={canInsight ? t('timeline.summarizeTitle') : t('timeline.insightBlocked')}
                   onClick={() => void runInsight('summary')}
                 >
-                  Summarize
+                  {t('timeline.summarize')}
                 </button>
                 <button
                   type="button"
                   className="secondary"
                   disabled={!canInsight || insight?.status === 'loading'}
-                  title={canInsight ? 'Assess the discussion and suggest next steps' : 'Needs a configured agent provider'}
+                  title={canInsight ? t('timeline.reviewTitle') : t('timeline.insightBlocked')}
                   onClick={() => void runInsight('review')}
                 >
-                  Review
+                  {t('timeline.review')}
                 </button>
               </div>
               <button
@@ -561,7 +571,7 @@ export function TimelinePage() {
                 aria-expanded={interjectOpen}
                 onClick={() => setInterjectOpen((v) => !v)}
               >
-                💬 Interject {interjectOpen ? '▾' : '▸'}
+                {t('timeline.interject')} {interjectOpen ? '▾' : '▸'}
               </button>
             </div>
 
@@ -574,11 +584,11 @@ export function TimelinePage() {
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleInterject(e);
                   }}
-                  placeholder="Step into the conversation — an instruction, opinion, or question for the agents…"
-                  aria-label="Message to the agents"
+                  placeholder={t('timeline.interjectPlaceholder')}
+                  aria-label={t('timeline.interjectAria')}
                 />
                 <button type="submit" className="primary" disabled={!canInterject || !interjectText.trim()}>
-                  Send
+                  {t('timeline.send')}
                 </button>
               </form>
             )}
@@ -590,7 +600,9 @@ export function TimelinePage() {
 }
 
 function TimelineItem({ msg, color }: { msg: TranscriptMessage; color: string }) {
-  const time = new Date(msg.timestamp).toLocaleTimeString();
+  const { t } = useTranslation();
+  const language = useUiStore((s) => s.language);
+  const time = formatTime(msg.timestamp, language);
   const failed = msg.status === 'failed';
   // Mirror the card (header + body) for RTL languages; the spine node stays put.
   const dir = dirForLanguage(msg.language);
@@ -611,12 +623,14 @@ function TimelineItem({ msg, color }: { msg: TranscriptMessage; color: string })
         <div className={styles.cardHeader}>
           <span className={styles.agent}>
             {msg.agentName}
-            {msg.agentDeleted && <span className="chip"> deleted</span>}
+            {msg.agentDeleted && <span className="chip">{t('timeline.deleted')}</span>}
           </span>
           {msg.role && <span className="chip">{msg.role}</span>}
           {msg.targetAgentName && <span className="chip">→ {msg.targetAgentName}</span>}
-          {msg.answeringTo && <span className="chip">answering {msg.answeringTo}</span>}
-          {msg.status === 'stopped' && <span className="chip">stopped</span>}
+          {msg.answeringTo && (
+            <span className="chip">{t('timeline.answering', { name: msg.answeringTo })}</span>
+          )}
+          {msg.status === 'stopped' && <span className="chip">{t('timeline.stopped')}</span>}
           {reasoning && (
             <button
               type="button"
@@ -624,20 +638,20 @@ function TimelineItem({ msg, color }: { msg: TranscriptMessage; color: string })
               aria-expanded={showReasoning}
               onClick={() => setShowReasoning((v) => !v)}
             >
-              thinking {showReasoning ? '▾' : '▸'}
+              {t('timeline.thinking')} {showReasoning ? '▾' : '▸'}
             </button>
           )}
           <span className={styles.meta}>
             {msg.model || '—'} · {time}
-            {msg.durationMs != null && ` · ${formatDuration(msg.durationMs)}`}
-            {msg.totalTokens != null && ` · ${msg.totalTokens} tok`}
+            {msg.durationMs != null && ` · ${formatDuration(msg.durationMs, language)}`}
+            {msg.totalTokens != null && ` · ${formatNumber(msg.totalTokens, language)} ${t('timeline.tokensLabel')}`}
           </span>
         </div>
         {msg.sourceAgentId && msg.connectionType && (
-          <div className={styles.source}>via {msg.connectionType} connection</div>
+          <div className={styles.source}>{t('timeline.viaConnection', { type: msg.connectionType })}</div>
         )}
         {msg.topicChange && (
-          <div className={styles.source}>topic redirected to: “{msg.topicChange}”</div>
+          <div className={styles.source}>{t('timeline.topicRedirected', { topic: msg.topicChange })}</div>
         )}
         {showReasoning && reasoning && (
           <div className={styles.body} dir="ltr">
@@ -648,13 +662,12 @@ function TimelineItem({ msg, color }: { msg: TranscriptMessage; color: string })
             above (driven by the agent's language), not a content guess. */}
         <div className={styles.body}>
           {failed ? (
-            <span className={styles.errText}>Failed: {msg.error}</span>
+            <span className={styles.errText}>{t('timeline.failedPrefix')}{msg.error}</span>
           ) : visibleContent ? (
             <MessageMarkdown content={visibleContent} />
           ) : reasoning ? (
             <span className={styles.source}>
-              No visible answer — the model only produced thinking. Expand “thinking” or raise Max
-              output tokens.
+              {t('timeline.noVisibleAnswer')}
             </span>
           ) : null}
         </div>
@@ -678,6 +691,7 @@ function TimelineLiveItem({
   reasoning?: string;
   color: string;
 }) {
+  const { t } = useTranslation();
   const [showReasoning, setShowReasoning] = useState(false);
   const split = extractInlineThinking(text);
   const visible = split.text;
@@ -706,10 +720,10 @@ function TimelineLiveItem({
               aria-expanded={showReasoning}
               onClick={() => setShowReasoning((v) => !v)}
             >
-              thinking {showReasoning ? '▾' : '▸'}
+              {t('timeline.thinking')} {showReasoning ? '▾' : '▸'}
             </button>
           )}
-          <span className={styles.liveBadge}>{thinking ? 'thinking…' : 'streaming…'}</span>
+          <span className={styles.liveBadge}>{thinking ? t('timeline.thinkingBadge') : t('timeline.streamingBadge')}</span>
         </div>
         {showReasoning && reasoning && (
           <div className={styles.body} dir="ltr">

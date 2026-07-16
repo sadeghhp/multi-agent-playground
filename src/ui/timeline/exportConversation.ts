@@ -1,123 +1,78 @@
 import type { Playground, TranscriptMessage } from '../../domain/schema';
 import { extractInlineThinking } from '../../providers/openaiAdapter';
-import { formatDuration } from '../formatDuration';
-import { groupByTurn } from './turnGroups';
+import { groupByTurn, isInterjectionGroup, type TurnGroup } from './turnGroups';
 
 /**
- * Pure conversation-export builders for the timeline (Markdown, plain text,
- * JSON). Kept free of DOM/store access so they are unit-testable; the timeline
- * hands the result to fileDownload/clipboard.
+ * Pure conversation-export builders for the timeline. The output is a clean,
+ * natural reading of the discussion: the subject as the title, then each turn
+ * with its speakers and what they said — nothing else. No model/timing/token
+ * metadata, no reasoning or tool internals, no export banner. Kept free of
+ * DOM/store access so they stay unit-testable; the timeline hands the result to
+ * fileDownload/clipboard.
  */
 
-/** Answer text with any inline <think> fences stripped (mirrors the timeline body). */
+/** Visible answer text, inline <think> fences stripped (mirrors the timeline body). */
 function answerText(msg: TranscriptMessage): string {
+  if (msg.status === 'failed') return '';
   return extractInlineThinking(msg.content).text.trim();
 }
 
-/** Reasoning from both the dedicated field and inline fences, like the UI shows. */
-function reasoningText(msg: TranscriptMessage): string {
-  const split = extractInlineThinking(msg.content);
-  return [msg.reasoning, split.reasoning].filter(Boolean).join('\n\n').trim();
+/** Conversation title: the subject, falling back to the playground name. */
+function conversationTitle(pg: Playground): string {
+  return pg.conversation.subject.trim() || pg.name.trim() || 'Conversation';
 }
 
-function headerLine(msg: TranscriptMessage): string {
-  const parts = [msg.agentName];
-  if (msg.role) parts.push(`(${msg.role})`);
-  const meta = [
-    msg.model || null,
-    new Date(msg.timestamp).toLocaleString(),
-    msg.durationMs != null ? formatDuration(msg.durationMs) : null,
-    msg.totalTokens != null ? `${msg.totalTokens} tok` : null,
-  ].filter(Boolean);
-  return `${parts.join(' ')} — ${meta.join(' · ')}`;
-}
-
-function preambleLines(pg: Playground): string[] {
-  const lines: string[] = [];
-  if (pg.conversation.subject) lines.push(`Subject: ${pg.conversation.subject}`);
-  if (pg.conversation.objective) lines.push(`Objective: ${pg.conversation.objective}`);
-  return lines;
+/** Section heading for a group: "Turn N", or "Interjection" for a user aside. */
+function groupHeading(group: TurnGroup): string {
+  return isInterjectionGroup(group) ? 'Interjection' : `Turn ${group.turn}`;
 }
 
 /**
- * Markdown export: turn headings, one section per message with metadata, the
- * visible answer as-is (agent output is already Markdown), and reasoning/tool
- * calls tucked into <details> so the document stays readable but loses nothing.
+ * Markdown export: the subject as an H1, each turn as an H2, and every message
+ * as a bold speaker line followed by what they said (already Markdown). Reads
+ * like a clean conversation transcript.
  */
 export function conversationToMarkdown(pg: Playground): string {
-  const out: string[] = [`# ${pg.name || 'Untitled playground'} — conversation`, ''];
-  const pre = preambleLines(pg);
-  if (pre.length > 0) out.push(...pre.map((l) => `> ${l}`), '');
-  out.push(`_Exported ${new Date().toLocaleString()} · ${pg.transcript.length} messages_`, '');
-
+  const out: string[] = [`# ${conversationTitle(pg)}`, ''];
   for (const group of groupByTurn(pg.transcript)) {
-    out.push(`## Turn ${group.turn}`, '');
+    out.push(`## ${groupHeading(group)}`, '');
     for (const msg of group.messages) {
-      out.push(`### ${headerLine(msg)}`, '');
-      if (msg.status === 'failed') {
-        out.push(`**Failed:** ${msg.error ?? 'unknown error'}`, '');
-        continue;
-      }
-      const reasoning = reasoningText(msg);
-      if (reasoning) {
-        out.push('<details><summary>Thinking</summary>', '', reasoning, '', '</details>', '');
-      }
-      for (const t of msg.toolTrace ?? []) {
-        out.push(
-          `<details><summary>Tool: ${t.tool}${t.ok ? '' : ' (failed)'}</summary>`,
-          '',
-          `Input: \`${t.input || '(none)'}\``,
-          '',
-          t.result,
-          '',
-          '</details>',
-          '',
-        );
-      }
-      out.push(answerText(msg) || '_(no visible answer)_', '');
+      out.push(`**${msg.agentName}:**`, '');
+      out.push(answerText(msg) || '_(no response)_', '');
     }
   }
   return out.join('\n').trimEnd() + '\n';
 }
 
 /**
- * Plain-text export: a clean read of the conversation — turn banners, speaker
- * headers, and answers only (no reasoning/tool internals).
+ * Plain-text export: the subject, then each turn with speakers and their words.
+ * The same natural read as the Markdown, stripped of Markdown syntax markers.
  */
 export function conversationToPlainText(pg: Playground): string {
-  const rule = '='.repeat(64);
-  const out: string[] = [`${pg.name || 'Untitled playground'} — conversation`, ...preambleLines(pg), rule];
-
+  const out: string[] = [conversationTitle(pg)];
   for (const group of groupByTurn(pg.transcript)) {
-    out.push('', `--- Turn ${group.turn} ---`);
+    out.push('', groupHeading(group));
     for (const msg of group.messages) {
-      out.push('', headerLine(msg));
-      out.push(
-        msg.status === 'failed'
-          ? `FAILED: ${msg.error ?? 'unknown error'}`
-          : answerText(msg) || '(no visible answer)',
-      );
+      out.push('', `${msg.agentName}:`, answerText(msg) || '(no response)');
     }
   }
   return out.join('\n').trimEnd() + '\n';
 }
 
-/** JSON export: full-fidelity transcript plus conversation context. */
+/**
+ * JSON export: the same subject + turns model as a structure — each turn is its
+ * speakers and what they said. Not a full-fidelity transcript dump; it mirrors
+ * what the readable exports show.
+ */
 export function conversationToJson(pg: Playground): string {
-  return JSON.stringify(
-    {
-      playground: pg.name,
-      subject: pg.conversation.subject,
-      objective: pg.conversation.objective,
-      exportedAt: new Date().toISOString(),
-      messages: pg.transcript,
-    },
-    null,
-    2,
-  );
+  const turns = groupByTurn(pg.transcript).map((group) => ({
+    turn: group.turn,
+    messages: group.messages.map((m) => ({ speaker: m.agentName, text: answerText(m) })),
+  }));
+  return JSON.stringify({ subject: conversationTitle(pg), turns }, null, 2);
 }
 
 /** Safe download base name for the playground (extension added by the caller). */
 export function exportBaseName(pg: Playground): string {
-  return `${pg.name || 'conversation'}-transcript`;
+  return `${conversationTitle(pg)}-conversation`;
 }

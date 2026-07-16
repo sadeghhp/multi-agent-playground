@@ -39,59 +39,88 @@ function demoPlayground(): Playground {
 }
 
 describe('conversationToMarkdown', () => {
-  it('renders title, context, turn headings and per-message sections', () => {
+  it('titles with the subject and renders turns as speaker + words only', () => {
     const md = conversationToMarkdown(demoPlayground());
-    expect(md).toContain('# Demo Playground — conversation');
-    expect(md).toContain('> Subject: Test subject');
-    expect(md).toContain('> Objective: Reach agreement');
+    expect(md).toContain('# Test subject');
     expect(md).toContain('## Turn 1');
     expect(md).toContain('## Turn 2');
-    expect(md).toContain('### Researcher (researcher)');
+    expect(md).toContain('**Researcher:**');
+    expect(md).toContain('**Critic:**');
     expect(md).toContain('Opening idea.');
     expect(md).toContain('A rebuttal.');
   });
 
-  it('strips inline thinking from the answer but preserves it in a details block', () => {
+  it('drops all metadata, thinking, and tool internals', () => {
     const md = conversationToMarkdown(demoPlayground());
-    expect(md).toContain('<details><summary>Thinking</summary>');
-    expect(md).toContain('secret plan');
-    // The visible answer must not carry the think fence inline.
+    // The visible answer only — inline thinking stripped, never re-surfaced.
     expect(md).not.toContain('<think>');
+    expect(md).not.toContain('secret plan');
+    expect(md).not.toContain('<details>');
+    // No model / timing / token / role / objective / export banner.
+    expect(md).not.toContain('test-model');
+    expect(md).not.toContain('42');
+    expect(md).not.toContain('(researcher)');
+    expect(md).not.toMatch(/Objective/i);
+    expect(md).not.toMatch(/Exported/i);
+    // Tool call internals are gone.
+    expect(md).not.toContain('Found it.');
+    expect(md).not.toContain('wikipedia');
   });
 
-  it('records tool calls and failed turns', () => {
+  it('renders a failed turn as a brief no-response note, not an error dump', () => {
     const md = conversationToMarkdown(demoPlayground());
-    expect(md).toContain('<details><summary>Tool: wikipedia</summary>');
-    expect(md).toContain('Found it.');
-    expect(md).toContain('**Failed:** timeout');
+    expect(md).toContain('_(no response)_');
+    expect(md).not.toContain('timeout');
+  });
+
+  it('labels a user interjection group as Interjection, not a turn', () => {
+    const pg = demoPlayground();
+    pg.transcript = [
+      msg({ id: 'a', turn: 1, agentId: 'x', agentName: 'Researcher', content: 'Idea.' }),
+      msg({ id: 'u', turn: 2, agentId: null, agentName: 'You', role: 'user', content: 'Consider X.' }),
+    ];
+    const md = conversationToMarkdown(pg);
+    expect(md).toContain('## Interjection');
+    expect(md).toContain('**You:**');
+    expect(md).toContain('Consider X.');
   });
 });
 
 describe('conversationToPlainText', () => {
-  it('renders a clean answers-only view with turn banners', () => {
+  it('renders the subject then turns with speakers and words only', () => {
     const txt = conversationToPlainText(demoPlayground());
-    expect(txt).toContain('Demo Playground — conversation');
-    expect(txt).toContain('--- Turn 1 ---');
+    expect(txt.startsWith('Test subject')).toBe(true);
+    expect(txt).toContain('Turn 1');
+    expect(txt).toContain('Researcher:');
     expect(txt).toContain('Opening idea.');
-    expect(txt).toContain('FAILED: timeout');
-    // No internals in the plain-text read.
+    expect(txt).toContain('(no response)');
+    // No internals or metadata.
     expect(txt).not.toContain('secret plan');
     expect(txt).not.toContain('Found it.');
+    expect(txt).not.toContain('test-model');
+    expect(txt).not.toContain('timeout');
   });
 });
 
 describe('conversationToJson', () => {
-  it('round-trips the full transcript with context', () => {
+  it('is a clean subject + turns model, not a full transcript dump', () => {
     const parsed = JSON.parse(conversationToJson(demoPlayground()));
-    expect(parsed.playground).toBe('Demo Playground');
     expect(parsed.subject).toBe('Test subject');
-    expect(parsed.messages).toHaveLength(3);
-    expect(parsed.messages[1].toolTrace[0].tool).toBe('wikipedia');
+    expect(parsed).not.toHaveProperty('objective');
+    expect(parsed).not.toHaveProperty('exportedAt');
+    expect(parsed.turns).toHaveLength(2);
+    expect(parsed.turns[0]).toEqual({
+      turn: 1,
+      messages: [{ speaker: 'Researcher', text: 'Opening idea.' }],
+    });
+    // No model/token/tool fields leak through.
+    expect(JSON.stringify(parsed)).not.toContain('wikipedia');
+    expect(JSON.stringify(parsed)).not.toContain('test-model');
   });
 });
 
 describe('exportBaseName', () => {
-  it('derives the name from the playground', () => {
-    expect(exportBaseName(demoPlayground())).toBe('Demo Playground-transcript');
+  it('derives the file name from the subject', () => {
+    expect(exportBaseName(demoPlayground())).toBe('Test subject-conversation');
   });
 });

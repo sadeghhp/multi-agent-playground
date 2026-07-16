@@ -126,7 +126,12 @@ interface RuntimeStoreState {
   /** Non-serialized: aborts the in-flight provider request (spec §14). */
   abortController: AbortController | null;
 
-  startRun: (runId: string, controller: AbortController) => void;
+  /**
+   * Begin a fresh run. `startTurn` seeds `currentTurn` so a run over an existing
+   * transcript continues its turn numbering monotonically instead of restarting
+   * at 0 (which would collide with prior turns). Fresh runs pass 0 (the default).
+   */
+  startRun: (runId: string, controller: AbortController, startTurn?: number) => void;
   recordSnapshot: (messageId: string, snapshot: RequestSnapshot) => void;
   appendToken: (agentId: string, chunk: string) => void;
   appendReasoningToken: (agentId: string, chunk: string) => void;
@@ -208,11 +213,12 @@ function makeInitial() {
 export const useRuntimeStore = create<RuntimeStoreState>((set, get) => ({
   ...makeInitial(),
 
-  startRun: (runId, controller) =>
+  startRun: (runId, controller, startTurn = 0) =>
     set({
       ...makeInitial(),
       runId,
       status: 'running',
+      currentTurn: startTurn,
       abortController: controller,
     }),
 

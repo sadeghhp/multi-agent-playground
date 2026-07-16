@@ -31,18 +31,24 @@ import {
 import { isSuggestableFailure, listFallbackCandidates } from '../usage/fallback';
 import { detectToolCall, MAX_TOOL_ROUNDS, stripToolFences, toolResultMessage } from '../tools/protocol';
 import { executeToolCall, resolveTools } from '../tools/registry';
+import { buildControlTools, type RosterEntry } from '../tools/control';
+import {
+  applyControlEffects,
+  createControlBudget,
+  createNoopTurnControl,
+  createTurnControl,
+  promoteToFront,
+  type QueueItem,
+  type TurnControl,
+} from './controlEffects';
 
 /**
  * Conversation orchestrator (spec §11). Directed sequential traversal of the
  * agent graph with hard cycle controls. One run at a time; a single
  * AbortController cancels the in-flight request and the loop (spec §14).
+ * Queue item shape (incl. the out-of-order `directive`) lives in
+ * controlEffects.ts, the orchestration control plane.
  */
-
-interface QueueItem {
-  agentId: string;
-  connectionId: string | null;
-  sourceAgentId: string | null;
-}
 
 /**
  * Control outcome of a single agent turn (see runAgentTurn). Decoupled from the
@@ -208,10 +214,35 @@ const USER_DIRECTIVE_FRESH_TURNS = 3;
  */
 function findLastUserDirective(
   transcript: TranscriptMessage[],
-): { content: string; index: number } | null {
+): { content: string; index: number; targetAgentId: string | null; targetAgentName: string | null } | null {
   for (let i = transcript.length - 1; i >= 0; i--) {
     const m = transcript[i];
-    if (m.agentId === null && m.role === 'user' && m.content) return { content: m.content, index: i };
+    if (m.agentId === null && m.role === 'user' && m.content) {
+      return {
+        content: m.content,
+        index: i,
+        targetAgentId: m.targetAgentId ?? null,
+        targetAgentName: m.targetAgentName ?? null,
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * The discussion's current topic redirect, if any: the LAST transcript message
+ * carrying a `topicChange` (set via the moderator's set_topic tool). Derived
+ * from the transcript — not runtime state — so it survives continueRun
+ * re-entries and page reloads with zero extra persistence.
+ */
+export function findActiveTopic(
+  transcript: TranscriptMessage[],
+): { topic: string; setByName: string } | null {
+  for (let i = transcript.length - 1; i >= 0; i--) {
+    const m = transcript[i];
+    if (m.topicChange?.trim() && m.status === 'completed') {
+      return { topic: m.topicChange.trim(), setByName: m.agentName };
+    }
   }
   return null;
 }
@@ -295,12 +326,15 @@ export function retryAgentTurn(agentId: string): void {
 
 /**
  * Continue a finished (or stopped) run with a new user message: appends it to
- * the transcript as a user turn, then re-enters the graph from the starting
- * agent so agents pick up the discussion with the user's input in view (spec
- * §11.6 — the fresh message is just more history, surfaced to every agent via
- * assembleMessages). No-op while a run is already in progress.
+ * the transcript as a user turn, then re-enters the graph so agents pick up
+ * the discussion with the user's input in view (spec §11.6). When the message
+ * addresses a specific agent (composer @mention → opts.targetAgentId), that
+ * agent answers FIRST — the run is seeded at it with a user-question directive
+ * — and the graph then continues from it via its outgoing edges. Untargeted
+ * messages re-enter from the starting agent as before (broadcast directive).
+ * No-op while a run is already in progress.
  */
-export function continueRun(userMessage: string): void {
+export function continueRun(userMessage: string, opts: { targetAgentId?: string } = {}): void {
   const domain = useDomainStore.getState();
   const pg = domain.playground;
   if (!pg) return;
@@ -312,9 +346,23 @@ export function continueRun(userMessage: string): void {
   const providers = useProviderStore.getState().providers;
   if (hasBlockingErrors(validateForRun(pg, providers))) return;
 
+  // A target must be enabled and non-terminal (terminal kinds only speak in the
+  // wrap-up phase). The composer filters these already; fall back to broadcast
+  // rather than dropping the message if a stale target slips through.
+  const target = opts.targetAgentId
+    ? pg.agents.find(
+        (a) => a.id === opts.targetAgentId && a.runtime.enabled && !isTerminalKind(a.kind),
+      ) ?? null
+    : null;
+
+  // Monotonic turn (one past the highest so far), not 0 — a turn-grouped view
+  // (timeline / exports) would otherwise wedge a stray "Turn 0" between later
+  // turns. startRun then resumes numbering past this message, so the
+  // interjection itself doesn't consume the continued run's turn budget.
+  const userTurn = pg.transcript.reduce((max, m) => Math.max(max, m.turn), 0) + 1;
   domain.appendTranscript({
     id: newMessageId(),
-    turn: 0,
+    turn: userTurn,
     agentId: null,
     agentName: 'You',
     agentDeleted: false,
@@ -326,10 +374,25 @@ export function continueRun(userMessage: string): void {
     status: 'completed',
     sourceAgentId: null,
     connectionType: null,
+    ...(target ? { targetAgentId: target.id, targetAgentName: target.name } : {}),
     timestamp: Date.now(),
   });
 
-  void startRun();
+  if (target) {
+    log('directed-question', `You addressed "${target.name}" directly — they answer next.`, target.id);
+    void startRun({
+      seed: [
+        {
+          agentId: target.id,
+          connectionId: null,
+          sourceAgentId: null,
+          directive: { type: 'user-question', fromAgentId: null, fromName: 'You', text: trimmed, depth: 0 },
+        },
+      ],
+    });
+  } else {
+    void startRun();
+  }
 }
 
 export async function startRun(
@@ -365,7 +428,12 @@ export async function startRun(
 
   const controller = new AbortController();
   const runId = newRunId();
-  runtime.startRun(runId, controller);
+  // Continue numbering from the highest turn already in the transcript so a run
+  // over existing content (continue, follow-up, retry, dialog re-run) never
+  // restarts at 1 and collides with prior turns. Fresh runs start from 0. The
+  // per-run turn cap below is measured relative to this base.
+  const startTurn = pg.transcript.reduce((max, m) => Math.max(max, m.turn), 0);
+  runtime.startRun(runId, controller, startTurn);
   await beginVersionedRun(pg, runId);
   log('run-started', `Run started on subject: ${pg.conversation.subject || '(none)'}`);
 
@@ -386,6 +454,18 @@ export async function startRun(
 
   const maxTurns = opts.maxTurns ?? pg.conversation.maxTotalTurns;
   const policy = resolveFailurePolicy(pg.conversation);
+  // Run-scoped budgets for the orchestration control tools (see controlEffects).
+  const runBudget = createControlBudget();
+  const isDisabledForRun = (id: string) => useRuntimeStore.getState().isAgentDisabledForRun(id);
+  const responsesOf = (id: string) => useRuntimeStore.getState().responsesPerAgent[id] ?? 0;
+  /** Live roster for control-tool target resolution (reflects run-disabled state). */
+  const buildRoster = (): RosterEntry[] =>
+    pg.agents.map((a) => ({
+      id: a.id,
+      name: a.name,
+      kind: a.kind,
+      enabled: a.runtime.enabled && !isDisabledForRun(a.id),
+    }));
 
   // Turn a recorded failure into a control-flow outcome for the loop: 'abort'
   // (a Stop landed mid-decision → break), 'stop' (end the run with error),
@@ -410,8 +490,10 @@ export async function startRun(
 
   // Run a single agent's turn end-to-end: guards → generate → record. It never
   // touches the queue, so the discussion loop and the wrap-up phase both use it
-  // and each applies its own failure handling to the returned outcome.
-  const runAgentTurn = async (item: QueueItem): Promise<TurnOutcome> => {
+  // and each applies its own failure handling to the returned outcome. `ctrl`
+  // collects the turn's control-tool effects; the caller drains and applies
+  // them at the turn boundary (the wrap-up phase passes an inert one).
+  const runAgentTurn = async (item: QueueItem, ctrl: TurnControl): Promise<TurnOutcome> => {
     const agent = agentsById.get(item.agentId);
     if (!agent || !agent.runtime.enabled) {
       log('agent-skipped', `Agent skipped (missing or disabled).`, item.agentId);
@@ -487,6 +569,21 @@ export async function startRun(
       sourceOutput,
       pendingUserDirective,
       userDirectiveIsFresh: userDirective ? completedSinceDirective < USER_DIRECTIVE_FRESH_TURNS : undefined,
+      userDirectiveTargetName: userDirective?.targetAgentName ?? null,
+      userDirectiveTargetsSelf: userDirective?.targetAgentId === agent.id,
+      // Out-of-order turn contract: an agent-question / reply-return directive
+      // binds this turn only (user-question is already covered by the targeted
+      // user-directive treatment above).
+      pendingAgentDirective:
+        item.directive && item.directive.type !== 'user-question'
+          ? {
+              fromName: item.directive.fromName,
+              text: item.directive.text,
+              isReplyReturn: item.directive.type === 'reply-return',
+            }
+          : null,
+      activeTopic: findActiveTopic(liveTranscript),
+      roster: buildRoster(),
       // "Opening" framing only fits a genuinely empty transcript.
       isFirstTurn: liveTranscript.length === 0,
     });
@@ -528,7 +625,12 @@ export async function startRun(
     // Each round goes through the UNCHANGED budget/retry/fallback wrapper, so
     // per-round auto-retry, failure policy, and budget assertion apply as-is.
     // Agents with no tools degenerate to exactly one round (today's behavior).
-    const enabledTools = resolveTools(agent.tools);
+    // Control tools (orchestration) join the same loop: their execute() pushes
+    // effects into `ctrl` instead of fetching data.
+    const enabledTools = [
+      ...resolveTools(agent.tools),
+      ...buildControlTools({ agent, roster: buildRoster(), ctrl }),
+    ];
     const toolTrace: ToolTraceEntry[] = [];
 
     try {
@@ -614,6 +716,14 @@ export async function startRun(
 
       const usedProvider = res.provider;
       const usedFallback = res.fallback;
+      // Orchestration control metadata (spec extension): a directed question is
+      // stamped on the ASKER's message; a topic redirect on the redirecting
+      // message (findActiveTopic derives the current topic from it); a reply to
+      // a directed question records who it answers so history renders the jump.
+      const directedEffect = ctrl.effects.find((e) => e.kind === 'direct-question');
+      const directedTarget = directedEffect ? agentsById.get(directedEffect.targetAgentId) : undefined;
+      const topicEffect = ctrl.effects.find((e) => e.kind === 'set-topic');
+      const answersDirected = item.directive && item.directive.type !== 'reply-return';
       const message: TranscriptMessage = {
         id: messageId,
         turn: turnNumber,
@@ -633,6 +743,9 @@ export async function startRun(
         status: 'completed',
         sourceAgentId: item.sourceAgentId,
         connectionType: connection?.type ?? null,
+        ...(directedTarget ? { targetAgentId: directedTarget.id, targetAgentName: directedTarget.name } : {}),
+        ...(topicEffect ? { topicChange: topicEffect.topic } : {}),
+        ...(answersDirected ? { answeringTo: item.directive!.fromName } : {}),
         timestamp: Date.now(),
         durationMs: res.response.durationMs,
         promptTokens: res.response.promptTokens,
@@ -717,13 +830,14 @@ export async function startRun(
       if ((await pauseIfRequested()) === 'aborted') return 'aborted';
       const item: QueueItem = { agentId: agent.id, connectionId: null, sourceAgentId: null };
       // Retry loop without a queue: honor the failure policy inline (no re-queue).
-      let attempt = await runAgentTurn(item);
+      // Terminal kinds hold no control tools, so their TurnControl is inert.
+      let attempt = await runAgentTurn(item, createNoopTurnControl());
       while (typeof attempt === 'object') {
         const decision = await handleFailedTurn(agent, policy, attempt.failedDetail, controller.signal);
         if (controller.signal.aborted) return 'aborted';
         if (decision === 'retry') {
           log('agent-queued', `Retrying "${agent.name}" at the user's request.`, agent.id);
-          attempt = await runAgentTurn(item);
+          attempt = await runAgentTurn(item, createNoopTurnControl());
           continue;
         }
         // 'stop' marks the run errored but does not halt the remaining terminal
@@ -743,7 +857,9 @@ export async function startRun(
       // The in-flight turn always completes first; suspend at the boundary.
       if ((await pauseIfRequested()) === 'aborted') break;
 
-      if (useRuntimeStore.getState().currentTurn >= maxTurns) {
+      // Relative to startTurn so `maxTurns` bounds THIS invocation's turns, not
+      // the absolute turn number (which continues from prior runs).
+      if (useRuntimeStore.getState().currentTurn - startTurn >= maxTurns) {
         log('turn-limit', `Maximum total turns (${maxTurns}) reached.`);
         break;
       }
@@ -751,21 +867,91 @@ export async function startRun(
       const item = queue.shift()!;
       queued.delete(item.agentId);
 
-      const outcome = await runAgentTurn(item);
+      // Fresh per-turn control context; effects apply only if the turn succeeds
+      // (a failed turn's effects — and their budget — are simply dropped, so a
+      // retry can re-emit the same directed question without a dupe rejection).
+      const turnAgent = agentsById.get(item.agentId);
+      const ctrl = turnAgent
+        ? createTurnControl({
+            caller: turnAgent,
+            itemDirectiveDepth: item.directive?.depth ?? 0,
+            runBudget,
+            agentsById,
+            isDisabledForRun,
+            responsesOf,
+            responseLimitFor: (a) => responseLimitFor(a, pg),
+          })
+        : createNoopTurnControl();
+
+      const outcome = await runAgentTurn(item, ctrl);
       if (outcome === 'aborted') break;
       if (outcome === 'skipped') continue;
       if (typeof outcome === 'object') {
         // Generation failed (already recorded). Apply the failure policy, which
-        // may re-queue (retry), stop the run, or skip/disable and continue.
+        // may re-queue (retry), stop the run, or skip/disable and continue. A
+        // directed item's directive rides along on the retry unchanged.
         const failedAgent = agentsById.get(item.agentId)!;
+        if (item.directive) {
+          log(
+            'directed-question-dropped',
+            `"${failedAgent.name}" failed while answering a directed question — the directive is dropped unless retried.`,
+            failedAgent.id,
+          );
+        }
         const fo = await applyFailure(item, failedAgent, outcome.failedDetail);
         if (fo === 'abort') break;
         if (fo === 'stop') return finish(runId, 'error');
         continue;
       }
 
-      // --- enqueue targets (spec §11.2 steps 3–5) ---
+      // --- apply control effects at the turn boundary (spec extension) ---
       const agent = agentsById.get(item.agentId)!;
+      const { suppressGraphEnqueue } = applyControlEffects({
+        effects: ctrl.drain(),
+        item,
+        callerName: agent.name,
+        queue,
+        queued,
+        runBudget,
+        agentsById,
+        log,
+        onQueued: (id) => runtime.setAgentState(id, 'queued'),
+      });
+
+      // Reply routing (ask_agent round-trip): after the target answered, the
+      // asker gets one follow-up turn with the answer in view, ahead of the
+      // rest of the queue. Same guards as any dequeue (limits re-checked there).
+      // An end-discussion emitted by this turn wins over the round-trip — the
+      // queue stays drained.
+      const replyTo = suppressGraphEnqueue ? undefined : item.directive?.replyToAgentId;
+      if (replyTo) {
+        const asker = agentsById.get(replyTo);
+        if (
+          asker &&
+          asker.runtime.enabled &&
+          !isDisabledForRun(asker.id) &&
+          responsesOf(asker.id) < responseLimitFor(asker, pg)
+        ) {
+          promoteToFront(queue, queued, {
+            agentId: asker.id,
+            connectionId: null,
+            sourceAgentId: agent.id,
+            directive: {
+              type: 'reply-return',
+              fromAgentId: agent.id,
+              fromName: agent.name,
+              text: item.directive!.text,
+              depth: item.directive!.depth,
+            },
+          });
+          runtime.setAgentState(asker.id, 'queued');
+          log('agent-queued', `"${asker.name}" resumes next with "${agent.name}"'s answer.`, asker.id);
+        }
+      }
+
+      if (suppressGraphEnqueue) continue;
+
+      // --- enqueue targets (spec §11.2 steps 3–5) ---
       for (const conn of outgoing(pg, agent.id)) {
         const target = agentsById.get(conn.target);
         if (!target) continue;

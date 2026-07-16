@@ -6,6 +6,7 @@ import { useUiStore } from '../../store/uiStore';
 import { agentColor } from '../../graph/colors';
 import { stopRun, continueRun } from '../../orchestrator/orchestrator';
 import { hasBlockingErrors, validateForRun } from '../../orchestrator/validate';
+import { addressableAgents, parseMention } from '../addressing';
 import { Message } from '../transcript/Message';
 import { LiveMessage } from '../transcript/LiveMessage';
 import { RunIcon, StopIcon, SendIcon } from './icons';
@@ -73,7 +74,13 @@ export function MobileChat() {
     e.preventDefault();
     const text = followUp.trim();
     if (!text || !canContinue) return;
-    continueRun(text);
+    // Leading "@AgentName" addresses that agent directly (parse-only on mobile).
+    const mention = parseMention(text, addressableAgents(playground?.agents ?? []));
+    if (mention && mention.message) {
+      continueRun(mention.message, { targetAgentId: mention.target.id });
+    } else {
+      continueRun(text);
+    }
     setFollowUp('');
   }
 

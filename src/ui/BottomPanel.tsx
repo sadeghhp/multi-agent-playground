@@ -12,6 +12,7 @@ import { useRuntimeStore } from '../store/runtimeStore';
 import { agentColor } from '../graph/colors';
 import { continueRun, retryAgentTurn } from '../orchestrator/orchestrator';
 import { hasBlockingErrors, validateForRun } from '../orchestrator/validate';
+import { addressableAgents, mentionSuggestions, parseMention } from './addressing';
 import { Message } from './transcript/Message';
 import { LiveMessage } from './transcript/LiveMessage';
 import styles from './BottomPanel.module.css';
@@ -51,16 +52,26 @@ export function BottomPanel() {
 
   // Follow-up input: lets the user steer the conversation ("argue against this",
   // "give me the facts") after a run has stopped, without reopening Run Dialog.
+  // Starting the message with "@AgentName" addresses that agent directly — it
+  // answers first, out of graph order (spec extension: orchestration control).
   const [followUp, setFollowUp] = useState('');
   const canContinue =
     status !== 'running' && transcript.length > 0 && !!playground &&
     !hasBlockingErrors(validateForRun(playground, providers));
 
+  const addressable = useMemo(() => addressableAgents(playground?.agents ?? []), [playground?.agents]);
+  const mention = parseMention(followUp.trim(), addressable);
+  const suggestions = mentionSuggestions(followUp, addressable);
+
   function handleContinue(e: FormEvent) {
     e.preventDefault();
     const text = followUp.trim();
     if (!text || !canContinue) return;
-    continueRun(text);
+    if (mention && mention.message) {
+      continueRun(mention.message, { targetAgentId: mention.target.id });
+    } else {
+      continueRun(text);
+    }
     setFollowUp('');
   }
 
@@ -271,14 +282,38 @@ export function BottomPanel() {
 
       {!collapsed && tab === 'transcript' && status !== 'running' && transcript.length > 0 && (
         <form className={styles.followUp} onSubmit={handleContinue}>
+          {suggestions.length > 0 && (
+            <div className={styles.mentionSuggestions} role="listbox" aria-label="Address an agent">
+              {suggestions.map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  role="option"
+                  aria-selected={false}
+                  onClick={() => setFollowUp(`@${a.name} `)}
+                >
+                  @{a.name}
+                </button>
+              ))}
+            </div>
+          )}
+          {mention && (
+            <span className="chip" title={`Only ${mention.target.name} is asked to answer; the others see it as context.`}>
+              To: {mention.target.name}
+            </span>
+          )}
           <input
             type="text"
             value={followUp}
             onChange={(e) => setFollowUp(e.target.value)}
-            placeholder="Add your input to continue the conversation (e.g. an opinion, an order, a request for facts or arguments)…"
+            placeholder="Add your input to continue the conversation — start with @AgentName to address one agent directly…"
             aria-label="Message to continue the conversation"
           />
-          <button type="submit" className="primary" disabled={!canContinue || !followUp.trim()}>
+          <button
+            type="submit"
+            className="primary"
+            disabled={!canContinue || !followUp.trim() || (!!mention && !mention.message)}
+          >
             Continue
           </button>
         </form>

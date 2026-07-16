@@ -16,6 +16,7 @@ import {
 } from '../../agents/conversationInsights';
 import { continueRun, startRun } from '../../orchestrator/orchestrator';
 import { hasBlockingErrors, validateForRun } from '../../orchestrator/validate';
+import { addressableAgents, parseMention } from '../addressing';
 import { useDomainStore } from '../../store/domainStore';
 import { useProviderStore } from '../../store/providerStore';
 import { useRuntimeStore } from '../../store/runtimeStore';
@@ -30,13 +31,8 @@ import {
   conversationToPlainText,
   exportBaseName,
 } from './exportConversation';
+import { groupByTurn, isInterjectionGroup } from './turnGroups';
 import styles from './Timeline.module.css';
-
-/** Consecutive messages sharing a turn number, in chronological order. */
-interface TurnGroup {
-  turn: number;
-  messages: TranscriptMessage[];
-}
 
 /** First grapheme-ish character of the agent's name for the spine disc. */
 function agentInitial(name: string): string {
@@ -46,24 +42,6 @@ function agentInitial(name: string): string {
 /** Compact token count for the header stats (e.g. 12.4k). */
 function formatTokens(n: number): string {
   return n >= 10_000 ? `${(n / 1000).toFixed(1)}k` : String(n);
-}
-
-/**
- * Group the (already chronological) transcript into contiguous runs by turn
- * number. A new turn value starts a new group; the same turn repeated later
- * (which shouldn't normally happen) starts a fresh group rather than merging.
- */
-function groupByTurn(transcript: TranscriptMessage[]): TurnGroup[] {
-  const groups: TurnGroup[] = [];
-  for (const msg of transcript) {
-    const last = groups[groups.length - 1];
-    if (last && last.turn === msg.turn) {
-      last.messages.push(msg);
-    } else {
-      groups.push({ turn: msg.turn, messages: [msg] });
-    }
-  }
-  return groups;
 }
 
 const EXPORT_FORMATS = [
@@ -152,12 +130,21 @@ export function TimelinePage() {
   // message up as a pending user directive when they resume).
   const canInterject = status !== 'running' && transcript.length > 0 && graphOk;
 
+  const [moreTurns, setMoreTurns] = useState(2);
+  // Surface the actual blocker rather than a single canned line.
+  const continueTitle = canRunMore
+    ? `Let the agents talk for up to ${moreTurns} more turn${moreTurns === 1 ? '' : 's'}`
+    : !idle
+      ? 'Available once the run finishes'
+      : !graphOk
+        ? 'Fix configuration issues to continue'
+        : 'Available once there is a conversation';
+
   const turnOptions = useMemo(() => {
     const opts = new Set(BASE_TURN_OPTIONS);
     if (playground) opts.add(playground.conversation.maxTotalTurns);
     return [...opts].sort((a, b) => a - b);
   }, [playground]);
-  const [moreTurns, setMoreTurns] = useState(2);
 
   const [interjectOpen, setInterjectOpen] = useState(false);
   const [interjectText, setInterjectText] = useState('');
@@ -166,14 +153,23 @@ export function TimelinePage() {
     e.preventDefault();
     const text = interjectText.trim();
     if (!text || !canInterject) return;
-    continueRun(text);
+    // Leading "@AgentName" addresses that agent directly — it answers next.
+    const mention = parseMention(text, addressableAgents(playground?.agents ?? []));
+    if (mention && mention.message) {
+      continueRun(mention.message, { targetAgentId: mention.target.id });
+    } else {
+      continueRun(text);
+    }
     setInterjectText('');
     setAtBottom(true);
   }
 
   // On-demand summary/review: borrows an existing agent's provider+model (a
   // summarizer if the playground has one) and never touches the transcript.
-  const insightAgent = useMemo(() => (playground ? pickInsightAgent(playground) : null), [playground]);
+  const insightAgent = useMemo(
+    () => (playground ? pickInsightAgent(playground, providers) : null),
+    [playground, providers],
+  );
   const insightProvider = insightAgent
     ? providers.find((p) => p.id === insightAgent.llm.providerId) ?? null
     : null;
@@ -223,14 +219,26 @@ export function TimelinePage() {
     return () => document.removeEventListener('mousedown', onDown);
   }, [exportOpen]);
 
-  const [copied, setCopied] = useState(false);
+  // 'ok'/'fail' drive a transient chip; null hides it. Reports the real result
+  // of the clipboard write rather than always claiming success.
+  const [copyState, setCopyState] = useState<'ok' | 'fail' | null>(null);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (copiedTimer.current) clearTimeout(copiedTimer.current); }, []);
 
-  function flashCopied() {
-    setCopied(true);
+  async function copyToClipboard(text: string) {
     if (copiedTimer.current) clearTimeout(copiedTimer.current);
-    copiedTimer.current = setTimeout(() => setCopied(false), 1500);
+    // navigator.clipboard is undefined in insecure contexts; treat as failure.
+    let ok = false;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        ok = true;
+      }
+    } catch {
+      ok = false;
+    }
+    setCopyState(ok ? 'ok' : 'fail');
+    copiedTimer.current = setTimeout(() => setCopyState(null), 1800);
   }
 
   function handleExport(format: ExportFormat) {
@@ -248,9 +256,8 @@ export function TimelinePage() {
 
   function handleCopyMarkdown() {
     if (!playground) return;
-    void navigator.clipboard?.writeText(conversationToMarkdown(playground));
     setExportOpen(false);
-    flashCopied();
+    void copyToClipboard(conversationToMarkdown(playground));
   }
 
   // Auto-scroll to the newest content when the reader is already near the bottom.
@@ -338,7 +345,9 @@ export function TimelinePage() {
                 )}
               </div>
             )}
-            {copied && <span className="chip">Copied ✓</span>}
+            {copyState && (
+              <span className="chip">{copyState === 'ok' ? 'Copied ✓' : 'Copy failed'}</span>
+            )}
             <div className={styles.exportWrap} ref={exportWrapRef}>
               <button
                 type="button"
@@ -387,10 +396,15 @@ export function TimelinePage() {
             <ol className={styles.timeline}>
               {groups.map((group, gi) => (
                 <li key={gi} className={styles.turnGroup}>
-                  <div className={styles.turnDivider} aria-label={`Turn ${group.turn}`}>
-                    <span className={styles.turnSpine} aria-hidden="true" />
-                    <span className={styles.turnLabel}>Turn {group.turn}</span>
-                  </div>
+                  {isInterjectionGroup(group) ? (
+                    <div className={styles.interjectDivider} aria-label="Interjection">
+                      <span className={styles.interjectLabel}>💬 Interjection</span>
+                    </div>
+                  ) : (
+                    <div className={styles.turnDivider} aria-label={`Turn ${group.turn}`}>
+                      <span className={styles.turnLabel}>Turn {group.turn}</span>
+                    </div>
+                  )}
                   {group.messages.map((msg) => (
                     <TimelineItem key={msg.id} msg={msg} color={colorFor(msg)} />
                   ))}
@@ -407,7 +421,6 @@ export function TimelinePage() {
               {needsNewLiveGroup && liveAgent && (
                 <li className={styles.turnGroup}>
                   <div className={styles.turnDivider} aria-label={`Turn ${currentTurn}`}>
-                    <span className={styles.turnSpine} aria-hidden="true" />
                     <span className={styles.turnLabel}>Turn {currentTurn}</span>
                   </div>
                   <TimelineLiveItem
@@ -448,10 +461,7 @@ export function TimelinePage() {
                       <button
                         type="button"
                         className="ghost"
-                        onClick={() => {
-                          void navigator.clipboard?.writeText(insight.text!);
-                          flashCopied();
-                        }}
+                        onClick={() => void copyToClipboard(insight.text!)}
                       >
                         Copy
                       </button>
@@ -501,11 +511,13 @@ export function TimelinePage() {
                   type="button"
                   className="primary"
                   disabled={!canRunMore}
-                  title={
-                    canRunMore
-                      ? `Let the agents talk for up to ${moreTurns} more turn${moreTurns === 1 ? '' : 's'}`
-                      : 'Available once a run has finished'
-                  }
+                  title={continueTitle}
+                  // Continue re-opens the discussion from the starting agent (like
+                  // the follow-up box, minus an injected user message) for `maxTurns`
+                  // more turns, then re-runs the wrap-up so the transcript ends with
+                  // a fresh, current summary/finalizer. Non-destructive: prior
+                  // wrap-up output stays as an intermediate snapshot. Turn numbers
+                  // continue monotonically (see orchestrator startTurn).
                   onClick={() => void startRun({ maxTurns: moreTurns })}
                 >
                   ▶ Continue
@@ -602,6 +614,8 @@ function TimelineItem({ msg, color }: { msg: TranscriptMessage; color: string })
             {msg.agentDeleted && <span className="chip"> deleted</span>}
           </span>
           {msg.role && <span className="chip">{msg.role}</span>}
+          {msg.targetAgentName && <span className="chip">→ {msg.targetAgentName}</span>}
+          {msg.answeringTo && <span className="chip">answering {msg.answeringTo}</span>}
           {msg.status === 'stopped' && <span className="chip">stopped</span>}
           {reasoning && (
             <button
@@ -621,6 +635,9 @@ function TimelineItem({ msg, color }: { msg: TranscriptMessage; color: string })
         </div>
         {msg.sourceAgentId && msg.connectionType && (
           <div className={styles.source}>via {msg.connectionType} connection</div>
+        )}
+        {msg.topicChange && (
+          <div className={styles.source}>topic redirected to: “{msg.topicChange}”</div>
         )}
         {showReasoning && reasoning && (
           <div className={styles.body} dir="ltr">

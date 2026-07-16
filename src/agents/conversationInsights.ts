@@ -65,11 +65,21 @@ function buildUserMessage(kind: InsightKind, pg: Playground): string {
  * The agent whose provider/model an insight call borrows: a summarizer is the
  * natural fit, then a finalizer/moderator (they already see the whole
  * conversation), then the starting agent, then any enabled agent with an LLM
- * configured. Returns null when nothing usable is configured.
+ * configured. Requires the agent's provider to exist AND be enabled — a call
+ * against a disabled provider would only fail live — so the caller can gate the
+ * Summarize/Review buttons on a non-null result. Returns null when nothing
+ * usable is configured.
  */
-export function pickInsightAgent(pg: Playground): Agent | null {
+export function pickInsightAgent(pg: Playground, providers: Provider[]): Agent | null {
+  const enabledProviderIds = new Set(
+    providers.filter((p) => p.enabled).map((p) => p.id),
+  );
   const usable = pg.agents.filter(
-    (a) => a.runtime.enabled && a.llm.providerId && a.llm.model,
+    (a) =>
+      a.runtime.enabled &&
+      a.llm.providerId &&
+      enabledProviderIds.has(a.llm.providerId) &&
+      a.llm.model,
   );
   const byKind = (kind: Agent['kind']) => usable.find((a) => a.kind === kind);
   return (

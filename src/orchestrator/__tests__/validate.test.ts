@@ -218,3 +218,54 @@ describe('reachableFrom', () => {
     expect(reachableFrom(pg, aId).has(bId)).toBe(false);
   });
 });
+
+describe('orchestration control validation', () => {
+  it('warns when an enabled moderator has no control tools', () => {
+    const { pg, providers, aId } = readyPlayground();
+    const a = pg.agents.find((x) => x.id === aId)!;
+    a.kind = 'moderator';
+    const issues = validateForRun(pg, providers);
+    const warn = issues.find((i) => /no orchestration tools/i.test(i.message));
+    expect(warn?.level).toBe('warning');
+    expect(warn?.agentId).toBe(aId);
+  });
+
+  it('does not warn for a moderator holding at least one control tool', () => {
+    const { pg, providers, aId } = readyPlayground();
+    const a = pg.agents.find((x) => x.id === aId)!;
+    a.kind = 'moderator';
+    a.tools = ['end_discussion'];
+    const issues = validateForRun(pg, providers);
+    expect(issues.some((i) => /no orchestration tools/i.test(i.message))).toBe(false);
+  });
+
+  it('warns about a control tool on an ineligible kind, not as an unknown tool', () => {
+    const { pg, providers, bId } = readyPlayground();
+    const b = pg.agents.find((x) => x.id === bId)!;
+    b.tools = ['end_discussion']; // moderator-only, b is a participant
+    const issues = validateForRun(pg, providers);
+    const warn = issues.find((i) => i.agentId === bId && /control tool "end_discussion"/i.test(i.message));
+    expect(warn?.level).toBe('warning');
+    expect(issues.some((i) => /unknown tool "end_discussion"/i.test(i.message))).toBe(false);
+  });
+
+  it('accepts an eligible control tool without any warning', () => {
+    const { pg, providers, bId } = readyPlayground();
+    const b = pg.agents.find((x) => x.id === bId)!;
+    b.tools = ['ask_agent'];
+    const issues = validateForRun(pg, providers);
+    expect(issues.some((i) => i.agentId === bId && /tool/i.test(i.message))).toBe(false);
+  });
+
+  it('warns when more than one enabled moderator exists', () => {
+    const { pg, providers, aId, bId } = readyPlayground();
+    for (const id of [aId, bId]) {
+      const agent = pg.agents.find((x) => x.id === id)!;
+      agent.kind = 'moderator';
+      agent.tools = ['direct_question'];
+    }
+    const issues = validateForRun(pg, providers);
+    const warn = issues.find((i) => /2 moderators/i.test(i.message));
+    expect(warn?.level).toBe('warning');
+  });
+});

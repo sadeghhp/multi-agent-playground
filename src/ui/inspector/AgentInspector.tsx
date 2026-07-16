@@ -16,6 +16,7 @@ import type { EnrichAgentDraft } from '../../agents/generateAgent';
 import { parseEnrichAgentDraftFromText } from '../../agents/parseGeneratedAgentDraft';
 import { exportSkillSet, importSkillSet } from '../../persistence/skillSets';
 import { TOOLS, toolAvailable } from '../../tools/registry';
+import { CONTROL_TOOL_IDS_BY_KIND, CONTROL_TOOL_META, grantedControlToolIds } from '../../tools/control';
 import { setTavilyKey } from '../../tools/tavily';
 import { downloadJson } from '../fileDownload';
 import { validateForRun } from '../../orchestrator/validate';
@@ -381,6 +382,14 @@ export function AgentInspector({ agent }: { agent: Agent }) {
       incoming: null,
       isFirstTurn: true,
       pendingUserDirective,
+      // Roster for control-tool descriptions, so the preview lists the same
+      // addressable agent names the live run would.
+      roster: debouncedPlayground.agents.map((a) => ({
+        id: a.id,
+        name: a.name,
+        kind: a.kind,
+        enabled: a.runtime.enabled,
+      })),
     };
     const text = `${buildSystemPrompt(ctx)}\n\n--- USER TURN ---\n${buildTaskPrompt(ctx)}`;
     const full = assembleMessages(ctx)
@@ -604,7 +613,9 @@ export function AgentInspector({ agent }: { agent: Agent }) {
             <p className={styles.hint}>
               Scheduled by graph edges like a participant, but always sees the full
               transcript and carries a facilitation contract. Wire it in wherever
-              you want it to intervene (e.g. after each round).
+              you want it to intervene (e.g. after each round). Grant it
+              orchestration tools (Tools section) to let it direct questions at
+              agents, redirect the topic, or end the discussion.
             </p>
           )}
         </div>
@@ -776,7 +787,38 @@ export function AgentInspector({ agent }: { agent: Agent }) {
         </div>
       </Section>
 
-      <Section title={`Tools (${agent.tools.filter((t) => toolAvailable(t)).length})`}>
+      <Section
+        title={`Tools (${agent.tools.filter((t) => toolAvailable(t)).length + grantedControlToolIds(agent).length})`}
+      >
+        {CONTROL_TOOL_IDS_BY_KIND[agent.kind].length > 0 && (
+          <>
+            <p className={styles.hint}>
+              Orchestration tools — let this {agent.kind} influence the conversation flow
+              (directed questions get an immediate out-of-turn answer).
+            </p>
+            {CONTROL_TOOL_IDS_BY_KIND[agent.kind].map((toolId) => (
+              <label key={toolId} className={styles.toolRow}>
+                <input
+                  type="checkbox"
+                  aria-label={`${CONTROL_TOOL_META[toolId].name} enabled`}
+                  checked={agent.tools.includes(toolId)}
+                  onChange={(e) =>
+                    patch({
+                      tools: e.target.checked
+                        ? [...agent.tools, toolId]
+                        : agent.tools.filter((t) => t !== toolId),
+                    })
+                  }
+                />
+                <span>
+                  <strong>{CONTROL_TOOL_META[toolId].name}</strong>
+                  <br />
+                  <span className={styles.hint}>{CONTROL_TOOL_META[toolId].description}</span>
+                </span>
+              </label>
+            ))}
+          </>
+        )}
         <p className={styles.hint}>
           Executable tools the agent can call mid-turn to fetch real facts and sources.
         </p>

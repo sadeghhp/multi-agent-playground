@@ -331,6 +331,19 @@ export const TranscriptMessage = z.object({
   status: z.enum(['completed', 'failed', 'stopped']).default('completed'),
   sourceAgentId: z.string().nullable().default(null),
   connectionType: ConnectionType.nullable().default(null),
+  // --- orchestration control (spec extension) --- all additive + optional so
+  // persisted transcripts and ConversationRun history parse unchanged (same
+  // pattern as `reasoning`/`toolTrace`).
+  /** Agent this message directs a question at (user @mention or a directed-question tool call). */
+  targetAgentId: z.string().optional(),
+  /** Display snapshot of the target's name — survives agent deletion (mirrors agentName). */
+  targetAgentName: z.string().optional(),
+  /** Set when this turn redirected the discussion topic (set_topic). The current
+   * topic is derived from the transcript: the LAST message carrying topicChange wins. */
+  topicChange: z.string().optional(),
+  /** Display name of who directed the question this message answers ("You" for the
+   * user). Lets history render `[Name, answering X]:` so the order jump reads clearly. */
+  answeringTo: z.string().optional(),
   timestamp: z.number().int(),
   durationMs: z.number().optional(),
   promptTokens: z.number().optional(),

@@ -334,6 +334,9 @@ const TEMPLATES: Record<TemplateKey, TemplateDef> = {
     characteristics: { skepticism: 85, assertiveness: 70, cooperation: 35 },
     color: 'red',
     skills: [presetSkill('critique')],
+    // ask_agent makes the critic's "needs evidence" verdicts actionable: it can
+    // demand the missing piece from the specific agent instead of dead-ending.
+    tools: ['ask_agent'],
   },
   moderator: {
     label: 'Moderator',
@@ -343,6 +346,9 @@ const TEMPLATES: Record<TemplateKey, TemplateDef> = {
     characteristics: { cooperation: 80, tone: 'balanced', assertiveness: 50 },
     color: 'green',
     skills: [presetSkill('summarization')],
+    // Full orchestration kit by default: direct questions at agents, redirect
+    // the topic, and end the discussion when the objective is met.
+    tools: ['direct_question', 'set_topic', 'end_discussion'],
     kind: 'moderator',
   },
   researcher: {

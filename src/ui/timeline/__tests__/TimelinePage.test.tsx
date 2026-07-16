@@ -293,4 +293,63 @@ describe('TimelinePage footer tools', () => {
     expect(screen.getByRole('button', { name: 'Summarize' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Review' })).toBeDisabled();
   });
+
+  it('disables Summarize/Review when the borrowed provider is disabled', () => {
+    const provider = createProvider({ displayName: 'Local', enabled: false });
+    useProviderStore.setState({ providers: [provider] });
+    const agent = createAgent({ name: 'Researcher' });
+    agent.llm.providerId = provider.id;
+    agent.llm.model = 'test-model';
+    useDomainStore.setState({
+      playground: {
+        ...createPlayground('Demo'),
+        agents: [agent],
+        transcript: [msg({ id: 'a', turn: 1, agentId: agent.id, agentName: 'Researcher', content: 'Hi.' })],
+      },
+    });
+
+    render(<TimelinePage />);
+    expect(screen.getByRole('button', { name: 'Summarize' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Review' })).toBeDisabled();
+  });
+
+  it('renders a user interjection as an Interjection marker, not a Turn divider', () => {
+    const agent = createAgent({ name: 'Researcher' });
+    useDomainStore.setState({
+      playground: {
+        ...createPlayground('Demo'),
+        agents: [agent],
+        transcript: [
+          msg({ id: 'a', turn: 1, agentId: agent.id, agentName: 'Researcher', content: 'Opening.' }),
+          // Monotonic interjection (turn 2) — must not produce a "Turn 2" divider.
+          msg({ id: 'u', turn: 2, agentId: null, agentName: 'You', role: 'user', content: 'Consider X.' }),
+          msg({ id: 'b', turn: 3, agentId: agent.id, agentName: 'Researcher', content: 'Good point.' }),
+        ],
+      },
+    });
+
+    render(<TimelinePage />);
+
+    expect(screen.getByLabelText('Interjection')).toBeInTheDocument();
+    expect(screen.getByText('Consider X.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Turn 1')).toBeInTheDocument();
+    expect(screen.getByLabelText('Turn 3')).toBeInTheDocument();
+    // The interjection's turn number must not surface as a divider.
+    expect(screen.queryByLabelText('Turn 2')).not.toBeInTheDocument();
+  });
+
+  it('reports a copy failure when the clipboard is unavailable', async () => {
+    const original = navigator.clipboard;
+    // Insecure-context / unsupported: no clipboard API at all.
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+    try {
+      seedConversation();
+      render(<TimelinePage />);
+      fireEvent.click(screen.getByRole('button', { name: 'Export ▾' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Copy as Markdown' }));
+      expect(await screen.findByText('Copy failed')).toBeInTheDocument();
+    } finally {
+      Object.defineProperty(navigator, 'clipboard', { value: original, configurable: true });
+    }
+  });
 });

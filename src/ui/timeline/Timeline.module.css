@@ -153,10 +153,11 @@
   max-width: 760px;
   position: relative;
 }
-/* The spine itself: ONE unbroken line from the top of the timeline to the last
-   message (the 14px inset matches the last item's bottom padding, so the line
-   ends at the final card instead of trailing past it). Per-item agent-colored
-   segments overlay it; turn dividers carry it with .turnSpine. */
+/* The spine: ONE unbroken line from the top of the timeline to the last message
+   (the 14px inset matches the last item's bottom padding, so the line ends at
+   the final card instead of trailing past it). It is never masked — turn
+   dividers and per-item agent-colored segments overlay it, so it stays a single
+   continuous line the whole way down. */
 .timeline::before {
   content: '';
   position: absolute;
@@ -170,7 +171,9 @@
 
 .turnGroup { margin: 0; }
 
-/* Turn marker — a sticky pill that rides above the spine while its turn scrolls. */
+/* Turn marker — a sticky pill that rides above the spine while its turn scrolls.
+   No full-width background: the pill/interjection label carry their own solid
+   background for legibility, leaving the spine line to show through unbroken. */
 .turnDivider {
   position: sticky;
   top: 0;
@@ -180,25 +183,12 @@
   gap: 12px;
   padding: 10px 0 8px;
   margin-top: 6px;
-  background: linear-gradient(to bottom, var(--bg) 72%, transparent);
 }
 .turnDivider::before,
 .turnDivider::after {
   content: '';
   flex: 1;
   height: 1px;
-  background: var(--border);
-}
-/* Carries the spine through the divider: the divider's scroll-masking gradient
-   paints over the .timeline::before base line, so redraw that stretch on top —
-   the spine stays one visually unbroken line across turn boundaries. */
-.turnSpine {
-  position: absolute;
-  left: 16px;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  border-radius: 1px;
   background: var(--border);
 }
 .turnLabel {
@@ -210,6 +200,30 @@
   white-space: nowrap;
   background: var(--surface);
   border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 3px 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+/* User interjection marker — an accent-tinted pill offset onto the spine, no
+   flanking rules, so a stepped-in message reads as an aside rather than a turn. */
+.interjectDivider {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  padding: 10px 0 8px 40px;
+  margin-top: 6px;
+}
+.interjectLabel {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
   border-radius: var(--radius-pill);
   padding: 3px 12px;
   box-shadow: var(--shadow-sm);

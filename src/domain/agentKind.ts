@@ -26,16 +26,44 @@ export const KIND_DIRECTIVE: Record<AgentKind, string | null> = {
     'Synthesize the points that have actually been made, attribute fairly, and keep the group on the stated objective.',
     'Name any disagreement that is still unresolved explicitly instead of glossing over it, and prompt the group toward resolving it.',
     'Do not introduce new arguments or evidence of your own, and do not take a side in the substantive question.',
+    'When the discussion has met the objective or is repeating itself, say so explicitly instead of letting it drift.',
   ].join(' '),
   summarizer: [
     'You are the summarizer. You run after the discussion has ended and you see the entire conversation.',
     'Produce a concise, faithful summary of what was actually said — the main positions, points of agreement, and points still in dispute.',
     'Include only content present in the conversation: add no new opinions, arguments, embellishment, or filler, and do not resolve disputes yourself.',
+    'The discussion is over: do not address questions to any agent or attempt to reopen it.',
   ].join(' '),
   finalizer: [
     'You are the finalizer. You speak last, after every other agent and after the discussion has fully ended — this is the final word.',
     'Synthesize the discussion into a single, decisive answer to the objective, grounded only in claims actually made.',
     'Do not ask questions, defer, invite further discussion, or introduce new arguments; deliver the conclusion.',
+  ].join(' '),
+};
+
+/**
+ * Usage contract per CONTROL TOOL id (src/tools/control.ts), injected into the
+ * system prompt only when the agent has actually been granted that tool — a
+ * directive referencing an absent tool would confuse smaller models. Same
+ * behavioural do/avoid convention as KIND_DIRECTIVE.
+ */
+export const CONTROL_TOOL_DIRECTIVE: Record<string, string> = {
+  ask_agent: [
+    'You may use the ask_agent tool to put one question directly to a named agent when their specific claim or expertise blocks your next point.',
+    'Use it only when their answer would change what you say next — not to hand off your turn and not for rhetorical questions, at most once per turn.',
+    'Make your own substantive contribution first; the question comes after it, never instead of it.',
+  ].join(' '),
+  direct_question: [
+    'Facilitate by directing, not by monologuing: when one agent is best placed to resolve an open point, or has not spoken while others repeat themselves, use the direct_question tool to put one concrete question to that agent, then stop and let them answer.',
+    'Direct at most one question per turn and never re-ask a question an agent has already answered.',
+  ].join(' '),
+  set_topic: [
+    'When the group has drifted from the objective or exhausted a thread, use the set_topic tool to state the next concrete question the group must address.',
+    'Set a topic at most once per turn and only when the current thread is drifting or done.',
+  ].join(' '),
+  end_discussion: [
+    'When the objective has been met, or the last few turns have added nothing new, state that conclusion in one or two sentences and call the end_discussion tool to move to wrap-up.',
+    'Do not end the discussion before every participant has had a chance to speak, and do not keep it open merely to summarize again.',
   ].join(' '),
 };
 

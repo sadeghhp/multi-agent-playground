@@ -188,6 +188,29 @@ describe('orchestrator cycle controls', () => {
     expect(useRuntimeStore.getState().status).toBe('completed');
   });
 
+  it('continues numbering monotonically across a follow-up run', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(okChat())));
+    const pg = cyclePlayground(3, 10);
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+    const firstMax = Math.max(
+      ...useDomainStore.getState().playground!.transcript.map((m) => m.turn),
+    );
+    expect(firstMax).toBe(3); // three turns capped by maxTotalTurns
+
+    // Continue for 2 more turns: numbering must resume past firstMax, not reset.
+    await startRun({ maxTurns: 2 });
+
+    const turns = useDomainStore.getState().playground!.transcript.map((m) => m.turn);
+    // Strictly increasing across the whole transcript — no duplicates, no reset.
+    for (let i = 1; i < turns.length; i++) {
+      expect(turns[i]).toBeGreaterThan(turns[i - 1]);
+    }
+    expect(Math.max(...turns)).toBe(5); // 3 + 2 more, continuing the sequence
+    expect(new Set(turns).size).toBe(turns.length);
+  });
+
   it('attributes a provider failure to the correct agent and stops on error', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('unauthorized', { status: 401 })));
     const pg = cyclePlayground(10, 5);
@@ -527,6 +550,9 @@ describe('continueRun', () => {
     const userMsg = transcript.find((m) => m.role === 'user' && m.agentId === null);
     expect(userMsg).toBeDefined();
     expect(userMsg!.content).toBe('Please argue against this and give me the facts.');
+    // The interjection is stamped with a monotonic turn (> 0), so a turn-grouped
+    // view never wedges a stray "Turn 0" between later turns.
+    expect(userMsg!.turn).toBeGreaterThan(0);
 
     // The next agent turn's final task message explicitly surfaces the user's
     // follow-up as an instruction to address — not just a buried history line.
@@ -1109,3 +1135,227 @@ describe('executable tool loop', () => {
     expect(transcript[0].toolTrace![0].ok).toBe(false);
   });
 });
+
+/** A control-tool fence (same protocol as data tools). */
+const ctrlFence = (tool: string, input: Record<string, unknown>) =>
+  '```tool\n' + JSON.stringify({ tool, input }) + '\n```';
+
+/** Body of the i-th fetch call flattened to one string for content assertions. */
+function fetchBodyFlat(fetchMock: ReturnType<typeof vi.fn>, i: number): string {
+  const body = JSON.parse(fetchMock.mock.calls[i][1].body as string);
+  return body.messages.map((m: { content: string }) => m.content).join('\n');
+}
+
+/**
+ * Mod (moderator, full control kit) → A, plus a disconnected B and an optional
+ * summarizer S. Mod starts.
+ */
+function moderatedPlayground(opts: { withSummarizer?: boolean } = {}): Playground {
+  const pg = createPlayground('Moderated');
+  const provider = createProvider({
+    displayName: 'Local',
+    baseUrl: 'http://localhost:11434',
+    authMethod: 'none',
+    models: ['test'],
+  });
+  const base = createAgent();
+  const llm = { ...base.llm, providerId: provider.id, model: 'test' };
+  const mod = createAgent({
+    name: 'Mod',
+    kind: 'moderator',
+    role: 'r',
+    systemInstruction: 'do',
+    tools: ['direct_question', 'set_topic', 'end_discussion'],
+    llm,
+  });
+  const a = createAgent({ name: 'A', role: 'r', systemInstruction: 'do', llm });
+  const b = createAgent({ name: 'B', role: 'r', systemInstruction: 'do', llm });
+  useProviderStore.setState({ providers: [provider] });
+  pg.agents.push(mod, a, b);
+  if (opts.withSummarizer) {
+    pg.agents.push(createAgent({ name: 'S', kind: 'summarizer', role: 'r', systemInstruction: 'do', llm }));
+  }
+  pg.connections.push({ id: 'c1', source: mod.id, target: a.id, enabled: true, type: 'conversation', priority: 0 });
+  pg.conversation = { ...pg.conversation, subject: 'topic', startingAgentId: mod.id };
+  return pg;
+}
+
+describe('orchestration control', () => {
+  it('direct_question summons the target out of graph order with the answer-first contract', async () => {
+    const script = [
+      chatWith('Let me hear from B.\n' + ctrlFence('direct_question', { target: 'B', question: 'What say you?' })),
+      chatWith('B, what say you?'),
+      chatWith('B answers.'),
+      chatWith('A speaks.'),
+    ];
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(script[fetchMock.mock.calls.length - 1]));
+    vi.stubGlobal('fetch', fetchMock);
+    const pg = moderatedPlayground();
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    const transcript = useDomainStore.getState().playground!.transcript;
+    // B answers immediately after the moderator — before graph-scheduled A.
+    expect(transcript.map((m) => m.agentName)).toEqual(['Mod', 'B', 'A']);
+    // The ask is stamped on the moderator's message; the reply records who it answers.
+    expect(transcript[0].targetAgentName).toBe('B');
+    expect(transcript[1].answeringTo).toBe('Mod');
+    // B's request carries the directed-question contract.
+    const bRequest = fetchBodyFlat(fetchMock, 2);
+    expect(bRequest).toContain('Mod has put a question directly to YOU: "What say you?"');
+    expect(useRuntimeStore.getState().status).toBe('completed');
+  });
+
+  it('ask_agent round-trips: target answers, then the asker resumes with the answer in view', async () => {
+    const pg = createPlayground('RoundTrip');
+    const provider = createProvider({
+      displayName: 'Local', baseUrl: 'http://localhost:11434', authMethod: 'none', models: ['test'],
+    });
+    const base = createAgent();
+    const llm = { ...base.llm, providerId: provider.id, model: 'test' };
+    const a = createAgent({ name: 'A', role: 'r', systemInstruction: 'do', tools: ['ask_agent'], llm });
+    const b = createAgent({ name: 'B', role: 'r', systemInstruction: 'do', llm });
+    useProviderStore.setState({ providers: [provider] });
+    pg.agents.push(a, b);
+    pg.conversation = { ...pg.conversation, subject: 'topic', startingAgentId: a.id };
+    useDomainStore.setState({ playground: pg });
+
+    const script = [
+      chatWith('I need input.\n' + ctrlFence('ask_agent', { target: 'B', question: 'why?' })),
+      chatWith('B, why?'),
+      chatWith('Because reasons.'),
+      chatWith('Thanks — then I conclude X.'),
+    ];
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(script[fetchMock.mock.calls.length - 1]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await startRun();
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    const transcript = useDomainStore.getState().playground!.transcript;
+    expect(transcript.map((m) => m.agentName)).toEqual(['A', 'B', 'A']);
+    // The asker's follow-up turn carries the reply-return contract and sees B's
+    // answer (with the answering attribution) in its history.
+    const replyReturnRequest = fetchBodyFlat(fetchMock, 3);
+    expect(replyReturnRequest).toContain('You previously asked B: "why?"');
+    expect(replyReturnRequest).toContain('[B, answering A]: Because reasons.');
+    expect(useRuntimeStore.getState().status).toBe('completed');
+  });
+
+  it('end_discussion drains the queue and still runs the wrap-up phase', async () => {
+    const script = [
+      chatWith('Objective met.\n' + ctrlFence('end_discussion', { reason: 'objective met' })),
+      chatWith('We are done — closing the discussion.'),
+      chatWith('Summary of the discussion.'),
+    ];
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(script[fetchMock.mock.calls.length - 1]));
+    vi.stubGlobal('fetch', fetchMock);
+    const pg = moderatedPlayground({ withSummarizer: true });
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+
+    const transcript = useDomainStore.getState().playground!.transcript;
+    // A (graph-scheduled after Mod) never speaks; the summarizer still runs.
+    expect(transcript.map((m) => m.agentName)).toEqual(['Mod', 'S']);
+    expect(useRuntimeStore.getState().status).toBe('completed');
+    expect(useRuntimeStore.getState().events.some((e) => e.kind === 'discussion-ended-by-moderator')).toBe(true);
+  });
+
+  it('set_topic persists on the message and binds later agents to the topic', async () => {
+    const script = [
+      chatWith('Redirecting.\n' + ctrlFence('set_topic', { topic: 'the migration cost' })),
+      chatWith('Let us focus on the migration cost.'),
+      chatWith('A on the migration cost.'),
+    ];
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(script[fetchMock.mock.calls.length - 1]));
+    vi.stubGlobal('fetch', fetchMock);
+    const pg = moderatedPlayground();
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+
+    const transcript = useDomainStore.getState().playground!.transcript;
+    expect(transcript[0].topicChange).toBe('the migration cost');
+    // A's request (third fetch) carries the topic redirect.
+    const aRequest = fetchBodyFlat(fetchMock, 2);
+    expect(aRequest).toContain('Mod has redirected the discussion to: "the migration cost"');
+  });
+
+  it('continueRun with a target seeds the addressed agent first, then continues the graph', async () => {
+    const pg = cyclePlayground(3, 2);
+    const b = pg.agents[1];
+    useDomainStore.setState({ playground: pg });
+
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(okChat()));
+    vi.stubGlobal('fetch', fetchMock);
+    continueRun('what say you?', { targetAgentId: b.id });
+    await vi.waitFor(() => expect(['completed', 'error']).toContain(useRuntimeStore.getState().status));
+
+    const transcript = useDomainStore.getState().playground!.transcript;
+    expect(transcript[0]).toMatchObject({ role: 'user', targetAgentId: b.id, targetAgentName: 'B' });
+    // B answers first, then the graph continues from B (B→A edge).
+    expect(transcript[1].agentName).toBe('B');
+    expect(transcript[2].agentName).toBe('A');
+    // The target gets the hard "addressed YOU" phrasing; the next agent the soft form.
+    expect(fetchBodyFlat(fetchMock, 0)).toContain('The user has addressed YOU directly');
+    expect(fetchBodyFlat(fetchMock, 1)).toContain('The user asked B the following');
+  });
+
+  it('drops the directive when a directed turn fails under a skip policy (no hang)', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => {
+      const n = fetchMock.mock.calls.length;
+      if (n === 1) {
+        return Promise.resolve(chatWith('Asking B.\n' + ctrlFence('direct_question', { target: 'B', question: 'q?' })));
+      }
+      if (n === 2) return Promise.resolve(chatWith('B, q?'));
+      if (n === 3) return Promise.resolve(errorChat(400)); // B's directed turn fails, not retryable
+      return Promise.resolve(okChat());
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const pg = moderatedPlayground();
+    pg.conversation = {
+      ...pg.conversation,
+      stopOnError: false,
+      failurePolicy: { onFailure: 'skip', maxAutoRetries: 0, backoffMs: 1, autoDisableAfterFailures: 0 },
+    };
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+
+    const transcript = useDomainStore.getState().playground!.transcript;
+    expect(transcript.map((m) => `${m.agentName}:${m.status}`)).toEqual([
+      'Mod:completed',
+      'B:failed',
+      'A:completed',
+    ]);
+    expect(useRuntimeStore.getState().events.some((e) => e.kind === 'directed-question-dropped')).toBe(true);
+    expect(useRuntimeStore.getState().status).toBe('completed');
+  });
+
+  it('rejects a control call against a terminal target with a model-visible error', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        fetchMock.mock.calls.length === 1
+          ? chatWith('Asking S.\n' + ctrlFence('direct_question', { target: 'S', question: 'q?' }))
+          : chatWith('Fine, moving on.'),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const pg = moderatedPlayground({ withSummarizer: true });
+    // Remove the Mod→A edge so the run is just Mod + wrap-up.
+    pg.connections.length = 0;
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+
+    // The tool round fed an ERROR back (S is not addressable), and the turn completed.
+    const secondRequest = fetchBodyFlat(fetchMock, 1);
+    expect(secondRequest).toContain('ERROR: no addressable agent named "S"');
+    const transcript = useDomainStore.getState().playground!.transcript;
+    expect(transcript.map((m) => m.agentName)).toEqual(['Mod', 'S']);
+  });
+});
+

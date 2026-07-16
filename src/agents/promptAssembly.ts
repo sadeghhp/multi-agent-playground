@@ -6,10 +6,12 @@ import type {
   TranscriptMessage,
 } from '../domain/schema';
 import { buildPersonaIdentitySection } from '../domain/persona';
-import { KIND_DIRECTIVE, overridesHistoryToggle } from '../domain/agentKind';
+import { CONTROL_TOOL_DIRECTIVE, KIND_DIRECTIVE, overridesHistoryToggle } from '../domain/agentKind';
 import { DISCUSSION_CONDUCT } from '../domain/conduct';
 import { buildToolProtocolSection } from '../tools/protocol';
 import { resolveTools } from '../tools/registry';
+import { buildControlTools, grantedControlToolIds, type RosterEntry } from '../tools/control';
+import { createNoopTurnControl } from '../orchestrator/controlEffects';
 import type { ChatMessage } from '../providers/types';
 import { extractInlineThinking } from '../providers/openaiAdapter';
 import { characteristicsToInstruction } from './characteristics';
@@ -65,6 +67,32 @@ export interface PromptContext {
    * every later agent to re-answer it. Undefined is treated as fresh (previews).
    */
   userDirectiveIsFresh?: boolean;
+  /**
+   * Display name of the specific agent the pending user directive addresses
+   * (user @mention). Null/undefined = broadcast to everyone (today's behavior).
+   * The addressed agent gets the hard "answer this" instruction; every other
+   * agent only sees it as context they must not answer themselves.
+   */
+  userDirectiveTargetName?: string | null;
+  /** True when the pending user directive addresses THIS agent. */
+  userDirectiveTargetsSelf?: boolean;
+  /**
+   * Present when this turn was summoned by a directed question (spec extension:
+   * orchestration control). `isReplyReturn` marks the asker's follow-up turn
+   * after the target answered (ask_agent round-trip).
+   */
+  pendingAgentDirective?: { fromName: string; text: string; isReplyReturn: boolean } | null;
+  /**
+   * The current discussion topic, when a moderator redirected it via set_topic.
+   * Derived from the transcript (last message carrying `topicChange` wins).
+   */
+  activeTopic?: { topic: string; setByName: string } | null;
+  /**
+   * The playground's agents, so control-tool descriptions can list addressable
+   * targets by name. Optional: previews/tests without it render the control
+   * tools with an empty roster.
+   */
+  roster?: readonly RosterEntry[];
 }
 
 /** Whether the flattened history block is included for this agent. */
@@ -195,6 +223,13 @@ export function buildSystemPrompt(ctx: PromptContext): string {
   const kindDirective = KIND_DIRECTIVE[agent.kind];
   if (kindDirective) sections.push(kindDirective);
 
+  // 3c. Control-tool usage contracts — only for tools the agent actually holds
+  // (opt-in ∩ kind-eligible), so the prompt never references an absent tool.
+  for (const toolId of grantedControlToolIds(agent)) {
+    const directive = CONTROL_TOOL_DIRECTIVE[toolId];
+    if (directive) sections.push(directive);
+  }
+
   // 4. Characteristics
   const characteristics = characteristicsToInstruction(agent.characteristics);
   if (characteristics) sections.push(`Characteristics: ${characteristics}`);
@@ -232,8 +267,13 @@ export function buildSystemPrompt(ctx: PromptContext): string {
 
   // 5b. Executable tools (in contrast to the declared-only skills above). The
   // mechanical invocation protocol lives here — template prose only says WHEN
-  // to use tools — so protocol changes never require template edits.
-  const tools = resolveTools(agent.tools);
+  // to use tools — so protocol changes never require template edits. Control
+  // tools (orchestration) join the same protocol list; the preview builds them
+  // with an inert TurnControl so the rendered prompt matches the live run.
+  const tools = [
+    ...resolveTools(agent.tools),
+    ...buildControlTools({ agent, roster: ctx.roster ?? [], ctrl: createNoopTurnControl() }),
+  ];
   if (tools.length > 0) {
     sections.push(buildToolProtocolSection(tools));
   }
@@ -262,6 +302,30 @@ export function buildSystemPrompt(ctx: PromptContext): string {
   return sections.join('\n');
 }
 
+/**
+ * Render the pending user directive for this agent. A broadcast directive keeps
+ * today's fresh/stale phrasing for everyone. A TARGETED directive (user
+ * @mention) is a hard "answer this" only for the addressed agent; every other
+ * agent gets a soft context line regardless of freshness — they must not answer
+ * a question that was put to someone else.
+ */
+function userDirectiveSection(ctx: PromptContext): string | null {
+  const text = ctx.pendingUserDirective?.trim();
+  if (!text) return null;
+  const targetName = ctx.userDirectiveTargetName?.trim();
+  if (targetName && !ctx.userDirectiveTargetsSelf) {
+    return `The user asked ${targetName} the following — treat it as context; do not answer it yourself: "${text}"`;
+  }
+  if (targetName) {
+    return ctx.userDirectiveIsFresh === false
+      ? `Earlier in this conversation the user addressed YOU directly with the following — keep it in mind: "${text}"`
+      : `The user has addressed YOU directly — you must answer this in your response; the other agents will see your reply: "${text}"`;
+  }
+  return ctx.userDirectiveIsFresh === false
+    ? `Earlier in this conversation the user interjected with the following — keep it in mind: "${text}"`
+    : `The user has interjected with the following — you must address it directly in your response: "${text}"`;
+}
+
 /** Build the user-turn content (the task/subject portion of spec §12, sent as the user message). */
 export function buildTaskPrompt(ctx: PromptContext): string {
   const { conversation, agent } = ctx;
@@ -275,11 +339,8 @@ export function buildTaskPrompt(ctx: PromptContext): string {
     if (conversation.objective) sections.push(`Keep this goal in mind as the discussion unfolds: ${conversation.objective}`);
     if (conversation.initialContext) sections.push(`Relevant background: ${conversation.initialContext}`);
     if (agent.runtime.openingInstruction?.trim()) sections.push(agent.runtime.openingInstruction.trim());
-    if (ctx.pendingUserDirective?.trim()) {
-      sections.push(
-        `The user has interjected with the following — you must address it directly: "${ctx.pendingUserDirective.trim()}"`,
-      );
-    }
+    const openingDirective = userDirectiveSection(ctx);
+    if (openingDirective) sections.push(openingDirective);
     if (agent.personaMode === 'digital-shadow') {
       const realName =
         agent.persona?.realName?.trim() || agent.name.trim() || 'your persona';
@@ -298,18 +359,23 @@ export function buildTaskPrompt(ctx: PromptContext): string {
   if (conversation.objective) sections.push(`Objective: ${conversation.objective}`);
   if (conversation.initialContext) sections.push(`Context: ${conversation.initialContext}`);
 
+  // Active topic redirect (spec extension: orchestration control). Rendered for
+  // every agent while it is the latest topicChange in the transcript.
+  if (ctx.activeTopic?.topic.trim()) {
+    sections.push(
+      `${ctx.activeTopic.setByName} has redirected the discussion to: "${ctx.activeTopic.topic.trim()}". Address this topic; do not return to earlier threads unless they bear on it.`,
+    );
+  }
+
   // The user's latest follow-up (spec extension: "continue the conversation").
   // Surfaced explicitly, outside the includeHistory/historyWindow gate, so it
   // stays visible even when it scrolls out of the bounded history. A fresh
   // interjection is imposed as a hard instruction; a since-addressed one
   // downgrades to context so it stops forcing every later agent to re-answer it.
-  if (ctx.pendingUserDirective?.trim()) {
-    sections.push(
-      ctx.userDirectiveIsFresh === false
-        ? `Earlier in this conversation the user interjected with the following — keep it in mind: "${ctx.pendingUserDirective.trim()}"`
-        : `The user has interjected with the following — you must address it directly in your response: "${ctx.pendingUserDirective.trim()}"`,
-    );
-  }
+  // Targeted (@mention) directives bind only the addressed agent — see
+  // userDirectiveSection.
+  const userDirective = userDirectiveSection(ctx);
+  if (userDirective) sections.push(userDirective);
 
   if (ctx.sourceAgentName && ctx.incoming) {
     sections.push(`You are responding after ${ctx.sourceAgentName} via a ${ctx.incoming.type} connection.`);
@@ -327,6 +393,26 @@ export function buildTaskPrompt(ctx: PromptContext): string {
   ) {
     const label = ctx.sourceAgentName ?? 'The previous agent';
     sections.push(`${label}'s most recent response:\n${ctx.sourceOutput.trim()}`);
+  }
+
+  // Directed-question contract (spec extension: orchestration control). Placed
+  // last before the response cue — the most specific instruction for this turn.
+  if (ctx.pendingAgentDirective) {
+    const { fromName, text, isReplyReturn } = ctx.pendingAgentDirective;
+    if (isReplyReturn) {
+      sections.push(
+        `You previously asked ${fromName}: "${text.trim()}". ${fromName} has now answered — see their most recent message above. Continue your point using their answer.`,
+      );
+    } else {
+      sections.push(
+        [
+          `${fromName} has put a question directly to YOU: "${text.trim()}"`,
+          `Answer ${fromName}'s question first, directly and by name, before anything else.`,
+          'If you cannot answer, state exactly what information you would need instead of deflecting.',
+          'Keep this reply focused on the question — do not open a new line of discussion in this reply.',
+        ].join(' '),
+      );
+    }
   }
 
   sections.push('Provide your response.');
@@ -353,9 +439,14 @@ export function assembleMessages(ctx: PromptContext): ChatMessage[] {
       // legible. The agent's OWN prior turns are sent unprefixed as assistant
       // messages — prefixing them trains the model to echo `[Name]:` on its next
       // reply, which then leaks verbatim into the transcript and peers' history.
+      // A reply to a directed question carries who it answers, so later agents
+      // understand why the turn order jumped.
+      const attribution = msg.answeringTo
+        ? `[${msg.agentName}, answering ${msg.answeringTo}]`
+        : `[${msg.agentName}]`;
       messages.push({
         role: isSelf ? 'assistant' : 'user',
-        content: isSelf ? answer : `[${msg.agentName}]: ${answer}`,
+        content: isSelf ? answer : `${attribution}: ${answer}`,
       });
     }
   }

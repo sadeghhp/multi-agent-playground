@@ -65,6 +65,58 @@ describe('executable tools fields (additive, no migration)', () => {
   });
 });
 
+describe('orchestration-control fields (additive, no migration)', () => {
+  it('parses a pre-change TranscriptMessage without the new fields', () => {
+    const msg = TranscriptMessage.parse({
+      id: 'm1',
+      turn: 1,
+      agentId: 'a1',
+      agentName: 'A',
+      timestamp: 1,
+    });
+    expect(msg.targetAgentId).toBeUndefined();
+    expect(msg.targetAgentName).toBeUndefined();
+    expect(msg.topicChange).toBeUndefined();
+    expect(msg.answeringTo).toBeUndefined();
+  });
+
+  it('round-trips directed/topic metadata', () => {
+    const msg = TranscriptMessage.parse({
+      id: 'm1',
+      turn: 1,
+      agentId: 'mod',
+      agentName: 'Mod',
+      timestamp: 1,
+      targetAgentId: 'b1',
+      targetAgentName: 'B',
+      topicChange: 'the migration cost',
+      answeringTo: 'You',
+    });
+    expect(msg.targetAgentId).toBe('b1');
+    expect(msg.targetAgentName).toBe('B');
+    expect(msg.topicChange).toBe('the migration cost');
+    expect(msg.answeringTo).toBe('You');
+  });
+
+  it('keeps historical ConversationRun records loadable (unversioned invariant)', () => {
+    const pg = createPlayground('Test');
+    const result = ConversationRun.safeParse({
+      id: 'run_1',
+      playgroundId: pg.id,
+      version: 1,
+      parentRunId: null,
+      startedAt: 1,
+      endedAt: 2,
+      status: 'completed',
+      conversation: pg.conversation,
+      transcript: [{ id: 'm1', turn: 1, agentId: 'a1', agentName: 'A', timestamp: 1 }],
+      events: [],
+      messageCountAtStart: 0,
+    });
+    expect(result.success).toBe(true);
+  });
+});
+
 describe('ConversationRun schema', () => {
   it('parses a minimal run record', () => {
     const pg = createPlayground('Test');

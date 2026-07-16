@@ -52,6 +52,16 @@ export const Message = memo(function Message({ msg, color }: { msg: TranscriptMe
           {msg.agentDeleted && <span className="chip"> deleted</span>}
         </span>
         {msg.role && <span className="chip">{msg.role}</span>}
+        {msg.targetAgentName && (
+          <span className="chip" title={`This message directs a question at ${msg.targetAgentName}`}>
+            → {msg.targetAgentName}
+          </span>
+        )}
+        {msg.answeringTo && (
+          <span className="chip" title={`Out-of-turn reply to ${msg.answeringTo}'s direct question`}>
+            answering {msg.answeringTo}
+          </span>
+        )}
         {reasoning && (
           <button
             type="button"
@@ -114,6 +124,11 @@ export const Message = memo(function Message({ msg, color }: { msg: TranscriptMe
       {msg.sourceAgentId && msg.connectionType && (
         <div className={styles.msgSource}>
           via {msg.connectionType} connection
+        </div>
+      )}
+      {msg.topicChange && (
+        <div className={styles.msgSource}>
+          topic redirected to: “{msg.topicChange}”
         </div>
       )}
       {showReasoning && reasoning && (

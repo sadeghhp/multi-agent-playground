@@ -2,6 +2,7 @@ import type { Playground, Provider } from '../domain/schema';
 import { isTerminalKind } from '../domain/agentKind';
 import { assessProviderReachability } from '../providers/browserReachability';
 import { TOOLS } from '../tools/registry';
+import { CONTROL_TOOL_IDS, CONTROL_TOOL_IDS_BY_KIND, grantedControlToolIds } from '../tools/control';
 
 /**
  * Graph + run validation (spec §19). Warnings don't block a run; errors do.
@@ -141,8 +142,18 @@ export function validateForRun(
     }
     // Unknown tool ids are ignored at runtime (registry ∩ agent.tools); surface
     // them so a typo or a removed tool doesn't silently strip a capability.
+    // Control tools (orchestration) live outside the data-tool registry: known,
+    // but only usable on an eligible kind — warn when granted to the wrong kind.
     for (const toolId of agent.tools) {
-      if (!(toolId in TOOLS)) {
+      if (CONTROL_TOOL_IDS.has(toolId)) {
+        if (!CONTROL_TOOL_IDS_BY_KIND[agent.kind].includes(toolId)) {
+          issues.push({
+            level: 'warning',
+            message: `Agent "${agent.name}" (${agent.kind}) has the control tool "${toolId}", which its kind cannot use — it will be ignored.`,
+            agentId: agent.id,
+          });
+        }
+      } else if (!(toolId in TOOLS)) {
         issues.push({
           level: 'warning',
           message: `Agent "${agent.name}" references an unknown tool "${toolId}" — it will be ignored.`,
@@ -150,6 +161,25 @@ export function validateForRun(
         });
       }
     }
+    // A moderator without any control tool can still facilitate, but only
+    // through prose — surface that so a missing grant isn't a silent surprise.
+    if (agent.kind === 'moderator' && grantedControlToolIds(agent).length === 0) {
+      issues.push({
+        level: 'warning',
+        message: `Moderator "${agent.name}" has no orchestration tools (direct_question / set_topic / end_discussion) — it can only facilitate through prose.`,
+        agentId: agent.id,
+      });
+    }
+  }
+
+  // Multiple moderators facilitate simultaneously and can each end the
+  // discussion — legitimate (adversarial co-moderation) but worth surfacing.
+  const moderators = enabledAgents.filter((a) => a.kind === 'moderator');
+  if (moderators.length > 1) {
+    issues.push({
+      level: 'warning',
+      message: `There are ${moderators.length} moderators; they will facilitate simultaneously and each can end the discussion.`,
+    });
   }
 
   // Dangling edges (spec §19). A disabled connection can never fire (outgoing()

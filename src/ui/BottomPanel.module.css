@@ -64,12 +64,39 @@
 
 .followUp {
   display: flex;
+  align-items: center;
   gap: 8px;
   padding: 8px 12px;
   border-top: 1px solid var(--border);
   flex-shrink: 0;
+  position: relative;
 }
 .followUp input {
   flex: 1;
   font-size: 13px;
+}
+/* @mention autocomplete: floats above the composer while a leading @token is typed. */
+.mentionSuggestions {
+  position: absolute;
+  bottom: 100%;
+  left: 12px;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel, var(--bg, #fff));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  z-index: 10;
+  overflow: hidden;
+}
+.mentionSuggestions button {
+  text-align: left;
+  padding: 6px 12px;
+  font-size: 13px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+.mentionSuggestions button:hover {
+  background: var(--hover, rgba(127, 127, 127, 0.15));
 }

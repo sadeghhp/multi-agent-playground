@@ -1,6 +1,7 @@
 import type { Playground, TranscriptMessage } from '../../domain/schema';
 import { extractInlineThinking } from '../../providers/openaiAdapter';
 import { formatDuration } from '../formatDuration';
+import { groupByTurn } from './turnGroups';
 
 /**
  * Pure conversation-export builders for the timeline (Markdown, plain text,
@@ -29,22 +30,6 @@ function headerLine(msg: TranscriptMessage): string {
     msg.totalTokens != null ? `${msg.totalTokens} tok` : null,
   ].filter(Boolean);
   return `${parts.join(' ')} — ${meta.join(' · ')}`;
-}
-
-interface TurnGroup {
-  turn: number;
-  messages: TranscriptMessage[];
-}
-
-/** Same contiguous-run grouping the timeline renders (repeated turn = new group). */
-function groupByTurn(transcript: TranscriptMessage[]): TurnGroup[] {
-  const groups: TurnGroup[] = [];
-  for (const msg of transcript) {
-    const last = groups[groups.length - 1];
-    if (last && last.turn === msg.turn) last.messages.push(msg);
-    else groups.push({ turn: msg.turn, messages: [msg] });
-  }
-  return groups;
 }
 
 function preambleLines(pg: Playground): string[] {

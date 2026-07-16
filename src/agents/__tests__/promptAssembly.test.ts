@@ -477,6 +477,126 @@ describe('boundHistory', () => {
   });
 });
 
+describe('orchestration control prompt sections', () => {
+  const conversation = { ...defaultConversationSettings(), subject: 'S' };
+
+  it('injects the control-tool protocol and usage contract for a granted moderator', () => {
+    const agent = createAgent({
+      name: 'Mod',
+      kind: 'moderator',
+      systemInstruction: 'x',
+      tools: ['direct_question', 'set_topic', 'end_discussion'],
+    });
+    const prompt = buildSystemPrompt({
+      agent,
+      conversation,
+      history: [],
+      roster: [
+        { id: agent.id, name: 'Mod', kind: 'moderator', enabled: true },
+        { id: 'a1', name: 'Alice', kind: 'participant', enabled: true },
+      ],
+    });
+    expect(prompt).toContain('You have real, executable tools.');
+    expect(prompt).toContain('direct_question');
+    expect(prompt).toContain('"Alice"');
+    // Usage contracts (agentKind.CONTROL_TOOL_DIRECTIVE) ride along.
+    expect(prompt).toContain('Facilitate by directing, not by monologuing');
+    expect(prompt).toContain('call the end_discussion tool');
+  });
+
+  it('injects no control section for an agent without granted control tools', () => {
+    const agent = createAgent({ name: 'A', systemInstruction: 'x' });
+    const prompt = buildSystemPrompt({ agent, conversation, history: [] });
+    expect(prompt).not.toContain('direct_question');
+    expect(prompt).not.toContain('ask_agent');
+    expect(prompt).not.toContain('Facilitate by directing');
+  });
+
+  it('never grants control tools to a terminal kind even when opted in', () => {
+    const agent = createAgent({ name: 'S', kind: 'summarizer', systemInstruction: 'x', tools: ['ask_agent', 'end_discussion'] });
+    const prompt = buildSystemPrompt({ agent, conversation, history: [] });
+    expect(prompt).not.toContain('ask_agent');
+    expect(prompt).not.toContain('end_discussion');
+  });
+
+  it('imposes the answer-first contract on a directed-question turn', () => {
+    const agent = createAgent({ name: 'Alice' });
+    const task = buildTaskPrompt({
+      agent,
+      conversation,
+      history: [],
+      pendingAgentDirective: { fromName: 'Mod', text: 'What is your estimate?', isReplyReturn: false },
+    });
+    expect(task).toContain('Mod has put a question directly to YOU: "What is your estimate?"');
+    expect(task).toContain("Answer Mod's question first");
+    expect(task).toContain('do not open a new line of discussion');
+  });
+
+  it('renders the reply-return continuation for the asker', () => {
+    const agent = createAgent({ name: 'Bob' });
+    const task = buildTaskPrompt({
+      agent,
+      conversation,
+      history: [],
+      pendingAgentDirective: { fromName: 'Alice', text: 'why?', isReplyReturn: true },
+    });
+    expect(task).toContain('You previously asked Alice: "why?"');
+    expect(task).toContain('Continue your point using their answer.');
+  });
+
+  it('renders the active topic redirect for every agent', () => {
+    const agent = createAgent({ name: 'A' });
+    const task = buildTaskPrompt({
+      agent,
+      conversation,
+      history: [],
+      activeTopic: { topic: 'the migration cost', setByName: 'Mod' },
+    });
+    expect(task).toContain('Mod has redirected the discussion to: "the migration cost"');
+    expect(task).toContain('do not return to earlier threads');
+  });
+
+  it('binds a targeted user directive only to the addressed agent', () => {
+    const base = {
+      conversation,
+      history: [],
+      pendingUserDirective: 'what do you think?',
+      userDirectiveIsFresh: true,
+      userDirectiveTargetName: 'Alice',
+    };
+    const forTarget = buildTaskPrompt({ ...base, agent: createAgent({ name: 'Alice' }), userDirectiveTargetsSelf: true });
+    expect(forTarget).toContain('The user has addressed YOU directly');
+    expect(forTarget).toContain('what do you think?');
+
+    const forOther = buildTaskPrompt({ ...base, agent: createAgent({ name: 'Bob' }), userDirectiveTargetsSelf: false });
+    expect(forOther).toContain('The user asked Alice the following');
+    expect(forOther).toContain('do not answer it yourself');
+    expect(forOther).not.toContain('YOU');
+  });
+
+  it('keeps the soft form for non-targets even while the directive is fresh', () => {
+    const forOther = buildTaskPrompt({
+      agent: createAgent({ name: 'Bob' }),
+      conversation,
+      history: [],
+      pendingUserDirective: 'answer me',
+      userDirectiveIsFresh: true,
+      userDirectiveTargetName: 'Alice',
+      userDirectiveTargetsSelf: false,
+    });
+    expect(forOther).not.toContain('you must');
+    expect(forOther).toContain('treat it as context');
+  });
+
+  it('renders an answering attribution prefix in flattened history', () => {
+    const agent = createAgent({ name: 'C', systemInstruction: 'x' });
+    const history = [{ ...msg('other', 'Alice', 'my answer', 1), answeringTo: 'Mod' }];
+    const messages = assembleMessages({ agent, conversation, history });
+    const flat = messages.map((m) => m.content).join('\n');
+    expect(flat).toContain('[Alice, answering Mod]: my answer');
+  });
+});
+
 describe('buildTaskPrompt user directive freshness (F13)', () => {
   it('imposes a fresh directive as a hard instruction', () => {
     const agent = createAgent({ name: 'A' });

@@ -1,6 +1,7 @@
 import type { Playground, Provider } from '../domain/schema';
 import { isTerminalKind } from '../domain/agentKind';
 import { assessProviderReachability } from '../providers/browserReachability';
+import { TOOLS } from '../tools/registry';
 
 /**
  * Graph + run validation (spec §19). Warnings don't block a run; errors do.
@@ -137,6 +138,17 @@ export function validateForRun(
     }
     if (!agent.llm.model.trim()) {
       issues.push({ level: 'error', message: `Agent "${agent.name}" has no model set.`, agentId: agent.id });
+    }
+    // Unknown tool ids are ignored at runtime (registry ∩ agent.tools); surface
+    // them so a typo or a removed tool doesn't silently strip a capability.
+    for (const toolId of agent.tools) {
+      if (!(toolId in TOOLS)) {
+        issues.push({
+          level: 'warning',
+          message: `Agent "${agent.name}" references an unknown tool "${toolId}" — it will be ignored.`,
+          agentId: agent.id,
+        });
+      }
     }
   }
 

@@ -1,6 +1,7 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { CSSProperties } from 'react';
 import type { AgentFlowNode } from './graphAdapter';
+import { useRuntimeStore } from '../store/runtimeStore';
 import { agentColor } from './colors';
 import styles from './AgentNode.module.css';
 
@@ -46,6 +47,9 @@ const KIND_META: Record<
 
 export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const status = data.runtimeState;
+  // Mid-turn tool execution label ("Using Wikipedia search…"); replaces the
+  // generic generating badge while a tool call is in flight.
+  const toolStatus = useRuntimeStore((s) => s.toolStatus[data.agentId] ?? null);
   const classNames = [
     styles.node,
     selected ? styles.selected : '',
@@ -73,7 +77,11 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
           {data.name || 'Unnamed agent'}
         </span>
         <span className={`${styles.badge} ${styles[`badge_${status}`] ?? ''}`}>
-          {data.hasError ? 'Error' : STATUS_LABEL[status] ?? status}
+          {data.hasError
+            ? 'Error'
+            : status === 'generating' && toolStatus
+              ? toolStatus
+              : STATUS_LABEL[status] ?? status}
         </span>
       </div>
       {data.role && <div className={styles.role}>{data.role}</div>}

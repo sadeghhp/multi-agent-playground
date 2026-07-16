@@ -19,6 +19,7 @@ import { AgentLibraryPanel } from './ui/AgentLibraryPanel';
 import { useAgentLibraryStore } from './store/agentLibraryStore';
 import { useRunPresetStore } from './store/runPresetStore';
 import { CreateAgentWithAiModal } from './ui/CreateAgentWithAiModal';
+import { SmartArrangeModal } from './ui/SmartArrangeModal';
 import { Toast } from './ui/Toast';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import { FallbackSuggestModal } from './ui/FallbackSuggestModal';
@@ -120,6 +121,7 @@ export default function App() {
       {openPanel === 'runHistory' && <ConversationRunsPanel />}
       {openPanel === 'library' && <AgentLibraryPanel />}
       {openPanel === 'createAgentAi' && <CreateAgentWithAiModal />}
+      {openPanel === 'smartArrange' && <SmartArrangeModal />}
       {openPanel === 'usage' && <UsagePanel />}
       {openPanel === 'settings' && <SettingsPanel />}
       <Toast />

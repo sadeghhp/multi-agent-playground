@@ -17,6 +17,21 @@
  *  - Each response emits only the fields defined for its role.
  */
 
+/**
+ * Interactional conduct for participant agents replying inside a live
+ * discussion. Injected by prompt assembly only when the agent actually has
+ * prior messages to engage with (never for the opening speaker), and never for
+ * moderator/summarizer/finalizer kinds, whose KIND_DIRECTIVE neutrality
+ * contracts would conflict with "disagree plainly".
+ */
+export const DISCUSSION_CONDUCT = [
+  'Discussion conduct:',
+  '- Engage with what was actually said: name the agent and the specific claim you are responding to, quoting a short phrase of theirs when useful.',
+  '- When you disagree, say so plainly and give your reason. Do not agree just to be agreeable, and never soften a criticism with praise first.',
+  '- Do not open with a greeting, a restatement of the topic, or the same phrase you used in a previous turn — start with your substantive point.',
+  '- Add something new each turn: a fact, an example, a counterargument, or a sharper question. If you have nothing new to add, concur and yield in one sentence.',
+].join('\n');
+
 /** The five epistemic statuses every substantive claim must carry. */
 export const EPISTEMIC_LABELS = [
   'Verified fact',

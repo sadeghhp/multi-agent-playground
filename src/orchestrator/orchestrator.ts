@@ -4,6 +4,7 @@ import type {
   FailurePolicy,
   Playground,
   Provider,
+  ToolTraceEntry,
   TranscriptMessage,
 } from '../domain/schema';
 import { resolveFailurePolicy } from '../domain/schema';
@@ -28,6 +29,8 @@ import {
   buildBudgetSnapshot,
 } from '../usage/budget';
 import { isSuggestableFailure, listFallbackCandidates } from '../usage/fallback';
+import { detectToolCall, MAX_TOOL_ROUNDS, stripToolFences, toolResultMessage } from '../tools/protocol';
+import { executeToolCall, resolveTools } from '../tools/registry';
 
 /**
  * Conversation orchestrator (spec §11). Directed sequential traversal of the
@@ -511,30 +514,93 @@ export async function startRun(
         ? Math.min(agent.runtime.responseTimeoutMs, pg.conversation.responseTimeoutOverrideMs)
         : agent.runtime.responseTimeoutMs;
 
+    // Executable tools (spec extension): the turn becomes a bounded loop —
+    // model call → detect tool fence → execute → feed result back → re-call.
+    // Each round goes through the UNCHANGED budget/retry/fallback wrapper, so
+    // per-round auto-retry, failure policy, and budget assertion apply as-is.
+    // Agents with no tools degenerate to exactly one round (today's behavior).
+    const enabledTools = resolveTools(agent.tools);
+    const toolTrace: ToolTraceEntry[] = [];
+
     try {
-      const res = await callWithBudgetAndOptionalFallback({
-        agent,
-        provider,
-        providersById,
-        chatParams,
-        messages,
-        controller,
-        effectiveTimeoutMs,
-        isFallback,
-        runId,
-        playgroundId: pg.id,
-        messageId,
-        snapshotBase,
-        item,
-        turnNumber,
-        policy,
-      });
-      if (!res) {
-        // Failure already recorded inside the call; caller applies policy.
-        if (controller.signal.aborted) return 'aborted';
-        const errors = useRuntimeStore.getState().errors;
-        const detail = errors[errors.length - 1]?.detail ?? 'Request failed.';
-        return { failedDetail: detail };
+      let loopMessages = messages;
+      let res: Awaited<ReturnType<typeof callWithBudgetAndOptionalFallback>> = null;
+      for (let round = 0; ; round++) {
+        res = await callWithBudgetAndOptionalFallback({
+          agent,
+          provider,
+          providersById,
+          chatParams: { ...chatParams, messages: loopMessages },
+          messages: loopMessages,
+          controller,
+          effectiveTimeoutMs,
+          isFallback,
+          runId,
+          playgroundId: pg.id,
+          messageId,
+          // Re-snapshot per round under the same messageId so the request
+          // inspector always shows the request that actually produced the turn.
+          snapshotBase: { ...snapshotBase, messages: loopMessages },
+          item,
+          turnNumber,
+          policy,
+        });
+        if (!res) {
+          // Failure already recorded inside the call; caller applies policy.
+          if (controller.signal.aborted) return 'aborted';
+          const errors = useRuntimeStore.getState().errors;
+          const detail = errors[errors.length - 1]?.detail ?? 'Request failed.';
+          return { failedDetail: detail };
+        }
+
+        // Usage is recorded per round — every round is a real provider call.
+        void recordCallUsage({
+          response: res.response,
+          messages: loopMessages,
+          provider: res.provider,
+          model: res.response.model || model,
+          playgroundId: pg.id,
+          runId,
+          fallback: res.fallback,
+        });
+
+        const call =
+          round < MAX_TOOL_ROUNDS && enabledTools.length > 0
+            ? detectToolCall(res.response.text, enabledTools)
+            : null;
+        if (!call) break;
+
+        // The intermediate response was streamed into the live buffer; clear it
+        // so the next round's tokens don't append onto the tool request text.
+        useRuntimeStore.getState().clearStreaming(agent.id);
+
+        let resultText: string;
+        let entry: ToolTraceEntry;
+        if (call.kind === 'error') {
+          resultText = call.error;
+          entry = { tool: 'invalid', input: '', result: call.error, ok: false };
+          log('tool-call', `"${agent.name}" emitted a malformed tool call.`, agent.id);
+        } else {
+          useRuntimeStore.getState().setToolStatus(agent.id, `Using ${call.def.name}…`);
+          log('tool-call', `"${agent.name}" called ${call.def.id}.`, agent.id);
+          const result = await executeToolCall(call.def, call.input, controller.signal);
+          resultText = result.text;
+          entry = {
+            tool: call.def.id,
+            input: JSON.stringify(call.input),
+            result: result.text,
+            ok: result.ok,
+            durationMs: result.durationMs,
+          };
+          useRuntimeStore.getState().setToolStatus(agent.id, null);
+        }
+        toolTrace.push(entry);
+
+        loopMessages = [
+          ...loopMessages,
+          { role: 'assistant', content: res.response.text },
+          { role: 'user', content: toolResultMessage(entry.tool, resultText, MAX_TOOL_ROUNDS - round - 1) },
+        ];
       }
 
       const usedProvider = res.provider;
@@ -549,9 +615,12 @@ export async function startRun(
         language: agent.language,
         model: res.response.model,
         providerId: usedProvider.id,
-        // Keep thinking out of the visible transcript body.
-        content: res.response.text || '',
+        // Keep thinking out of the visible transcript body. When tools ran, a
+        // leftover fence (budget-forced answer) is stripped from the answer —
+        // the trace preserves it for inspection.
+        content: (toolTrace.length > 0 ? stripToolFences(res.response.text) : res.response.text) || '',
         reasoning: res.response.reasoning || undefined,
+        toolTrace: toolTrace.length > 0 ? toolTrace : undefined,
         status: 'completed',
         sourceAgentId: item.sourceAgentId,
         connectionType: connection?.type ?? null,
@@ -570,23 +639,16 @@ export async function startRun(
       log(
         'request-completed',
         `"${agent.name}" responded in ${res.response.durationMs}ms` +
+          (toolTrace.length > 0 ? ` after ${toolTrace.length} tool call${toolTrace.length === 1 ? '' : 's'}` : '') +
           (usedFallback ? ' (fallback provider).' : '.'),
         agent.id,
       );
-      void recordCallUsage({
-        response: res.response,
-        messages,
-        provider: usedProvider,
-        model: res.response.model || model,
-        playgroundId: pg.id,
-        runId,
-        fallback: usedFallback,
-      });
       return 'success';
     } catch (err) {
       const partialOutputChars =
         useRuntimeStore.getState().streamingText[agent.id]?.length ?? 0;
       useRuntimeStore.getState().clearStreaming(agent.id);
+      useRuntimeStore.getState().setToolStatus(agent.id, null);
       if (controller.signal.aborted) return 'aborted';
       const pe =
         err instanceof BudgetExceededError
@@ -599,7 +661,7 @@ export async function startRun(
         messageId,
         buildFailureSnapshot(snapshotBase, pe, messages, partialOutputChars),
       );
-      recordFailure(agent, turnNumber, messageId, item, detail, 'agent', provider.displayName, pe);
+      recordFailure(agent, turnNumber, messageId, item, detail, 'agent', provider.displayName, pe, toolTrace);
       return { failedDetail: detail };
     }
   };
@@ -758,6 +820,8 @@ function recordFailure(
   level: 'agent' | 'run',
   providerName?: string,
   pe?: ProviderError,
+  /** Tool calls already executed this turn, kept on the failed row for inspection. */
+  toolTrace?: ToolTraceEntry[],
 ) {
   const runtime = useRuntimeStore.getState();
   runtime.setAgentState(agent.id, 'failed');
@@ -783,6 +847,7 @@ function recordFailure(
     model: agent.llm.model,
     providerId: agent.llm.providerId,
     content: '',
+    toolTrace: toolTrace && toolTrace.length > 0 ? toolTrace : undefined,
     status: 'failed',
     sourceAgentId: item.sourceAgentId,
     connectionType: null,

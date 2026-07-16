@@ -50,6 +50,15 @@ function CanvasInner() {
   const errors = useRuntimeStore((s) => s.errors);
 
   const { fitView } = useReactFlow();
+  const fitViewNonce = useUiStore((s) => s.fitViewNonce);
+
+  // Re-fit the viewport when asked (e.g. Smart Arrange just repositioned every
+  // node). Deferred a frame so React Flow has adopted the new positions first.
+  useEffect(() => {
+    if (fitViewNonce === 0) return;
+    const id = requestAnimationFrame(() => void fitView({ duration: 200, maxZoom: 1 }));
+    return () => cancelAnimationFrame(id);
+  }, [fitViewNonce, fitView]);
 
   const erroredAgentIds = useMemo(
     () => new Set(errors.filter((e) => e.agentId).map((e) => e.agentId as string)),

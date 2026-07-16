@@ -2,6 +2,7 @@ import { type CSSProperties, useState } from 'react';
 import type { AgentLanguage } from '../../domain/schema';
 import { dirForLanguage } from '../../domain/language';
 import { extractInlineThinking } from '../../providers/openaiAdapter';
+import { useRuntimeStore } from '../../store/runtimeStore';
 import styles from './Transcript.module.css';
 
 /**
@@ -37,6 +38,11 @@ export function LiveMessage({
   const reasoning =
     [reasoningProp, split.reasoning].filter((s) => s && s.length > 0).join('\n\n') || undefined;
   const thinking = visible.length === 0;
+  // The live message always belongs to the active agent; show its in-flight
+  // tool execution ("Using Wikipedia search…") instead of the generic badge.
+  const toolStatus = useRuntimeStore((s) =>
+    s.activeAgentId ? s.toolStatus[s.activeAgentId] ?? null : null,
+  );
   const dir = dirForLanguage(language);
   return (
     <div className={`${styles.message} ${styles.live}`} style={style} dir={dir} aria-live="polite">
@@ -54,7 +60,9 @@ export function LiveMessage({
             thinking {showReasoning ? '▾' : '▸'}
           </button>
         )}
-        <span className={styles.liveBadge}>{thinking ? 'thinking…' : 'streaming…'}</span>
+        <span className={styles.liveBadge}>
+          {toolStatus ?? (thinking ? 'thinking…' : 'streaming…')}
+        </span>
       </div>
       {showReasoning && reasoning && (
         <div className={styles.request} dir="ltr">

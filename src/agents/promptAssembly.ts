@@ -7,6 +7,9 @@ import type {
 } from '../domain/schema';
 import { buildPersonaIdentitySection } from '../domain/persona';
 import { KIND_DIRECTIVE, overridesHistoryToggle } from '../domain/agentKind';
+import { DISCUSSION_CONDUCT } from '../domain/conduct';
+import { buildToolProtocolSection } from '../tools/protocol';
+import { resolveTools } from '../tools/registry';
 import type { ChatMessage } from '../providers/types';
 import { extractInlineThinking } from '../providers/openaiAdapter';
 import { characteristicsToInstruction } from './characteristics';
@@ -209,6 +212,14 @@ export function buildSystemPrompt(ctx: PromptContext): string {
   const chitchatDirective = CHITCHAT_POLICY_DIRECTIVE[ctx.conversation.chitchatPolicy];
   if (chitchatDirective) sections.push(chitchatDirective);
 
+  // 4c. Discussion conduct — participants replying to a live discussion engage
+  // the specific prior claims instead of emitting parallel monologues. Gated on
+  // visible history: the opening speaker has nothing to respond to, and
+  // moderator/summarizer/finalizer keep their KIND_DIRECTIVE neutrality.
+  if (agent.kind === 'participant' && historyIncluded(ctx) && ctx.history.length > 0) {
+    sections.push(DISCUSSION_CONDUCT);
+  }
+
   // 5. Enabled skills
   const skills = agent.skills.filter((s) => s.enabled);
   if (skills.length > 0) {
@@ -217,6 +228,14 @@ export function buildSystemPrompt(ctx: PromptContext): string {
     for (const skill of skills) {
       if (skill.instruction.trim()) sections.push(skill.instruction.trim());
     }
+  }
+
+  // 5b. Executable tools (in contrast to the declared-only skills above). The
+  // mechanical invocation protocol lives here — template prose only says WHEN
+  // to use tools — so protocol changes never require template edits.
+  const tools = resolveTools(agent.tools);
+  if (tools.length > 0) {
+    sections.push(buildToolProtocolSection(tools));
   }
 
   // 6. Conversation rule (from the incoming connection)

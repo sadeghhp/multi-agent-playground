@@ -94,6 +94,12 @@ interface RuntimeStoreState {
    * while answer tokens stream into the body (ChatGPT/DeepSeek-style).
    */
   streamingReasoning: Record<string, string>;
+  /**
+   * Per-agent live tool-execution label ("Using Wikipedia search…") shown on
+   * the canvas node and live transcript entry instead of "Generating…" while a
+   * mid-turn tool call runs. Memory-only.
+   */
+  toolStatus: Record<string, string | null>;
   /** Run-scoped provider overrides from accepted fallback suggestions. */
   providerOverrides: Record<string, ProviderOverride>;
   /**
@@ -125,6 +131,8 @@ interface RuntimeStoreState {
   appendToken: (agentId: string, chunk: string) => void;
   appendReasoningToken: (agentId: string, chunk: string) => void;
   clearStreaming: (agentId: string) => void;
+  /** Set (or clear with null) the agent's live tool-execution label. */
+  setToolStatus: (agentId: string, label: string | null) => void;
   setProviderOverride: (agentId: string, override: ProviderOverride) => void;
   /** Remove an agent from the circuit for the rest of this run. */
   disableAgentForRun: (agentId: string) => void;
@@ -186,6 +194,7 @@ function makeInitial() {
     requestSnapshots: {} as Record<string, RequestSnapshot>,
     streamingText: {} as Record<string, string>,
     streamingReasoning: {} as Record<string, string>,
+    toolStatus: {} as Record<string, string | null>,
     providerOverrides: {} as Record<string, ProviderOverride>,
     runDisabledAgents: {} as Record<string, true>,
     consecutiveFailures: {} as Record<string, number>,
@@ -235,6 +244,16 @@ export const useRuntimeStore = create<RuntimeStoreState>((set, get) => ({
       delete nextText[agentId];
       delete nextReasoning[agentId];
       return { streamingText: nextText, streamingReasoning: nextReasoning };
+    }),
+  setToolStatus: (agentId, label) =>
+    set((s) => {
+      if (label === null) {
+        if (!(agentId in s.toolStatus)) return s;
+        const next = { ...s.toolStatus };
+        delete next[agentId];
+        return { toolStatus: next };
+      }
+      return { toolStatus: { ...s.toolStatus, [agentId]: label } };
     }),
   setProviderOverride: (agentId, override) =>
     set((s) => ({

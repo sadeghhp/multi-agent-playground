@@ -107,6 +107,7 @@ export function createAgent(overrides: Partial<Agent> = {}): Agent {
     kind: 'participant',
     characteristics: defaultCharacteristics(),
     skills: [],
+    tools: [],
     llm: defaultLlmConfig(),
     runtime: defaultRuntimeConfig(),
     position: { x: 0, y: 0 },
@@ -143,6 +144,7 @@ export function duplicateAgent(agent: Agent): Agent {
     llm: cloneLlmConfig(agent.llm),
     runtime: { ...agent.runtime },
     skills: agent.skills.map((s) => ({ ...s, id: newSkillId() })),
+    tools: [...agent.tools],
   };
 }
 
@@ -297,6 +299,8 @@ interface TemplateDef {
   characteristics: Partial<Characteristics>;
   color: Agent['colorCategory'];
   skills: { name: string; description: string; instruction: string }[];
+  /** Embedded executable tool ids (src/tools/registry.ts) enabled by default. */
+  tools?: string[];
   personaMode?: Agent['personaMode'];
   persona?: Agent['persona'];
   /** Lifecycle kind; omitted templates default to 'participant'. */
@@ -316,16 +320,17 @@ const TEMPLATES: Record<TemplateKey, TemplateDef> = {
     label: 'Analyst',
     role: 'Analyst',
     systemInstruction:
-      'Analyze the topic methodically. Break problems into parts and reason from evidence. Distinguish established facts from assumptions and inferences; state explicitly when evidence is insufficient rather than guessing.',
+      'Analyze methodically. Break the question into parts; for each, separate established fact, assumption, and inference, and label them as such. Quantify wherever possible — give numbers, ranges, or orders of magnitude instead of "large" or "small" — and state your confidence (high/medium/low) with the reason for it. When evidence is insufficient, name precisely what data is missing rather than guessing. Do not restate other agents\' points except to build on or dispute them.',
     characteristics: { assertiveness: 60, skepticism: 60, creativity: 40 },
     color: 'blue',
     skills: [presetSkill('analysis')],
+    tools: ['calculator'],
   },
   critic: {
     label: 'Critic',
     role: 'Skeptical reviewer',
     systemInstruction:
-      'Critically evaluate the previous responses. Challenge unsupported claims and identify weaknesses. Ground every objection in the text itself or in missing evidence — do not invent flaws. State each defect directly, without praise, hedging, or agreement.',
+      'You are the designated critic. In every reply: (1) identify the strongest claim in the message you are responding to and challenge it first, naming the agent and quoting the claim; (2) state exactly why it fails — missing evidence, logical gap, internal contradiction, or unstated assumption; (3) end with the single question or piece of evidence that would most change your assessment. Never open with praise or agreement, and raise no objection you cannot ground in the text itself or in missing evidence. If a claim survives your scrutiny, say so in one sentence and move to the next-strongest.',
     characteristics: { skepticism: 85, assertiveness: 70, cooperation: 35 },
     color: 'red',
     skills: [presetSkill('critique')],
@@ -344,10 +349,11 @@ const TEMPLATES: Record<TemplateKey, TemplateDef> = {
     label: 'Researcher',
     role: 'Researcher',
     systemInstruction:
-      'Gather relevant considerations and surface the most important facts and open questions. Mark uncertain or unverified points explicitly rather than presenting them as settled. Do not pad the list with restated or redundant considerations.',
+      'You are the researcher: you bring verifiable facts into the discussion, not opinions. Each turn, contribute the 2–4 facts that most change the discussion; for each, state the fact, its source, and your confidence in it. Mark anything unverified explicitly as unverified rather than presenting it as settled. When another agent states something factually wrong, correct it, naming the agent and the error. Do not pad with restated considerations or speculation. Before asserting a checkable fact, verify it with your tools when they are available and cite the returned title and URL/DOI next to the claim.',
     characteristics: { creativity: 60, verbosity: 60, skepticism: 50 },
     color: 'teal',
     skills: [presetSkill('brainstorming')],
+    tools: ['wikipedia_search', 'wikipedia_page', 'crossref_search', 'web_search'],
   },
   summarizer: {
     label: 'Summarizer',
@@ -440,6 +446,7 @@ export function createAgentFromTemplate(
       instruction: s.instruction,
       enabled: true,
     })),
+    ...(t.tools ? { tools: [...t.tools] } : {}),
     ...(t.personaMode ? { personaMode: t.personaMode } : {}),
     ...(t.persona ? { persona: { ...t.persona } } : {}),
     ...(t.kind ? { kind: t.kind } : {}),

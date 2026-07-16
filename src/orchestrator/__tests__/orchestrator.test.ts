@@ -970,3 +970,142 @@ describe('orchestrator pause / resume / retry', () => {
     await runPromise;
   });
 });
+
+/** okChat variant with custom assistant content. */
+function chatWith(content: string) {
+  return new Response(
+    JSON.stringify({
+      model: 'test',
+      choices: [{ message: { role: 'assistant', content }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } },
+  );
+}
+
+const calcFence = (expression: string) =>
+  '```tool\n' + JSON.stringify({ tool: 'calculator', input: { expression } }) + '\n```';
+
+/** One agent (optionally with tools) and no connections — a single-turn run. */
+function toolPlayground(tools: string[]): Playground {
+  const pg = createPlayground('Tools');
+  const provider = createProvider({
+    displayName: 'Local',
+    baseUrl: 'http://localhost:11434',
+    authMethod: 'none',
+    models: ['test'],
+  });
+  const base = createAgent();
+  const a = createAgent({
+    name: 'A',
+    role: 'r',
+    systemInstruction: 'do',
+    tools,
+    llm: { ...base.llm, providerId: provider.id, model: 'test' },
+  });
+  useProviderStore.setState({ providers: [provider] });
+  pg.agents.push(a);
+  pg.conversation = { ...pg.conversation, subject: 'topic', startingAgentId: a.id };
+  return pg;
+}
+
+describe('executable tool loop', () => {
+  it('executes a tool call, feeds the result back, and records the trace', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        fetchMock.mock.calls.length === 1
+          ? chatWith('Let me compute.\n' + calcFence('6 * 7'))
+          : chatWith('The answer is 42.'),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const pg = toolPlayground(['calculator']);
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // The second request carries the tool round-trip: the assistant's tool
+    // message plus the [tool_result: …] user message.
+    const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+    const roles = secondBody.messages.map((m: { role: string }) => m.role);
+    expect(roles.slice(-2)).toEqual(['assistant', 'user']); // fence message, then tool result
+    const flat = secondBody.messages.map((m: { content: string }) => m.content).join('\n');
+    expect(flat).toContain('[tool_result: calculator]');
+    expect(flat).toContain('6 * 7 = 42');
+
+    const transcript = useDomainStore.getState().playground!.transcript;
+    expect(transcript).toHaveLength(1);
+    expect(transcript[0].content).toBe('The answer is 42.');
+    expect(transcript[0].toolTrace).toHaveLength(1);
+    expect(transcript[0].toolTrace![0]).toMatchObject({
+      tool: 'calculator',
+      ok: true,
+      result: '6 * 7 = 42',
+    });
+    expect(useRuntimeStore.getState().status).toBe('completed');
+    // One agent turn, regardless of rounds.
+    expect(useRuntimeStore.getState().responsesPerAgent[pg.agents[0].id]).toBe(1);
+    expect(useRuntimeStore.getState().toolStatus[pg.agents[0].id]).toBeUndefined();
+  });
+
+  it('leaves a tool fence verbatim for an agent without tools (single round)', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(chatWith(calcFence('1 + 1'))));
+    vi.stubGlobal('fetch', fetchMock);
+    const pg = toolPlayground([]);
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const transcript = useDomainStore.getState().playground!.transcript;
+    expect(transcript[0].content).toContain('```tool');
+    expect(transcript[0].toolTrace).toBeUndefined();
+  });
+
+  it('stops after MAX_TOOL_ROUNDS and strips leftover fences from the forced answer', async () => {
+    // The model insists on another tool call every round.
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(() => Promise.resolve(chatWith('Still checking.\n' + calcFence('2 + 2'))));
+    vi.stubGlobal('fetch', fetchMock);
+    const pg = toolPlayground(['calculator']);
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+
+    // 3 tool rounds + the final forced-answer call.
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    const transcript = useDomainStore.getState().playground!.transcript;
+    expect(transcript).toHaveLength(1);
+    expect(transcript[0].toolTrace).toHaveLength(3);
+    expect(transcript[0].content).toBe('Still checking.');
+    expect(transcript[0].content).not.toContain('```tool');
+  });
+
+  it('feeds a malformed tool call back as an error result instead of failing the turn', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        fetchMock.mock.calls.length === 1
+          ? chatWith('```tool\n{"tool": "no_such_tool", "input": {}}\n```')
+          : chatWith('Fine, answering without tools.'),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const pg = toolPlayground(['calculator']);
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+    const flat = secondBody.messages.map((m: { content: string }) => m.content).join('\n');
+    expect(flat).toContain('unknown tool "no_such_tool"');
+
+    const transcript = useDomainStore.getState().playground!.transcript;
+    expect(transcript[0].status).toBe('completed');
+    expect(transcript[0].content).toBe('Fine, answering without tools.');
+    expect(transcript[0].toolTrace).toHaveLength(1);
+    expect(transcript[0].toolTrace![0].ok).toBe(false);
+  });
+});

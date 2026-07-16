@@ -12,6 +12,7 @@ export function Palette() {
   const setPanel = useUiStore((s) => s.setPanel);
   const isRunning = useRuntimeStore((s) => s.status === 'running');
   const hasEnabledProvider = useProviderStore((s) => s.providers.some((p) => p.enabled));
+  const enabledAgentCount = playground?.agents.filter((a) => a.runtime.enabled).length ?? 0;
 
   // Stagger new nodes so they don't stack exactly on top of each other.
   function nextPosition() {
@@ -46,6 +47,21 @@ export function Palette() {
           title={!hasEnabledProvider ? 'Add an enabled provider first' : undefined}
         >
           ✨ Create agent with AI
+        </button>
+        <button
+          type="button"
+          className={styles.block}
+          onClick={() => setPanel('smartArrange')}
+          disabled={isRunning || !hasEnabledProvider || enabledAgentCount < 2}
+          title={
+            !hasEnabledProvider
+              ? 'Add an enabled provider first'
+              : enabledAgentCount < 2
+                ? 'Add at least 2 enabled agents first'
+                : 'AI connects your agents into a conversation flow for a subject'
+          }
+        >
+          ✨ Smart Arrange
         </button>
       </section>
 

@@ -15,6 +15,8 @@ import { enrichAgentDraft, enrichedDraftToAgentOverrides, type EnrichAgentResult
 import type { EnrichAgentDraft } from '../../agents/generateAgent';
 import { parseEnrichAgentDraftFromText } from '../../agents/parseGeneratedAgentDraft';
 import { exportSkillSet, importSkillSet } from '../../persistence/skillSets';
+import { TOOLS, toolAvailable } from '../../tools/registry';
+import { setTavilyKey } from '../../tools/tavily';
 import { downloadJson } from '../fileDownload';
 import { validateForRun } from '../../orchestrator/validate';
 import { Section } from './Section';
@@ -45,6 +47,8 @@ export function AgentInspector({ agent }: { agent: Agent }) {
 
   const [newTarget, setNewTarget] = useState('');
   const [newType, setNewType] = useState<ConnectionType>('conversation');
+  // Draft only — persisted to the credential store on blur, never kept in state.
+  const [tavilyKeyDraft, setTavilyKeyDraft] = useState('');
   const skillFileInput = useRef<HTMLInputElement>(null);
 
   const library = playground?.skillLibrary ?? [];
@@ -769,6 +773,73 @@ export function AgentInspector({ agent }: { agent: Agent }) {
               e.target.value = '';
             }}
           />
+        </div>
+      </Section>
+
+      <Section title={`Tools (${agent.tools.filter((t) => t in TOOLS).length})`}>
+        <p className={styles.hint}>
+          Executable tools the agent can call mid-turn to fetch real facts and sources.
+        </p>
+        {Object.values(TOOLS).map((tool) => (
+          <label key={tool.id} className={styles.toolRow}>
+            <input
+              type="checkbox"
+              aria-label={`${tool.name} enabled`}
+              checked={agent.tools.includes(tool.id)}
+              onChange={(e) =>
+                patch({
+                  tools: e.target.checked
+                    ? [...agent.tools, tool.id]
+                    : agent.tools.filter((t) => t !== tool.id),
+                })
+              }
+            />
+            <span>
+              <strong>{tool.name}</strong>
+              {tool.id === 'web_search' && !toolAvailable('web_search') && (
+                <span className="chip"> needs API key</span>
+              )}
+              <br />
+              <span className={styles.hint}>{tool.description}</span>
+            </span>
+          </label>
+        ))}
+        <div className="field">
+          <label htmlFor="ag-tavily-key">Web search key (Tavily)</label>
+          <div className={styles.skillHead}>
+            <input
+              id="ag-tavily-key"
+              type="password"
+              placeholder={toolAvailable('web_search') ? 'Key saved for this session' : 'tvly-…'}
+              value={tavilyKeyDraft}
+              onChange={(e) => setTavilyKeyDraft(e.target.value)}
+              onBlur={() => {
+                // Save only a non-empty draft; blurring an untouched field must
+                // never erase a previously saved key.
+                if (tavilyKeyDraft.trim()) {
+                  setTavilyKey(tavilyKeyDraft);
+                  setTavilyKeyDraft('');
+                  showToast('info', 'Web search key saved for this session.');
+                }
+              }}
+            />
+            {toolAvailable('web_search') && (
+              <button
+                type="button"
+                className="danger"
+                onClick={() => {
+                  setTavilyKey('');
+                  setTavilyKeyDraft('');
+                  showToast('info', 'Web search key cleared.');
+                }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <p className={styles.hint}>
+            App-wide; stored only in this browser session, never in playgrounds or exports.
+          </p>
         </div>
       </Section>
 

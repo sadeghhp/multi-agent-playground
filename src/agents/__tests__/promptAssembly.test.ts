@@ -240,6 +240,65 @@ describe('buildSystemPrompt', () => {
     expect(prompt).not.toContain('cite it in first person');
   });
 
+  it('injects the tool protocol section only for agents with resolvable tools', () => {
+    const conversation = defaultConversationSettings();
+    const withTools = createAgent({ name: 'R', systemInstruction: 'x', tools: ['wikipedia_search'] });
+    const toolPrompt = buildSystemPrompt({ agent: withTools, conversation, history: [] });
+    expect(toolPrompt).toContain('You have real, executable tools.');
+    expect(toolPrompt).toContain('wikipedia_search');
+    expect(toolPrompt).toContain('```tool');
+
+    const without = createAgent({ name: 'A', systemInstruction: 'x' });
+    const plainPrompt = buildSystemPrompt({ agent: without, conversation, history: [] });
+    expect(plainPrompt).not.toContain('You have real, executable tools.');
+
+    const unknownOnly = createAgent({ name: 'U', systemInstruction: 'x', tools: ['no_such_tool'] });
+    const unknownPrompt = buildSystemPrompt({ agent: unknownOnly, conversation, history: [] });
+    expect(unknownPrompt).not.toContain('You have real, executable tools.');
+  });
+
+  it('omits keyed tools (web_search) when no key is configured', () => {
+    const agent = createAgent({ name: 'R', systemInstruction: 'x', tools: ['web_search', 'calculator'] });
+    const prompt = buildSystemPrompt({ agent, conversation: defaultConversationSettings(), history: [] });
+    expect(prompt).not.toContain('web_search');
+    expect(prompt).toContain('calculator');
+  });
+
+  it('injects discussion conduct for a participant with visible history', () => {
+    const agent = createAgent({ name: 'A', systemInstruction: 'x' });
+    const history = [msg('other', 'B', 'a prior point', 1)];
+    const prompt = buildSystemPrompt({ agent, conversation: defaultConversationSettings(), history });
+    expect(prompt).toContain('Discussion conduct:');
+    expect(prompt).toContain('Do not agree just to be agreeable');
+  });
+
+  it('omits discussion conduct for the opening speaker (empty history)', () => {
+    const agent = createAgent({ name: 'A', systemInstruction: 'x' });
+    const prompt = buildSystemPrompt({ agent, conversation: defaultConversationSettings(), history: [] });
+    expect(prompt).not.toContain('Discussion conduct:');
+  });
+
+  it('omits discussion conduct when the participant has history off', () => {
+    const base = createAgent();
+    const agent = createAgent({
+      name: 'A',
+      systemInstruction: 'x',
+      runtime: { ...base.runtime, includeHistory: false },
+    });
+    const history = [msg('other', 'B', 'a prior point', 1)];
+    const prompt = buildSystemPrompt({ agent, conversation: defaultConversationSettings(), history });
+    expect(prompt).not.toContain('Discussion conduct:');
+  });
+
+  it('omits discussion conduct for moderator/summarizer/finalizer kinds', () => {
+    const history = [msg('other', 'B', 'a prior point', 1)];
+    for (const kind of ['moderator', 'summarizer', 'finalizer'] as const) {
+      const agent = createAgent({ name: 'A', kind, systemInstruction: 'x' });
+      const prompt = buildSystemPrompt({ agent, conversation: defaultConversationSettings(), history });
+      expect(prompt).not.toContain('Discussion conduct:');
+    }
+  });
+
   it('keeps role-agent identity for personaMode role', () => {
     const agent = createAgent({ name: "Nagel's Advocate", role: 'Philosophical Explainer' });
     const prompt = buildSystemPrompt({ agent, conversation: defaultConversationSettings(), history: [] });

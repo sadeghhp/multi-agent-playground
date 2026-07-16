@@ -89,6 +89,10 @@
   padding: 8px;
   margin-bottom: 8px;
 }
+.toolRow { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; font-size: 12px; }
+.toolRow input[type='checkbox'] { width: auto; margin-top: 2px; }
+.toolRow .hint { margin: 0; }
+
 .skillHead { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
 .skillHead input[type='checkbox'] { width: auto; }
 .skillHead input[type='text'], .skillHead > input:not([type]) { flex: 1; min-width: 0; }

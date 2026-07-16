@@ -18,6 +18,7 @@ export type OpenPanel =
   | 'timeline'
   | 'runHistory'
   | 'createAgentAi'
+  | 'smartArrange'
   | 'usage';
 
 export type Selection =
@@ -80,6 +81,8 @@ interface UiState {
   fallbackSuggest: FallbackState | null;
   /** Failure-decision prompt while a run is paused on failure ('prompt' mode). */
   failureDecision: FailureDecisionState | null;
+  /** Bumped to ask the canvas to re-fit the viewport (e.g. after Smart Arrange). */
+  fitViewNonce: number;
 
   selectAgent: (id: string) => void;
   selectConnection: (id: string) => void;
@@ -111,6 +114,8 @@ interface UiState {
     signal?: AbortSignal,
   ) => Promise<FailureDecision>;
   resolveFailureDecision: (decision: FailureDecision) => void;
+  /** Ask the canvas to re-fit the viewport around all nodes. */
+  requestFitView: () => void;
 }
 
 export const useUiStore = create<UiState>((set, get) => ({
@@ -121,6 +126,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   confirm: null,
   fallbackSuggest: null,
   failureDecision: null,
+  fitViewNonce: 0,
 
   selectAgent: (id) => set({ selection: { kind: 'agent', id } }),
   selectConnection: (id) => set({ selection: { kind: 'connection', id } }),
@@ -132,6 +138,7 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({ theme: next });
   },
   showToast: (kind, message) => set({ toast: { kind, message } }),
+  requestFitView: () => set((s) => ({ fitViewNonce: s.fitViewNonce + 1 })),
   dismissToast: () => set({ toast: null }),
   requestConfirm: (opts) =>
     new Promise<boolean>((resolve) => {

@@ -23,6 +23,7 @@ export const Message = memo(function Message({ msg, color }: { msg: TranscriptMe
   const [expanded, setExpanded] = useState(true);
   const [showRequest, setShowRequest] = useState(failed);
   const [showReasoning, setShowReasoning] = useState(false);
+  const [showTools, setShowTools] = useState(false);
   const showToast = useUiStore((s) => s.showToast);
   const snapshot = useRuntimeStore((s) => s.requestSnapshots[msg.id]);
 
@@ -59,6 +60,16 @@ export const Message = memo(function Message({ msg, color }: { msg: TranscriptMe
             onClick={() => setShowReasoning((v) => !v)}
           >
             thinking {showReasoning ? '▾' : '▸'}
+          </button>
+        )}
+        {msg.toolTrace && msg.toolTrace.length > 0 && (
+          <button
+            type="button"
+            className="chip"
+            aria-expanded={showTools}
+            onClick={() => setShowTools((v) => !v)}
+          >
+            tools ({msg.toolTrace.length}) {showTools ? '▾' : '▸'}
           </button>
         )}
         <span className={styles.msgMeta}>
@@ -108,6 +119,18 @@ export const Message = memo(function Message({ msg, color }: { msg: TranscriptMe
       {showReasoning && reasoning && (
         <div className={styles.request} dir="ltr">
           <pre className={styles.reqPre}>{reasoning}</pre>
+        </div>
+      )}
+      {showTools && msg.toolTrace && msg.toolTrace.length > 0 && (
+        <div className={styles.request} dir="ltr">
+          <pre className={styles.reqPre}>
+            {msg.toolTrace
+              .map(
+                (t) =>
+                  `→ ${t.tool} ${t.input}${t.durationMs != null ? ` (${formatDuration(t.durationMs)})` : ''}\n${t.result}`,
+              )
+              .join('\n\n')}
+          </pre>
         </div>
       )}
       {expanded && (

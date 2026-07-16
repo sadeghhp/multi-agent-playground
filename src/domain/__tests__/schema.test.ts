@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Agent, ConversationRun, Playground, Provider, SCHEMA_VERSION } from '../schema';
+import { Agent, ConversationRun, Playground, Provider, SCHEMA_VERSION, TranscriptMessage } from '../schema';
 import { createPlayground, createProvider } from '../factories';
 
 // F15: nested config blocks are defaulted so a record missing one still loads
@@ -29,6 +29,39 @@ describe('defensive nested-object defaults (F15)', () => {
       expect(result.data.conversation.maxTotalTurns).toBe(12);
       expect(result.data.ui.bottomPanelHeight).toBe(260);
     }
+  });
+});
+
+describe('executable tools fields (additive, no migration)', () => {
+  it('parses a pre-tools Agent and defaults tools to []', () => {
+    const result = Agent.safeParse({ id: 'a1', name: 'A' });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.tools).toEqual([]);
+  });
+
+  it('round-trips an Agent with tools and a TranscriptMessage with a toolTrace', () => {
+    const agent = Agent.parse({ id: 'a1', name: 'R', tools: ['wikipedia_search', 'calculator'] });
+    expect(agent.tools).toEqual(['wikipedia_search', 'calculator']);
+
+    const msg = TranscriptMessage.parse({
+      id: 'm1',
+      turn: 1,
+      agentId: 'a1',
+      agentName: 'R',
+      timestamp: 1,
+      toolTrace: [{ tool: 'wikipedia_search', input: '{"query":"x"}', result: '1. X — y', ok: true, durationMs: 12 }],
+    });
+    expect(msg.toolTrace).toHaveLength(1);
+    expect(msg.toolTrace?.[0].tool).toBe('wikipedia_search');
+
+    const withoutTrace = TranscriptMessage.parse({
+      id: 'm2',
+      turn: 2,
+      agentId: 'a1',
+      agentName: 'R',
+      timestamp: 2,
+    });
+    expect(withoutTrace.toolTrace).toBeUndefined();
   });
 });
 

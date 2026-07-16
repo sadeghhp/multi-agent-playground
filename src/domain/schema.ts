@@ -199,6 +199,13 @@ export const Agent = z.object({
   // defaulted, so `.default({})` reconstructs the standard config.
   characteristics: Characteristics.default({}),
   skills: z.array(Skill).default([]),
+  /**
+   * Ids of embedded executable tools (src/tools/registry.ts) this agent may
+   * invoke mid-turn — distinct from `skills`, which remain prompt-text-only
+   * declared capabilities. Unknown ids are ignored at runtime (validate.ts
+   * warns). Additive + defaulted, so no SCHEMA_VERSION bump.
+   */
+  tools: z.array(z.string()).default([]),
   llm: LlmConfig.default({}),
   runtime: RuntimeConfig.default({}),
   // Visual state (spec §7.2 "Visual state"). Position is the source of truth
@@ -285,6 +292,22 @@ export type Provider = z.infer<typeof Provider>;
 // Transcript (spec §13.1)
 // ---------------------------------------------------------------------------
 
+/**
+ * One executed tool call inside an agent turn. Persisted on the transcript
+ * message (not just runtime state) so run history and exports keep the
+ * evidence behind cited claims.
+ */
+export const ToolTraceEntry = z.object({
+  tool: z.string(),
+  /** Compact JSON of the validated input. */
+  input: z.string().default(''),
+  /** Truncated result text (or `ERROR: …`). */
+  result: z.string().default(''),
+  ok: z.boolean().default(true),
+  durationMs: z.number().optional(),
+});
+export type ToolTraceEntry = z.infer<typeof ToolTraceEntry>;
+
 export const TranscriptMessage = z.object({
   id: z.string(),
   turn: z.number().int(),
@@ -302,6 +325,9 @@ export const TranscriptMessage = z.object({
   /** Reasoning/thinking text streamed separately from `content`. Hidden by
    * default in the UI; never fed back to other agents as conversation history. */
   reasoning: z.string().optional(),
+  /** Tool calls executed during this turn, in order. Hidden behind a chip in
+   * the UI; never fed back to other agents as conversation history. */
+  toolTrace: z.array(ToolTraceEntry).optional(),
   status: z.enum(['completed', 'failed', 'stopped']).default('completed'),
   sourceAgentId: z.string().nullable().default(null),
   connectionType: ConnectionType.nullable().default(null),

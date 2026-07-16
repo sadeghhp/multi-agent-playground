@@ -57,6 +57,19 @@ interface DomainState {
   updateConnection: (id: string, patch: Partial<Connection>) => void;
   removeConnection: (id: string) => void;
 
+  /**
+   * Apply a Smart Arrange plan (or revert to a snapshot of one) as ONE atomic
+   * mutation: wholesale connection replacement, per-agent kind/position
+   * patches, and a conversation patch — a single autosave with no partially
+   * applied states visible to the canvas. Symmetric by design: the inverse
+   * call, built from a pre-apply snapshot, is the revert.
+   */
+  applyArrangement: (arr: {
+    connections: Connection[];
+    agentPatches: { id: string; kind?: Agent['kind']; position: { x: number; y: number } }[];
+    conversationPatch: Partial<ConversationSettings>;
+  }) => void;
+
   // providers are application-global (see store/providerStore.ts); the domain
   // store only needs to drop a deleted provider's id from this playground's agents.
   unassignProvider: (providerId: string) => void;
@@ -307,6 +320,24 @@ export const useDomainStore = create<DomainState>((set, get) => {
 
     removeConnection(id) {
       mutate((pg) => ({ ...pg, connections: pg.connections.filter((c) => c.id !== id) }));
+    },
+
+    applyArrangement({ connections, agentPatches, conversationPatch }) {
+      const patches = new Map(agentPatches.map((p) => [p.id, p]));
+      mutate((pg) => ({
+        ...pg,
+        connections: [...connections],
+        agents: pg.agents.map((a) => {
+          const patch = patches.get(a.id);
+          if (!patch) return a;
+          return {
+            ...a,
+            position: { ...patch.position },
+            ...(patch.kind ? { kind: patch.kind } : {}),
+          };
+        }),
+        conversation: { ...pg.conversation, ...conversationPatch },
+      }));
     },
 
     unassignProvider(providerId) {

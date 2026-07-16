@@ -57,11 +57,24 @@ export function isTerminalKind(kind: AgentKind): boolean {
 }
 
 /**
- * Kinds that must reason over the whole conversation rather than the agent's
- * bounded history window. A moderator can't facilitate, and a summarizer/finalizer
- * can't synthesize, from a truncated view.
+ * Kinds that read the ENTIRE transcript unbounded. Only the one-shot terminal
+ * kinds qualify: they run once, so cost is bounded by `maxTotalTurns`. A
+ * moderator is deliberately excluded — it speaks repeatedly, so it gets a
+ * bounded (but larger-than-participant) window instead (see the orchestrator's
+ * history selection) to avoid a late-run turn overflowing a small model.
  */
 export function usesFullHistory(kind: AgentKind): boolean {
+  return isTerminalKind(kind);
+}
+
+/**
+ * Kinds whose need for history overrides the per-agent `includeHistory` toggle.
+ * A moderator can't facilitate, and a summarizer/finalizer can't synthesize,
+ * from an empty view — so the history block is forced on for them regardless of
+ * the toggle. Distinct from `usesFullHistory`: this governs *whether* history is
+ * included, not *how much* of it.
+ */
+export function overridesHistoryToggle(kind: AgentKind): boolean {
   return kind === 'moderator' || isTerminalKind(kind);
 }
 

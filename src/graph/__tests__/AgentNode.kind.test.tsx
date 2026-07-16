@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
-import { ReactFlowProvider } from '@xyflow/react';
+import { ReactFlowProvider, type NodeProps } from '@xyflow/react';
 import { AgentNode } from '../AgentNode';
-import type { AgentNodeData } from '../graphAdapter';
+import type { AgentFlowNode, AgentNodeData } from '../graphAdapter';
 
 function baseData(overrides: Partial<AgentNodeData>): AgentNodeData {
   return {
@@ -19,12 +19,18 @@ function baseData(overrides: Partial<AgentNodeData>): AgentNodeData {
   };
 }
 
+// AgentNode only reads `data` and `selected`; supply those and fill the ~15
+// other React Flow-injected NodeProps fields with a single documented cast
+// rather than fabricating each unused one.
+function nodeProps(data: AgentNodeData): NodeProps<AgentFlowNode> {
+  return { data, selected: false } as unknown as NodeProps<AgentFlowNode>;
+}
+
 /** AgentNode uses React Flow Handles, which need the provider context. */
 function renderNode(data: AgentNodeData) {
   return render(
     <ReactFlowProvider>
-      {/* @ts-expect-error NodeProps has many fields the component ignores; data is what matters. */}
-      <AgentNode data={data} selected={false} />
+      <AgentNode {...nodeProps(data)} />
     </ReactFlowProvider>,
   );
 }

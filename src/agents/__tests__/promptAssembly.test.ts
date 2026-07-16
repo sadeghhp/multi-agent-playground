@@ -84,6 +84,31 @@ describe('buildSystemPrompt', () => {
     expect(finalizer).toMatch(/last|final word/i);
   });
 
+  it('forces history on for moderator/summarizer/finalizer even when includeHistory is off (#3)', () => {
+    const history = [msg('x', 'X', 'a prior point was made', 1)];
+    for (const kind of ['moderator', 'summarizer', 'finalizer'] as const) {
+      const base = createAgent();
+      const agent = createAgent({
+        name: 'A',
+        kind,
+        systemInstruction: 'do',
+        runtime: { ...base.runtime, includeHistory: false },
+      });
+      const messages = assembleMessages({ agent, conversation: defaultConversationSettings(), history });
+      const flat = messages.map((m) => m.content).join('\n');
+      expect(flat).toContain('a prior point was made');
+    }
+  });
+
+  it('still drops history for a participant when includeHistory is off (#3 — unchanged)', () => {
+    const history = [msg('x', 'X', 'a prior point was made', 1)];
+    const base = createAgent();
+    const agent = createAgent({ name: 'A', systemInstruction: 'do', runtime: { ...base.runtime, includeHistory: false } });
+    const messages = assembleMessages({ agent, conversation: defaultConversationSettings(), history });
+    const flat = messages.map((m) => m.content).join('\n');
+    expect(flat).not.toContain('a prior point was made');
+  });
+
   it('applies the review connection rule and instruction override', () => {
     const agent = createAgent({ name: 'Critic', systemInstruction: 'x' });
     const incoming: Connection = { id: 'c', source: 'a', target: agent.id, enabled: true, type: 'review', priority: 0, instructionOverride: 'Focus only on factual weaknesses.' };

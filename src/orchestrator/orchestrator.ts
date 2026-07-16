@@ -267,7 +267,9 @@ export function retryAgentTurn(agentId: string): void {
     : null;
 
   log('run-retry', `Retrying "${agent.name}" from a stopped run.`, agentId);
-  void startRun({ seed: [{ agentId, connectionId: connection?.id ?? null, sourceAgentId }] });
+  // A retry is a surgical re-run of one agent, not a full round — skip the
+  // terminal wrap-up so it never appends a duplicate summarizer/finalizer.
+  void startRun({ seed: [{ agentId, connectionId: connection?.id ?? null, sourceAgentId }], skipWrapUp: true });
 }
 
 /**
@@ -309,7 +311,9 @@ export function continueRun(userMessage: string): void {
   void startRun();
 }
 
-export async function startRun(opts: { seed?: QueueItem[] } = {}): Promise<void> {
+export async function startRun(
+  opts: { seed?: QueueItem[]; skipWrapUp?: boolean } = {},
+): Promise<void> {
   const domain = useDomainStore.getState();
   const runtime = useRuntimeStore.getState();
   const pg = domain.playground;
@@ -337,9 +341,15 @@ export async function startRun(opts: { seed?: QueueItem[] } = {}): Promise<void>
 
   // Seed the queue from the starting agent by default, or from an explicit seed
   // (a post-run retry re-enters at a specific agent — see retryAgentTurn).
-  const seed = opts.seed ?? [
-    { agentId: pg.conversation.startingAgentId!, connectionId: null, sourceAgentId: null },
-  ];
+  // A terminal starting agent is NOT seeded into the discussion — it only runs
+  // in the wrap-up phase, so seeding it would make it speak first, breaking the
+  // "runs last" contract. The wrap-up phase picks it up regardless.
+  const startAgent = agentsById.get(pg.conversation.startingAgentId!);
+  const defaultSeed: QueueItem[] =
+    startAgent && isTerminalKind(startAgent.kind)
+      ? []
+      : [{ agentId: pg.conversation.startingAgentId!, connectionId: null, sourceAgentId: null }];
+  const seed = opts.seed ?? defaultSeed;
   const queue: QueueItem[] = [...seed];
   const queued = new Set<string>(seed.map((s) => s.agentId));
   for (const s of seed) runtime.setAgentState(s.agentId, 'queued');
@@ -414,11 +424,17 @@ export async function startRun(opts: { seed?: QueueItem[] } = {}): Promise<void>
     }
 
     const liveTranscript = useDomainStore.getState().playground!.transcript;
-    // Moderators and terminal kinds (summarizer/finalizer) must reason over the
-    // whole conversation, not the agent's bounded window (agentKind.usesFullHistory).
+    // History scope by kind:
+    //  - terminal (summarizer/finalizer): the ENTIRE transcript — they run once,
+    //    so cost is bounded by maxTotalTurns and they must synthesize everything.
+    //  - moderator: no count cap but the standard char budget applies, so a late
+    //    turn on a long run can't overflow a small model (it repeats, unlike terminal).
+    //  - participant: the agent's own bounded window (unchanged).
     const history = usesFullHistory(agent.kind)
       ? liveTranscript
-      : boundHistory(liveTranscript, agent.runtime.historyWindow);
+      : agent.kind === 'moderator'
+        ? boundHistory(liveTranscript, liveTranscript.length)
+        : boundHistory(liveTranscript, agent.runtime.historyWindow);
     // The source agent's most recent output, always available to review/handoff
     // targets regardless of the history window (spec §12).
     const sourceOutput = findLastSourceOutput(liveTranscript, item.sourceAgentId);
@@ -560,11 +576,29 @@ export async function startRun(opts: { seed?: QueueItem[] } = {}): Promise<void>
     }
   };
 
+  // Pause point (spec extension: flow control). Suspends between turns until the
+  // user resumes or stops; the in-flight turn always completes first. Shared by
+  // the discussion loop and the wrap-up phase. Returns 'aborted' if a Stop landed
+  // during the wait, else 'ok'.
+  const pauseIfRequested = async (): Promise<'aborted' | 'ok'> => {
+    if (!useRuntimeStore.getState().pauseRequested) return 'ok';
+    runtime.setStatus('paused');
+    runtime.setActive(null, null);
+    log('run-paused', 'Run paused.');
+    await waitForResume(controller.signal);
+    if (controller.signal.aborted) return 'aborted';
+    useRuntimeStore.getState().setPauseRequested(false);
+    runtime.setStatus('running');
+    log('run-resumed', 'Run resumed.');
+    return 'ok';
+  };
+
   // Wrap-up phase: engine-scheduled terminal kinds. Runs after the discussion
   // ends by natural drain or turn-limit (not on a user Stop). Summarizers run
   // first (so a finalizer can build on the summary), then finalizers; each sees
-  // the full transcript including prior wrap-up output. Returns 'stopped' if the
-  // failure policy stopped the run, 'aborted' on a mid-phase Stop, else 'completed'.
+  // the full transcript including prior wrap-up output. Returns 'stopped' if any
+  // terminal agent failed under a stop policy, 'aborted' on a mid-phase Stop,
+  // else 'completed'.
   const runWrapUpPhase = async (): Promise<'completed' | 'stopped' | 'aborted'> => {
     const terminal = pg.agents
       .filter((a) => isTerminalKind(a.kind) && a.runtime.enabled)
@@ -574,8 +608,14 @@ export async function startRun(opts: { seed?: QueueItem[] } = {}): Promise<void>
       .filter((a) => (useRuntimeStore.getState().responsesPerAgent[a.id] ?? 0) === 0)
       .sort((a, b) => terminalKindRank(a.kind) - terminalKindRank(b.kind));
 
+    // Terminal agents are independent one-shot jobs: a failure of one — even a
+    // 'stop' decision — must not suppress the others. At wrap-up there is no
+    // cascade left to halt, and the finalizer is the primary deliverable. Any
+    // stop-level failure still ends the run in error (via the returned 'stopped').
+    let errored = false;
     for (const agent of terminal) {
       if (controller.signal.aborted) return 'aborted';
+      if ((await pauseIfRequested()) === 'aborted') return 'aborted';
       const item: QueueItem = { agentId: agent.id, connectionId: null, sourceAgentId: null };
       // Retry loop without a queue: honor the failure policy inline (no re-queue).
       let attempt = await runAgentTurn(item);
@@ -587,30 +627,22 @@ export async function startRun(opts: { seed?: QueueItem[] } = {}): Promise<void>
           attempt = await runAgentTurn(item);
           continue;
         }
-        if (decision === 'stop') return 'stopped';
-        break; // skip / disable / continue → move on to the next terminal agent
+        // 'stop' marks the run errored but does not halt the remaining terminal
+        // agents; 'skip'/'disable' just moves on.
+        if (decision === 'stop') errored = true;
+        break;
       }
       if (attempt === 'aborted') return 'aborted';
     }
-    return 'completed';
+    return errored ? 'stopped' : 'completed';
   };
 
   try {
     while (queue.length > 0) {
       if (controller.signal.aborted) break;
 
-      // Pause point (spec extension: flow control). Suspend between turns until
-      // the user resumes or stops. The in-flight turn always completes first.
-      if (useRuntimeStore.getState().pauseRequested) {
-        runtime.setStatus('paused');
-        runtime.setActive(null, null);
-        log('run-paused', 'Run paused.');
-        await waitForResume(controller.signal);
-        if (controller.signal.aborted) break;
-        useRuntimeStore.getState().setPauseRequested(false);
-        runtime.setStatus('running');
-        log('run-resumed', 'Run resumed.');
-      }
+      // The in-flight turn always completes first; suspend at the boundary.
+      if ((await pauseIfRequested()) === 'aborted') break;
 
       if (useRuntimeStore.getState().currentTurn >= maxTurns) {
         log('turn-limit', `Maximum total turns (${maxTurns}) reached.`);
@@ -653,8 +685,17 @@ export async function startRun(opts: { seed?: QueueItem[] } = {}): Promise<void>
     }
 
     // Wrap-up phase — engine-scheduled terminal kinds run after the discussion
-    // ends by natural drain or turn-limit. A user Stop (aborted signal) skips it.
+    // ends by natural drain or turn-limit. Skipped when:
+    //  - the caller opted out (retryAgentTurn: a surgical re-run, not a round),
+    //  - a user Stop aborted the run, or
+    //  - no substantive discussion happened (no completed turn to synthesize) —
+    //    don't finalize over an empty/failed-only transcript.
+    const hasCompletedTurn = useDomainStore
+      .getState()
+      .playground!.transcript.some((m) => m.status === 'completed');
     if (
+      !opts.skipWrapUp &&
+      hasCompletedTurn &&
       !controller.signal.aborted &&
       useRuntimeStore.getState().runId === runId &&
       useRuntimeStore.getState().status === 'running'

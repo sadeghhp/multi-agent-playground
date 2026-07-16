@@ -6,7 +6,7 @@ import type {
   TranscriptMessage,
 } from '../domain/schema';
 import { buildPersonaIdentitySection } from '../domain/persona';
-import { KIND_DIRECTIVE } from '../domain/agentKind';
+import { KIND_DIRECTIVE, overridesHistoryToggle } from '../domain/agentKind';
 import type { ChatMessage } from '../providers/types';
 import { extractInlineThinking } from '../providers/openaiAdapter';
 import { characteristicsToInstruction } from './characteristics';
@@ -289,7 +289,9 @@ export function assembleMessages(ctx: PromptContext): ChatMessage[] {
   const messages: ChatMessage[] = [];
   messages.push({ role: 'system', content: buildSystemPrompt(ctx) });
 
-  if (ctx.agent.runtime.includeHistory) {
+  // Moderator/summarizer/finalizer need the transcript to do their job, so their
+  // kind overrides the per-agent includeHistory toggle (agentKind.overridesHistoryToggle).
+  if (ctx.agent.runtime.includeHistory || overridesHistoryToggle(ctx.agent.kind)) {
     for (const msg of ctx.history) {
       // Answer only — never feed thinking/reasoning to peer agents.
       const answer = visibleAnswerText(msg);

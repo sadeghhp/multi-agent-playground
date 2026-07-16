@@ -9,7 +9,8 @@ import type { Agent, Playground } from '../../domain/schema';
 import { useDomainStore } from '../../store/domainStore';
 import { useProviderStore } from '../../store/providerStore';
 import { useRuntimeStore } from '../../store/runtimeStore';
-import { retryAgentTurn, startRun, stopRun } from '../orchestrator';
+import { pauseRun, resumeRun, retryAgentTurn, startRun, stopRun } from '../orchestrator';
+import type { TranscriptMessage } from '../../domain/schema';
 
 function okChat() {
   return new Response(
@@ -84,6 +85,26 @@ function buildPlayground(opts: { cycle: boolean; maxTurns: number }): Built {
     maxResponsesPerAgent: 10,
   };
   return { pg, a, b, summarizer, finalizer };
+}
+
+/** A completed transcript message, used to pre-fill history for the #2 bounds test. */
+function bigMsg(i: number): TranscriptMessage {
+  return {
+    id: `pre${i}`,
+    turn: i,
+    agentId: 'x',
+    agentName: 'X',
+    agentDeleted: false,
+    role: 'r',
+    language: 'en',
+    model: 'test',
+    providerId: null,
+    content: 'x'.repeat(1000), // ~1000 chars so 30 messages blow the 12k boundHistory budget
+    status: 'completed',
+    sourceAgentId: null,
+    connectionType: null,
+    timestamp: 0,
+  };
 }
 
 beforeEach(() => {
@@ -196,5 +217,136 @@ describe('agent-kind wrap-up phase', () => {
     // Neither terminal agent ran.
     expect(transcript.some((m) => m.agentId === summarizer.id)).toBe(false);
     expect(transcript.some((m) => m.agentId === finalizer.id)).toBe(false);
+  });
+
+  it('does not append a second finalizer when an agent is retried after a completed run (#1)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(okChat())));
+    const { pg, a, finalizer } = buildPlayground({ cycle: false, maxTurns: 50 });
+    useDomainStore.setState({ playground: pg });
+    await startRun();
+    expect(useRuntimeStore.getState().status).toBe('completed');
+    const finalizersBefore = useDomainStore
+      .getState()
+      .playground!.transcript.filter((m) => m.agentId === finalizer.id).length;
+    expect(finalizersBefore).toBe(1);
+
+    // Retrying a participant is a surgical re-run — it must NOT re-run the wrap-up.
+    retryAgentTurn(a.id);
+    await vi.waitFor(() => expect(useRuntimeStore.getState().status).toBe('completed'));
+
+    const finalizersAfter = useDomainStore
+      .getState()
+      .playground!.transcript.filter((m) => m.agentId === finalizer.id).length;
+    expect(finalizersAfter).toBe(finalizersBefore); // still exactly one
+  });
+
+  it('never runs a terminal agent first when it is the starting agent (#8)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(okChat())));
+    const { pg, finalizer } = buildPlayground({ cycle: false, maxTurns: 50 });
+    pg.conversation.startingAgentId = finalizer.id; // degenerate config (validation warns)
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+
+    // The finalizer is excluded from the discussion seed, so it is never the
+    // opening speaker. (Nothing else can start here, so the run is empty.)
+    const transcript = useDomainStore.getState().playground!.transcript;
+    expect(transcript[0]?.agentId).not.toBe(finalizer.id);
+  });
+
+  it('does not finalize over a failed-only transcript (#9)', async () => {
+    // Every participant fails (401, non-retryable) and the policy skips rather
+    // than stops, so the discussion drains with zero completed turns.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() => Promise.resolve(new Response('unauthorized', { status: 401 }))),
+    );
+    const { pg, summarizer, finalizer } = buildPlayground({ cycle: false, maxTurns: 50 });
+    pg.conversation.stopOnError = false; // onFailure → 'skip'
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+
+    const transcript = useDomainStore.getState().playground!.transcript;
+    // No completed turn happened, so the wrap-up phase is skipped entirely.
+    expect(transcript.some((m) => m.status === 'completed')).toBe(false);
+    expect(transcript.some((m) => m.agentId === summarizer.id)).toBe(false);
+    expect(transcript.some((m) => m.agentId === finalizer.id)).toBe(false);
+  });
+
+  it('runs the finalizer even when the summarizer fails under a stop policy (#4)', async () => {
+    // Participants + finalizer succeed; only the summarizer fails.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((_url: string, init?: RequestInit) =>
+        Promise.resolve(requestKind(init) === 'summarizer' ? new Response('unauthorized', { status: 401 }) : okChat()),
+      ),
+    );
+    const { pg, summarizer, finalizer } = buildPlayground({ cycle: false, maxTurns: 50 });
+    // Default policy stops on error; the summarizer's failure must not suppress
+    // the finalizer, but the run still ends in error.
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+
+    const transcript = useDomainStore.getState().playground!.transcript;
+    expect(transcript.some((m) => m.agentId === summarizer.id && m.status === 'failed')).toBe(true);
+    expect(transcript.some((m) => m.agentId === finalizer.id && m.status === 'completed')).toBe(true);
+    expect(useRuntimeStore.getState().status).toBe('error');
+  });
+
+  it('honors a Pause requested during the wrap-up phase (#5)', async () => {
+    // Request a pause while the summarizer (first wrap-up agent) is generating;
+    // the phase must suspend before the finalizer runs.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+        if (requestKind(init) === 'summarizer') pauseRun();
+        return Promise.resolve(okChat());
+      }),
+    );
+    const { pg, finalizer } = buildPlayground({ cycle: false, maxTurns: 50 });
+    useDomainStore.setState({ playground: pg });
+
+    void startRun();
+    await vi.waitFor(() => expect(useRuntimeStore.getState().status).toBe('paused'));
+    // The finalizer has not run yet — the phase paused between terminal agents.
+    expect(useDomainStore.getState().playground!.transcript.some((m) => m.agentId === finalizer.id)).toBe(false);
+
+    resumeRun();
+    await vi.waitFor(() => expect(useRuntimeStore.getState().status).toBe('completed'));
+    expect(useDomainStore.getState().playground!.transcript.some((m) => m.agentId === finalizer.id)).toBe(true);
+  });
+
+  it('bounds a moderator\'s history but gives the finalizer the full transcript (#2)', async () => {
+    const calls: { kind: string; count: number }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+        calls.push({ kind: requestKind(init), count: historyLabels(init).length });
+        return Promise.resolve(okChat());
+      }),
+    );
+    // Moderator as the (graph) start + a finalizer in wrap-up; pre-fill a large
+    // transcript so the moderator's char budget forces truncation.
+    const provider = createProvider({ displayName: 'Local', baseUrl: 'http://localhost:11434', authMethod: 'none', models: ['test'] });
+    const llm = { ...createAgent().llm, providerId: provider.id, model: 'test' };
+    const moderator = createAgent({ name: 'M', role: 'r', systemInstruction: 'do', kind: 'moderator', llm });
+    const finalizer = createAgent({ name: 'F', role: 'r', systemInstruction: 'do', kind: 'finalizer', llm });
+    useProviderStore.setState({ providers: [provider] });
+    const pg = createPlayground('Test');
+    pg.agents.push(moderator, finalizer);
+    pg.transcript = Array.from({ length: 30 }, (_, i) => bigMsg(i));
+    pg.conversation = { ...pg.conversation, subject: 'topic', startingAgentId: moderator.id, maxTotalTurns: 50, maxResponsesPerAgent: 1 };
+    useDomainStore.setState({ playground: pg });
+
+    await startRun();
+
+    const modCall = calls.find((c) => c.kind === 'moderator')!;
+    const finCall = calls.find((c) => c.kind === 'finalizer')!;
+    // Moderator history is truncated by the char budget; the finalizer sees everything.
+    expect(modCall.count).toBeLessThan(30);
+    expect(finCall.count).toBeGreaterThanOrEqual(30);
+    expect(modCall.count).toBeLessThan(finCall.count);
   });
 });

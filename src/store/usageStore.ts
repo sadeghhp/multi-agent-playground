@@ -11,8 +11,20 @@ import {
   deleteModelPrice as dbDeletePrice,
 } from '../persistence/db';
 import { getUsageBudget, setUsageBudget } from './prefs';
+import { useUiStore } from './uiStore';
 import { estimateCostUsd } from '../usage/pricing';
 import { startOfLocalDay, sumTokensSince } from '../usage/budget';
+
+/**
+ * Running cache of today's token total, so `dayTokens()` (called on every
+ * budget check) doesn't re-scan the whole unbounded ledger each time. Recomputed
+ * lazily when the local day rolls over, incremented on each new same-day entry,
+ * and invalidated on any bulk change (hydrate/clear).
+ */
+let dayTotalCache: { day: number; total: number } | null = null;
+function invalidateDayTotal(): void {
+  dayTotalCache = null;
+}
 
 interface UsageState {
   entries: UsageEntry[];
@@ -57,9 +69,11 @@ export const useUsageStore = create<UsageState>((set, get) => ({
   async hydrate() {
     try {
       const [entries, prices] = await Promise.all([loadAllUsageEntries(), loadAllModelPrices()]);
+      invalidateDayTotal();
       set({ entries, prices, budget: getUsageBudget(), hydrated: true });
     } catch (err) {
       console.error('Usage hydrate failed', err);
+      invalidateDayTotal();
       set({ entries: [], prices: [], budget: getUsageBudget(), hydrated: true });
     }
   },
@@ -93,10 +107,22 @@ export const useUsageStore = create<UsageState>((set, get) => ({
       fallback: input.fallback,
     };
     set((s) => ({ entries: [...s.entries, entry] }));
+    // Keep the day-total cache in step with the new entry instead of forcing a
+    // full re-scan on the next dayTokens() call.
+    if (dayTotalCache && dayTotalCache.day === startOfLocalDay() && entry.at >= dayTotalCache.day) {
+      dayTotalCache.total += entry.totalTokens;
+    } else {
+      invalidateDayTotal();
+    }
     try {
       await saveUsageEntry(entry);
     } catch (err) {
       console.error('Usage save failed', err);
+      // Surface it: the in-memory ledger now counts this entry but a reload would
+      // lose it, so day-budget accounting silently under-counts post-reload.
+      useUiStore
+        .getState()
+        .showToast('warn', 'Usage accounting could not be saved; it may reset on reload.');
     }
     return entry;
   },
@@ -131,17 +157,23 @@ export const useUsageStore = create<UsageState>((set, get) => ({
   },
 
   async clearAll() {
+    invalidateDayTotal();
     set({ entries: [] });
     await clearUsageLedger();
   },
 
   async clearToday() {
     const since = startOfLocalDay();
+    invalidateDayTotal();
     set((s) => ({ entries: s.entries.filter((e) => e.at < since) }));
     await deleteUsageSince(since);
   },
 
   dayTokens() {
-    return sumTokensSince(get().entries, startOfLocalDay());
+    const day = startOfLocalDay();
+    if (!dayTotalCache || dayTotalCache.day !== day) {
+      dayTotalCache = { day, total: sumTokensSince(get().entries, day) };
+    }
+    return dayTotalCache.total;
   },
 }));

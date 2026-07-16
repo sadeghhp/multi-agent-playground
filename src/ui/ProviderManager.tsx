@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Provider } from '../domain/schema';
 import { deriveAuthMethod } from './providerAuth';
 import { useProviderStore } from '../store/providerStore';
@@ -180,6 +180,26 @@ function ProviderEditor({
   const [manualModel, setManualModel] = useState('');
   const [showKey, setShowKey] = useState(false);
 
+  // Debounce credential writes so a partial key isn't persisted to Web Storage on
+  // every keystroke. The pending write carries its own providerId/mode so a flush
+  // (including the on-unmount flush) never loses the last keystroke or targets the
+  // wrong provider.
+  const credTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingCred = useRef<{ providerId: string; apiKey: string; mode: Provider['credentialStorage'] } | null>(null);
+  const flushCredential = () => {
+    if (credTimer.current) {
+      clearTimeout(credTimer.current);
+      credTimer.current = null;
+    }
+    const p = pendingCred.current;
+    if (p) {
+      saveCredential(p.providerId, p.apiKey, p.mode);
+      pendingCred.current = null;
+    }
+  };
+  // Flush any pending write when the editor unmounts.
+  useEffect(() => flushCredential, []);
+
   const urlValidation = validateEndpoint(provider.baseUrl);
   const hasUrl = Boolean(provider.baseUrl.trim());
   const reachability = hasUrl && urlValidation.ok
@@ -228,10 +248,17 @@ function ProviderEditor({
       authHeaderName: 'Authorization',
       authPrefix: '',
     });
-    saveCredential(provider.id, apiKey, provider.credentialStorage);
+    // Debounced persist — the last keystroke lands (or is flushed on unmount).
+    pendingCred.current = { providerId: provider.id, apiKey, mode: provider.credentialStorage };
+    if (credTimer.current) clearTimeout(credTimer.current);
+    credTimer.current = setTimeout(flushCredential, 400);
   }
 
   function clearKey() {
+    // Cancel any pending debounced write before clearing.
+    if (credTimer.current) clearTimeout(credTimer.current);
+    credTimer.current = null;
+    pendingCred.current = null;
     onChange({ apiKey: '', authMethod: 'none' });
     clearCredential(provider.id);
   }
@@ -239,7 +266,12 @@ function ProviderEditor({
   function setRemember(remember: boolean) {
     const mode = remember ? 'local' : 'session';
     onChange({ credentialStorage: mode });
-    if (provider.apiKey) saveCredential(provider.id, provider.apiKey, mode);
+    // Retarget a pending write to the new mode, else persist the current key now.
+    if (pendingCred.current) {
+      pendingCred.current = { ...pendingCred.current, mode };
+    } else if (provider.apiKey) {
+      saveCredential(provider.id, provider.apiKey, mode);
+    }
   }
 
   function addModel(model: string) {
@@ -716,11 +748,17 @@ function ModelImportPanel({
     return models.filter((m) => m.id.toLowerCase().includes(q));
   }, [models, filter]);
 
-  const selectedList = models.filter((m) => selected.has(m.id));
+  // Memoized so its reference is stable across renders — otherwise the effect
+  // below (which lists it as a dep) would run after every render.
+  const selectedList = useMemo(() => models.filter((m) => selected.has(m.id)), [models, selected]);
 
   useEffect(() => {
-    if (defaultModel && !selected.has(defaultModel)) {
-      setDefaultModel(selectedList[0]?.id ?? '');
+    // Keep a valid default: re-pick the first selected model whenever the current
+    // default is empty or no longer selected (the empty case previously never
+    // recovered a default after a clear-then-select).
+    const stillValid = defaultModel && selected.has(defaultModel);
+    if (!stillValid && selectedList.length > 0) {
+      setDefaultModel(selectedList[0].id);
     }
   }, [selected, defaultModel, selectedList]);
 

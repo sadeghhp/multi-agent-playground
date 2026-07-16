@@ -3,7 +3,7 @@ import { createAgent, createProvider } from '../../domain/factories';
 import { ProviderError } from '../../providers/errors';
 import type { NormalizedResponse } from '../../providers/types';
 import { enrichAgentDraft, enrichedDraftToAgentOverrides } from '../enrichAgent';
-import type { GeneratedAgentDraft } from '../generateAgent';
+import type { EnrichAgentDraft, GeneratedAgentDraft } from '../generateAgent';
 
 vi.mock('../../providers/openaiAdapter', () => ({
   sendChat: vi.fn(),
@@ -197,5 +197,67 @@ describe('enrichedDraftToAgentOverrides', () => {
     const overrides = enrichedDraftToAgentOverrides(agent, draft);
     expect(overrides.personaMode).toBe('digital-shadow');
     expect(overrides.persona?.knownFor).toBe('Philosophy of mind');
+  });
+
+  // F1: enrich must preserve, not reset, any field the model omits.
+  it('preserves language, characteristics, colorCategory, and skills when the draft omits them', () => {
+    const fa = createAgent({
+      language: 'fa',
+      colorCategory: 'violet',
+      characteristics: { tone: 'formal', verbosity: 20, creativity: 90, assertiveness: 55, skepticism: 85, cooperation: 30 },
+      skills: [{ id: 'sk_keep', name: 'critique', description: 'd', instruction: 'i', enabled: true }],
+    });
+    // A minimal partial reply — only the identity fields the model touched.
+    const draft = {
+      name: 'Critic',
+      role: 'Skeptical reviewer',
+      systemInstruction: 'Challenge unsupported claims and fact-check numbers.',
+    } as EnrichAgentDraft;
+    const overrides = enrichedDraftToAgentOverrides(fa, draft);
+    expect(overrides.systemInstruction).toContain('fact-check');
+    // Omitted fields are absent from the overrides → the agent keeps its values.
+    expect(overrides.language).toBeUndefined();
+    expect(overrides.colorCategory).toBeUndefined();
+    expect(overrides.characteristics).toBeUndefined();
+    expect(overrides.skills).toBeUndefined();
+  });
+
+  it('overrides only the characteristics keys the draft supplies', () => {
+    const base = createAgent({
+      characteristics: { tone: 'neutral', verbosity: 50, creativity: 50, assertiveness: 50, skepticism: 50, cooperation: 50 },
+    });
+    const draft = {
+      name: 'X',
+      role: 'Y',
+      systemInstruction: 'Z instruction.',
+      characteristics: { skepticism: 90 },
+    } as EnrichAgentDraft;
+    const overrides = enrichedDraftToAgentOverrides(base, draft);
+    expect(overrides.characteristics?.skepticism).toBe(90);
+    expect(overrides.characteristics?.verbosity).toBe(50);
+    expect(overrides.characteristics?.tone).toBe('neutral');
+  });
+});
+
+describe('enrichAgentDraft preserves omitted fields end-to-end', () => {
+  const provider = createProvider({ baseUrl: 'https://api.example.com', apiKey: 'k' });
+  const agent = createAgent({
+    language: 'fa',
+    llm: { providerId: 'pv_1', model: 'm1', temperature: 0.7, maxOutputTokens: 1024 },
+    characteristics: { tone: 'formal', verbosity: 20, creativity: 90, assertiveness: 55, skepticism: 85, cooperation: 30 },
+  });
+
+  it('returns undefined for language/characteristics when the model omits them', async () => {
+    sendChatMock.mockResolvedValue(
+      reply(JSON.stringify({ name: 'Critic', role: 'Reviewer', systemInstruction: 'Do the review carefully.' })),
+    );
+    const result = await enrichAgentDraft(agent, 'Sharpen the review focus.', provider);
+    expect(result.ok).toBe(true);
+    expect(result.draft?.language).toBeUndefined();
+    expect(result.draft?.characteristics).toBeUndefined();
+    // And applying the overrides leaves the agent's tuned values intact.
+    const overrides = enrichedDraftToAgentOverrides(agent, result.draft!);
+    expect(overrides.language).toBeUndefined();
+    expect(overrides.characteristics).toBeUndefined();
   });
 });

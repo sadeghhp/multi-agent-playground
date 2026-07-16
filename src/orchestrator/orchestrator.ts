@@ -182,15 +182,33 @@ function findLastSourceOutput(
 }
 
 /**
- * Most recent user-authored message (see continueRun), walked backwards in
- * place. Kept as an explicit, always-surfaced instruction — not just a line
- * inside the bounded/gated history — so it stays authoritative for every
- * agent turn for the rest of the conversation, however many turns later.
+ * Char budget for the terminal (summarizer/finalizer) history window. Much
+ * larger than a participant's default so they still see effectively the whole
+ * conversation, but not unbounded — a very long run must not overflow a small
+ * model on the one turn (final synthesis) that matters most.
  */
-function findLastUserDirective(transcript: TranscriptMessage[]): string | null {
+const TERMINAL_HISTORY_CHAR_BUDGET = 48_000;
+
+/**
+ * A user interjection stays a hard "you must address this" instruction for this
+ * many completed agent turns after it; beyond that it downgrades to softer
+ * context so a since-resolved interjection stops forcing every later agent to
+ * re-answer it (see promptAssembly.userDirectiveIsFresh).
+ */
+const USER_DIRECTIVE_FRESH_TURNS = 3;
+
+/**
+ * Most recent user-authored message (see continueRun), walked backwards in
+ * place, with its transcript index so the caller can measure how many turns
+ * have addressed it. Surfaced explicitly — not just via the bounded history —
+ * so it stays visible even after it scrolls out of the window.
+ */
+function findLastUserDirective(
+  transcript: TranscriptMessage[],
+): { content: string; index: number } | null {
   for (let i = transcript.length - 1; i >= 0; i--) {
     const m = transcript[i];
-    if (m.agentId === null && m.role === 'user' && m.content) return m.content;
+    if (m.agentId === null && m.role === 'user' && m.content) return { content: m.content, index: i };
   }
   return null;
 }
@@ -425,28 +443,38 @@ export async function startRun(
 
     const liveTranscript = useDomainStore.getState().playground!.transcript;
     // History scope by kind:
-    //  - terminal (summarizer/finalizer): the ENTIRE transcript — they run once,
-    //    so cost is bounded by maxTotalTurns and they must synthesize everything.
+    //  - terminal (summarizer/finalizer): effectively the whole transcript, but
+    //    through a large char budget so a very long run can't overflow a small
+    //    model on the final synthesis turn.
     //  - moderator: no count cap but the standard char budget applies, so a late
     //    turn on a long run can't overflow a small model (it repeats, unlike terminal).
     //  - participant: the agent's own bounded window (unchanged).
     const history = usesFullHistory(agent.kind)
-      ? liveTranscript
+      ? boundHistory(liveTranscript, liveTranscript.length, TERMINAL_HISTORY_CHAR_BUDGET)
       : agent.kind === 'moderator'
         ? boundHistory(liveTranscript, liveTranscript.length)
         : boundHistory(liveTranscript, agent.runtime.historyWindow);
     // The source agent's most recent output, always available to review/handoff
     // targets regardless of the history window (spec §12).
     const sourceOutput = findLastSourceOutput(liveTranscript, item.sourceAgentId);
-    const pendingUserDirective = findLastUserDirective(liveTranscript);
+    const userDirective = findLastUserDirective(liveTranscript);
+    const pendingUserDirective = userDirective?.content ?? null;
+    // Fresh while only a few completed agent turns have followed the interjection.
+    const completedSinceDirective = userDirective
+      ? liveTranscript
+          .slice(userDirective.index + 1)
+          .filter((m) => m.agentId !== null && m.status === 'completed').length
+      : 0;
     const messages = assembleMessages({
       agent,
       conversation: pg.conversation,
       history,
       incoming: connection,
       sourceAgentName: sourceName,
+      sourceAgentId: item.sourceAgentId,
       sourceOutput,
       pendingUserDirective,
+      userDirectiveIsFresh: userDirective ? completedSinceDirective < USER_DIRECTIVE_FRESH_TURNS : undefined,
       // "Opening" framing only fits a genuinely empty transcript.
       isFirstTurn: liveTranscript.length === 0,
     });
@@ -882,10 +910,20 @@ function finish(runId: string, status: 'completed' | 'error') {
   log(status === 'completed' ? 'run-completed' : 'run-error', `Run ${status}.`);
 }
 
+/**
+ * Safety margin on the prompt-token estimate for budget gating. `estimateTokens`
+ * (chars/4) systematically under-counts for CJK/code — where real tokens can run
+ * 2-4× higher — so the raw estimate lets a run slip past its cap and overshoot
+ * silently. Inflating the prompt side makes the gate stop early rather than
+ * overshoot (it cannot eliminate overshoot for extreme CJK, but bounds it).
+ */
+const PROMPT_ESTIMATE_SAFETY = 1.3;
+
 function estimateRequestTokens(messages: ChatMessage[], maxOutputTokens: number): number {
   const prompt = messages.reduce((sum, m) => sum + estimateTokens(m.content), 0);
-  // Budget conservatively: assume the model may use up to maxOutputTokens.
-  return prompt + maxOutputTokens;
+  // Budget conservatively: inflate the prompt estimate and assume the model may
+  // use up to maxOutputTokens on the output side.
+  return Math.ceil(prompt * PROMPT_ESTIMATE_SAFETY) + maxOutputTokens;
 }
 
 async function recordCallUsage(opts: {

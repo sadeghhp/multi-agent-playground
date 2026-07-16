@@ -146,6 +146,20 @@ describe('providerErrorFromPayload', () => {
     expect(pe.kind).toBe('bad-request');
     expect(pe.status).toBe(502);
   });
+
+  // F6: a transient server-side message that merely mentions "token" must stay a
+  // retryable server-error, not be reclassified as non-retryable bad-request.
+  it('keeps a statusless "token"-mentioning transient error retryable', () => {
+    const pe = providerErrorFromPayload({ message: 'upstream token service unavailable' }, { streamed: true });
+    expect(pe.kind).toBe('server-error');
+    expect(retryEligible(pe.kind)).toBe(true);
+  });
+
+  it('still classifies a genuine context-length overflow as bad-request', () => {
+    const pe = providerErrorFromPayload({ message: "This model's maximum context length is 8192 tokens" }, { streamed: true });
+    expect(pe.kind).toBe('bad-request');
+    expect(retryEligible(pe.kind)).toBe(false);
+  });
 });
 
 describe('formatProviderErrorDetail', () => {

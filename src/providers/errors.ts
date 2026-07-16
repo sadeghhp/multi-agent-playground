@@ -23,7 +23,13 @@ export type ProviderErrorKind =
 
 const RAW_UPSTREAM_MAX = 500;
 
-const CLIENT_ARG_RE = /invalid argument|context(?:\s+length)?|token/i;
+// Signals of a client/argument problem (context overflow, bad params) that a
+// gateway sometimes wraps in a 5xx or an in-band SSE error with no status. Kept
+// deliberately specific: a bare "token" (e.g. "token service unavailable") is a
+// transient server-side message, and re-tagging it 'bad-request' would wrongly
+// flip a retry-eligible failure to non-retryable.
+const CLIENT_ARG_RE =
+  /invalid argument|context length|context window|maximum context|max_tokens|token limit|too many tokens|maximum .*tokens/i;
 
 export class ProviderError extends Error {
   readonly kind: ProviderErrorKind;

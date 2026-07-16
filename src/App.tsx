@@ -27,6 +27,7 @@ import { UsagePanel } from './ui/UsagePanel';
 import { SettingsPanel } from './ui/SettingsPanel';
 import { useUsageStore } from './store/usageStore';
 import { useLlmSettingsStore } from './store/llmSettingsStore';
+import { setRecordDropListener } from './persistence/db';
 import { useIsMobile } from './ui/useIsMobile';
 import { MobileApp } from './ui/mobile/MobileApp';
 import styles from './App.module.css';
@@ -48,6 +49,18 @@ export default function App() {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
+
+  // Surface dropped (corrupt/unreadable) stored records to the user, once, so a
+  // silently skipped playground/run isn't visible only in the console.
+  useEffect(() => {
+    let warned = false;
+    setRecordDropListener((detail) => {
+      if (warned) return;
+      warned = true;
+      useUiStore.getState().showToast('warn', `${detail} See the console for details.`);
+    });
+    return () => setRecordDropListener(null);
+  }, []);
 
   // On boot: load the last-selected playground, else create a starter one.
   useEffect(() => {

@@ -141,6 +141,13 @@ function collectWarnings(pg: Playground, providers: Provider[]): string[] {
       warnings.push(`Agent "${agent.name}" references a provider that is not in this file.`);
     }
   }
+  // A starting agent that isn't in the file leaves the run with no valid start.
+  // regenerateIds nulls it on the copy path, but the in-place path would keep it
+  // dangling silently — surface it so the user knows to pick a new start.
+  const startId = pg.conversation.startingAgentId;
+  if (startId && !agentIds.has(startId)) {
+    warnings.push('The starting agent is not present in this file; pick a new one before running.');
+  }
   return warnings;
 }
 

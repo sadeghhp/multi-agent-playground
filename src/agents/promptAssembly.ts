@@ -34,6 +34,8 @@ export interface PromptContext {
   /** The connection feeding this agent, if any (spec §7.3, §11.6). */
   incoming?: Connection | null;
   sourceAgentName?: string | null;
+  /** Id of the source agent, used to detect when its output is already in `history`. */
+  sourceAgentId?: string | null;
   /**
    * The source agent's most recent output (spec §12 "source agent output, when
    * applicable"). Included for review/handoff connections independently of the
@@ -52,6 +54,31 @@ export interface PromptContext {
    * bounded history window.
    */
   pendingUserDirective?: string | null;
+  /**
+   * Whether the pending user directive is still "fresh" — i.e. interjected
+   * within the last few turns. Fresh directives are imposed as a hard "you must
+   * address this" instruction; once a few turns have addressed it, it downgrades
+   * to a softer "keep in mind" so a since-resolved interjection stops forcing
+   * every later agent to re-answer it. Undefined is treated as fresh (previews).
+   */
+  userDirectiveIsFresh?: boolean;
+}
+
+/** Whether the flattened history block is included for this agent. */
+function historyIncluded(ctx: PromptContext): boolean {
+  return ctx.agent.runtime.includeHistory || overridesHistoryToggle(ctx.agent.kind);
+}
+
+/**
+ * True when the source agent's most-recent answer is already rendered inside the
+ * included history block — in which case embedding it again in the task prompt
+ * would duplicate the same text. The embed still fires when history is off or
+ * the source has scrolled out of the window (its intended purpose).
+ */
+function sourceOutputAlreadyInHistory(ctx: PromptContext): boolean {
+  if (!historyIncluded(ctx) || !ctx.sourceAgentId || !ctx.sourceOutput) return false;
+  const target = ctx.sourceOutput.trim();
+  return ctx.history.some((m) => m.agentId === ctx.sourceAgentId && visibleAnswerText(m) === target);
 }
 
 const CONNECTION_RULE: Record<Connection['type'], string> = {
@@ -254,11 +281,14 @@ export function buildTaskPrompt(ctx: PromptContext): string {
 
   // The user's latest follow-up (spec extension: "continue the conversation").
   // Surfaced explicitly, outside the includeHistory/historyWindow gate, so it
-  // stays an authoritative instruction for every agent for the rest of the
-  // run rather than one line that can scroll out of the bounded history.
+  // stays visible even when it scrolls out of the bounded history. A fresh
+  // interjection is imposed as a hard instruction; a since-addressed one
+  // downgrades to context so it stops forcing every later agent to re-answer it.
   if (ctx.pendingUserDirective?.trim()) {
     sections.push(
-      `The user has interjected with the following — you must address it directly in your response: "${ctx.pendingUserDirective.trim()}"`,
+      ctx.userDirectiveIsFresh === false
+        ? `Earlier in this conversation the user interjected with the following — keep it in mind: "${ctx.pendingUserDirective.trim()}"`
+        : `The user has interjected with the following — you must address it directly in your response: "${ctx.pendingUserDirective.trim()}"`,
     );
   }
 
@@ -267,11 +297,14 @@ export function buildTaskPrompt(ctx: PromptContext): string {
   }
 
   // For review/handoff, embed the source's actual output so the agent has the
-  // content it was instructed to review/continue, regardless of the history window.
+  // content it was instructed to review/continue, regardless of the history
+  // window — but skip it when that same output is already in the included
+  // history (else it is sent twice).
   if (
     ctx.incoming &&
     (ctx.incoming.type === 'review' || ctx.incoming.type === 'handoff') &&
-    ctx.sourceOutput?.trim()
+    ctx.sourceOutput?.trim() &&
+    !sourceOutputAlreadyInHistory(ctx)
   ) {
     const label = ctx.sourceAgentName ?? 'The previous agent';
     sections.push(`${label}'s most recent response:\n${ctx.sourceOutput.trim()}`);
@@ -291,15 +324,19 @@ export function assembleMessages(ctx: PromptContext): ChatMessage[] {
 
   // Moderator/summarizer/finalizer need the transcript to do their job, so their
   // kind overrides the per-agent includeHistory toggle (agentKind.overridesHistoryToggle).
-  if (ctx.agent.runtime.includeHistory || overridesHistoryToggle(ctx.agent.kind)) {
+  if (historyIncluded(ctx)) {
     for (const msg of ctx.history) {
       // Answer only — never feed thinking/reasoning to peer agents.
       const answer = visibleAnswerText(msg);
       if (!answer) continue;
-      // Prefix so each contribution is attributable inside the flattened history.
+      const isSelf = msg.agentId === ctx.agent.id;
+      // Attribute peers with a `[Name]:` prefix so the flattened history stays
+      // legible. The agent's OWN prior turns are sent unprefixed as assistant
+      // messages — prefixing them trains the model to echo `[Name]:` on its next
+      // reply, which then leaks verbatim into the transcript and peers' history.
       messages.push({
-        role: msg.agentId === ctx.agent.id ? 'assistant' : 'user',
-        content: `[${msg.agentName}]: ${answer}`,
+        role: isSelf ? 'assistant' : 'user',
+        content: isSelf ? answer : `[${msg.agentName}]: ${answer}`,
       });
     }
   }
@@ -317,14 +354,21 @@ export function boundHistory(
   windowSize: number,
   charBudget = 12_000,
 ): TranscriptMessage[] {
-  const recent = transcript.slice(-Math.max(1, windowSize));
+  // Only messages that carry a visible answer count toward the window: failed/
+  // empty turns (content '') are dropped at assembly anyway, so letting them
+  // consume window slots would silently shrink an agent's real context.
+  const withAnswers = transcript
+    .map((m) => ({ m, answer: visibleAnswerText(m) }))
+    .filter((x) => x.answer.length > 0);
+  const recent = withAnswers.slice(-Math.max(1, windowSize));
   const result: TranscriptMessage[] = [];
   let chars = 0;
   for (let i = recent.length - 1; i >= 0; i--) {
-    const len = visibleAnswerText(recent[i]).length;
+    // Approximate the assembled size, including the `[Name]: ` attribution prefix.
+    const len = recent[i].answer.length + recent[i].m.agentName.length + 4;
     if (chars + len > charBudget && result.length > 0) break;
     chars += len;
-    result.unshift(recent[i]);
+    result.unshift(recent[i].m);
   }
   return result;
 }

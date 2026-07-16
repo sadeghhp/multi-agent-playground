@@ -77,7 +77,7 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
         </span>
       </div>
       {data.role && <div className={styles.role}>{data.role}</div>}
-      {data.kind !== 'participant' && (
+      {data.kind !== 'participant' && KIND_META[data.kind] && (
         <div
           className={`${styles.kindChip} ${KIND_META[data.kind].wrapUp ? styles.kindWrapUp : ''}`}
           title={KIND_META[data.kind].hint}

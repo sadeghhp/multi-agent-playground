@@ -78,3 +78,4 @@ export const deleteUsageSince = vi.fn().mockResolvedValue(undefined);
 export const saveModelPrice = vi.fn().mockResolvedValue(undefined);
 export const loadAllModelPrices = vi.fn().mockResolvedValue([]);
 export const deleteModelPrice = vi.fn().mockResolvedValue(undefined);
+export const setRecordDropListener = vi.fn();

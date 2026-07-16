@@ -64,6 +64,23 @@ describe('duplicateAgent', () => {
     copy.llm.model = 'mutated';
     expect(original.llm.model).not.toBe('mutated');
   });
+
+  // F19: persona and llm.stopSequences must be cloned, not shared by reference.
+  it('deep-clones persona and llm.stopSequences (F19)', () => {
+    const original = createAgent({
+      name: 'Shadow',
+      personaMode: 'digital-shadow',
+      persona: { realName: 'Ada', knownFor: 'computing', stanceNotes: '- notes', citationStyle: 'in-character' },
+      llm: { providerId: null, model: 'm', temperature: 0.7, maxOutputTokens: 100, stopSequences: ['STOP'] },
+    });
+    const copy = duplicateAgent(original);
+    expect(copy.persona).not.toBe(original.persona);
+    expect(copy.llm.stopSequences).not.toBe(original.llm.stopSequences);
+    copy.persona!.stanceNotes = 'mutated';
+    copy.llm.stopSequences!.push('EXTRA');
+    expect(original.persona!.stanceNotes).toBe('- notes');
+    expect(original.llm.stopSequences).toEqual(['STOP']);
+  });
 });
 
 describe('skill library', () => {

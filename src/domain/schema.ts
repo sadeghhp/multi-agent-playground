@@ -193,13 +193,17 @@ export const Agent = z.object({
    * Defaults to 'participant' so pre-v4 agents behave exactly as before.
    */
   kind: AgentKind.default('participant'),
-  characteristics: Characteristics,
+  // Nested config is defaulted (not just required) so a stored/imported agent
+  // that is missing one of these blocks still loads instead of being silently
+  // dropped on read (parseStored). Each sub-schema is itself fully field-
+  // defaulted, so `.default({})` reconstructs the standard config.
+  characteristics: Characteristics.default({}),
   skills: z.array(Skill).default([]),
-  llm: LlmConfig,
-  runtime: RuntimeConfig,
+  llm: LlmConfig.default({}),
+  runtime: RuntimeConfig.default({}),
   // Visual state (spec §7.2 "Visual state"). Position is the source of truth
   // that the graph adapter projects into React Flow nodes.
-  position: z.object({ x: z.number(), y: z.number() }),
+  position: z.object({ x: z.number(), y: z.number() }).default({ x: 0, y: 0 }),
   colorCategory: ColorCategory.default('blue'),
 });
 export type Agent = z.infer<typeof Agent>;
@@ -485,7 +489,13 @@ export const ConversationRun = z.object({
   startedAt: z.number().int(),
   endedAt: z.number().int().nullable(),
   status: ConversationRunStatus,
-  conversation: ConversationSettings,
+  // Defaulted for the same reason as Playground.conversation: a stored run that
+  // predates a settings field still loads. NOTE: ConversationRun and UsageEntry
+  // are intentionally unversioned — they rely on this "additive, fully-defaulted
+  // only" invariant for their embedded schemas (ConversationSettings /
+  // TranscriptMessage). Never add a required, non-defaulted field to those, or
+  // historical runs will fail safeParse and be dropped on load.
+  conversation: ConversationSettings.default({}),
   transcript: z.array(TranscriptMessage).default([]),
   events: z.array(RunEventLogEntry).default([]),
   messageCountAtStart: z.number().int().nonnegative(),
@@ -526,9 +536,11 @@ export const Playground = z.object({
   // it still parse — no SCHEMA_VERSION bump needed. Carries no secrets, so it
   // exports as-is (PlaygroundExport inherits this field).
   skillLibrary: z.array(LibrarySkill).default([]),
-  conversation: ConversationSettings,
+  // Defaulted so a stored/imported playground missing these nested blocks loads
+  // instead of being dropped on read (both sub-schemas are fully field-defaulted).
+  conversation: ConversationSettings.default({}),
   transcript: z.array(TranscriptMessage).default([]),
-  ui: UiLayoutState,
+  ui: UiLayoutState.default({}),
 });
 export type Playground = z.infer<typeof Playground>;
 

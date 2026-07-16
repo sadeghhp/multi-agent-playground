@@ -38,8 +38,8 @@ function sleep(ms: number): Promise<void> {
  * `markRequestComplete()` (typically in a `finally`) to release the next waiter.
  * When delay is 0, this is a no-op.
  */
-export async function throttleBeforeRequest(): Promise<void> {
-  if (delayMs <= 0) return;
+export async function throttleBeforeRequest(): Promise<boolean> {
+  if (delayMs <= 0) return false;
 
   let release!: () => void;
   const held = new Promise<void>((r) => {
@@ -52,9 +52,16 @@ export async function throttleBeforeRequest(): Promise<void> {
   const wait = lastRequestEndAt + delayMs - Date.now();
   if (wait > 0) await sleep(wait);
   releases.push(release);
+  return true;
 }
 
-export function markRequestComplete(): void {
+/**
+ * Anchor the next request's spacing and release the next queued waiter. Pass the
+ * boolean returned by `throttleBeforeRequest`: only a call that actually acquired
+ * a slot may shift a release, otherwise a zero-delay request completing mid-flight
+ * could pop (and fire early) a *different* throttled request's release.
+ */
+export function markRequestComplete(acquired = true): void {
   lastRequestEndAt = Date.now();
-  releases.shift()?.();
+  if (acquired) releases.shift()?.();
 }

@@ -67,17 +67,35 @@ export function cleanEnhancedText(raw: string): string {
   // but only when real content follows it. Models commonly separate the preamble
   // from the real content with either a blank line OR just a single newline —
   // match either (`\n+`) rather than requiring a blank line specifically.
-  const preamble = text.match(/^(?:sure[,!. ]|certainly[,!. ]|here(?:'s| is| are)\b|improved\b)[^\n]*\n+([\s\S]+)$/i);
+  // NOTE: a bare `improved` opener is only treated as a preamble when its line
+  // ends in a colon ("Improved instruction:") — otherwise a real instruction that
+  // legitimately begins "Improved decision-making…" would have its first line eaten.
+  const preamble = text.match(
+    /^(?:sure[,!. ]|certainly[,!. ]|here(?:'s| is| are)\b|improved\b[^\n]*:)[^\n]*\n+([\s\S]+)$/i,
+  );
   if (preamble && preamble[1].trim()) text = preamble[1].trim();
 
-  // Unwrap symmetric surrounding quotes.
-  if (
-    (text.startsWith('"') && text.endsWith('"')) ||
-    (text.startsWith('“') && text.endsWith('”'))
-  ) {
-    text = text.slice(1, -1).trim();
-  }
+  // Unwrap a single enclosing quote pair, but not when the ends belong to
+  // different pairs (e.g. `"Alpha" and "Beta"` must survive intact).
+  text = unwrapSingleQuotePair(text);
 
+  return text;
+}
+
+/** Remove one pair of surrounding quotes only when it genuinely wraps the whole string. */
+function unwrapSingleQuotePair(text: string): string {
+  const pairs: [string, string][] = [
+    ['"', '"'],
+    ['“', '”'],
+  ];
+  for (const [open, close] of pairs) {
+    if (text.length >= open.length + close.length && text.startsWith(open) && text.endsWith(close)) {
+      const inner = text.slice(open.length, text.length - close.length);
+      // If the closing (or opening) quote appears inside, the ends aren't a
+      // single enclosing pair — leave the text untouched.
+      if (!inner.includes(open) && !inner.includes(close)) return inner.trim();
+    }
+  }
   return text;
 }
 

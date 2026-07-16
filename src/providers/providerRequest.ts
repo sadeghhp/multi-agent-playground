@@ -127,7 +127,7 @@ export async function providerRequest(
   const { signal, cleanup: signalCleanup } = mergeSignals(options.signal, timeoutController.signal);
 
   // Throttle before arming the idle timeout so delay wait does not consume timeoutMs.
-  await throttleBeforeRequest();
+  const throttled = await throttleBeforeRequest();
   try {
     armTimeout();
     const start = Date.now();
@@ -163,7 +163,7 @@ export async function providerRequest(
     }
     throw classifyThrown(err);
   } finally {
-    markRequestComplete();
+    markRequestComplete(throttled);
   }
 }
 

@@ -24,9 +24,23 @@ export interface MigrationResult {
   reason?: string;
 }
 
-export function migrateToCurrent(raw: unknown): MigrationResult {
+/**
+ * Which record type is being migrated. The version counter (SCHEMA_VERSION) is
+ * shared across Playground, SavedAgent and RunPreset, but their shapes are not —
+ * so any migration step that transforms shape (rather than just re-stamping the
+ * version) MUST gate on `kind`, or it will corrupt the record types it wasn't
+ * written for. Every step to date is a pure re-stamp (new fields carry zod
+ * defaults), which is type-agnostic; the `kind` switch is where the first real
+ * shape transform belongs.
+ */
+export type MigrationRecordKind = 'playground' | 'savedAgent' | 'runPreset';
+
+export function migrateToCurrent(
+  raw: unknown,
+  kind: MigrationRecordKind = 'playground',
+): MigrationResult {
   if (typeof raw !== 'object' || raw === null) {
-    return { ok: false, reason: 'Playground data is not an object.' };
+    return { ok: false, reason: `${kind} data is not an object.` };
   }
   const version = (raw as { schemaVersion?: unknown }).schemaVersion;
   if (typeof version !== 'number') {
@@ -40,9 +54,10 @@ export function migrateToCurrent(raw: unknown): MigrationResult {
   }
   let data = raw;
   if (version < 2) {
-    // v1 → v2: re-stamp the version. `providers` (if present) is left on the
-    // object so import can read it; the DB upgrade strips it from stored records
-    // and zod drops it when parsing against the provider-less Playground schema.
+    // v1 → v2: only the Playground carried embedded `providers`. Re-stamp; the
+    // `providers` field (if present) is left on the object so import can read it;
+    // the DB upgrade strips it from stored records and zod drops it on parse.
+    // SavedAgent/RunPreset never existed at v1, but re-stamp defensively.
     data = { ...(data as object), schemaVersion: 2 };
   }
   if ((data as { schemaVersion: number }).schemaVersion < 3) {

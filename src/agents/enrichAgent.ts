@@ -1,4 +1,4 @@
-import type { Agent, Provider, Skill } from '../domain/schema';
+import type { Agent, Provider } from '../domain/schema';
 import { newSkillId } from '../domain/ids';
 import { ProviderError, retryEligible } from '../providers/errors';
 import { sendChat } from '../providers/openaiAdapter';
@@ -6,9 +6,9 @@ import type { ChatMessage } from '../providers/types';
 import {
   personaFromDraft,
   resolvePersonaMode,
-  type GeneratedAgentDraft,
+  type EnrichAgentDraft,
 } from './generateAgent';
-import { parseGeneratedAgentDraftFromText } from './parseGeneratedAgentDraft';
+import { parseEnrichAgentDraftFromText } from './parseGeneratedAgentDraft';
 
 /**
  * Agent enricher. Takes an existing agent plus free-text "here's new
@@ -100,7 +100,7 @@ export interface EnrichAgentOptions {
 
 export interface EnrichAgentResult {
   ok: boolean;
-  draft?: GeneratedAgentDraft;
+  draft?: EnrichAgentDraft;
   model?: string;
   durationMs: number;
   errorKind?: string;
@@ -167,7 +167,7 @@ export async function enrichAgentDraft(
       };
     }
 
-    const parsed = parseGeneratedAgentDraftFromText(res.text);
+    const parsed = parseEnrichAgentDraftFromText(res.text);
     if (!parsed.ok) {
       if (parsed.failure === 'syntax') {
         const truncated = res.finishReason === 'length';
@@ -211,20 +211,7 @@ export async function enrichAgentDraft(
  * (id, libraryId, enabled) for skills the draft kept by name so existing
  * library links and toggles survive a re-enrichment.
  */
-export function enrichedDraftToAgentOverrides(agent: Agent, draft: GeneratedAgentDraft): Partial<Agent> {
-  const existingByName = new Map(agent.skills.map((s) => [s.name.trim().toLowerCase(), s]));
-  const skills: Skill[] = draft.skills.map((s) => {
-    const existing = existingByName.get(s.name.trim().toLowerCase());
-    return {
-      id: existing?.id ?? newSkillId(),
-      name: s.name,
-      description: s.description,
-      instruction: s.instruction,
-      enabled: existing?.enabled ?? true,
-      libraryId: existing?.libraryId,
-    };
-  });
-
+export function enrichedDraftToAgentOverrides(agent: Agent, draft: EnrichAgentDraft): Partial<Agent> {
   // Preserve existing digital-shadow mode when the model omits personaMode.
   const personaMode = resolvePersonaMode(draft, agent.personaMode);
   let persona: Agent['persona'];
@@ -238,16 +225,37 @@ export function enrichedDraftToAgentOverrides(agent: Agent, draft: GeneratedAgen
     persona = undefined;
   }
 
-  return {
+  // Enrich preserves anything the model didn't return: only fields present on
+  // the draft override the agent. `characteristics` merges key-by-key so a
+  // partial block leaves the untouched sliders alone; an omitted block leaves
+  // them all alone. `skills`/`language`/`description`/`colorCategory` apply only
+  // when the model actually supplied them.
+  const overrides: Partial<Agent> = {
     name: draft.name,
-    description: draft.description,
     role: draft.role,
     systemInstruction: draft.systemInstruction,
-    language: draft.language,
     personaMode,
     persona,
-    colorCategory: draft.colorCategory,
-    characteristics: { ...agent.characteristics, ...draft.characteristics },
-    skills,
   };
+  if (draft.description !== undefined) overrides.description = draft.description;
+  if (draft.language !== undefined) overrides.language = draft.language;
+  if (draft.colorCategory !== undefined) overrides.colorCategory = draft.colorCategory;
+  if (draft.characteristics !== undefined) {
+    overrides.characteristics = { ...agent.characteristics, ...draft.characteristics };
+  }
+  if (draft.skills !== undefined) {
+    const existingByName = new Map(agent.skills.map((s) => [s.name.trim().toLowerCase(), s]));
+    overrides.skills = draft.skills.map((s) => {
+      const existing = existingByName.get(s.name.trim().toLowerCase());
+      return {
+        id: existing?.id ?? newSkillId(),
+        name: s.name,
+        description: s.description,
+        instruction: s.instruction,
+        enabled: existing?.enabled ?? true,
+        libraryId: existing?.libraryId,
+      };
+    });
+  }
+  return overrides;
 }

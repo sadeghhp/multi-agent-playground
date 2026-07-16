@@ -321,8 +321,44 @@ describe('assembleMessages', () => {
     const messages = assembleMessages({ agent, conversation: defaultConversationSettings(), history });
     expect(messages[0].role).toBe('system');
     expect(messages.find((m) => m.content.includes('[B]: hello from B'))?.role).toBe('user');
-    expect(messages.find((m) => m.content.includes('[A]: my prior turn'))?.role).toBe('assistant');
+    // F11: the agent's OWN prior turn is an unprefixed assistant message, so the
+    // model isn't trained to echo a `[Name]:` prefix into its next reply.
+    const own = messages.find((m) => m.role === 'assistant');
+    expect(own?.content).toBe('my prior turn');
+    expect(messages.some((m) => m.content.includes('[A]:'))).toBe(false);
     expect(messages[messages.length - 1].role).toBe('user'); // the task turn
+  });
+
+  it('does not duplicate source output already present in the history block (F10)', () => {
+    const agent = createAgent({ name: 'Critic', systemInstruction: 'x' });
+    const incoming: Connection = { id: 'c', source: 'author', target: agent.id, enabled: true, type: 'review', priority: 0 };
+    const history = [msg('author', 'Author', 'The moon is made of cheese.', 1)];
+    const messages = assembleMessages({
+      agent,
+      conversation: defaultConversationSettings(),
+      history,
+      incoming,
+      sourceAgentName: 'Author',
+      sourceAgentId: 'author',
+      sourceOutput: 'The moon is made of cheese.',
+    });
+    const occurrences = messages.filter((m) => m.content.includes('The moon is made of cheese.')).length;
+    expect(occurrences).toBe(1);
+  });
+
+  it('still embeds source output when it has scrolled out of history (F10)', () => {
+    const agent = createAgent({ name: 'Critic', systemInstruction: 'x' });
+    const incoming: Connection = { id: 'c', source: 'author', target: agent.id, enabled: true, type: 'review', priority: 0 };
+    const messages = assembleMessages({
+      agent,
+      conversation: defaultConversationSettings(),
+      history: [msg('other', 'B', 'unrelated later chatter', 5)],
+      incoming,
+      sourceAgentName: 'Author',
+      sourceAgentId: 'author',
+      sourceOutput: 'The moon is made of cheese.',
+    });
+    expect(messages.some((m) => m.content.includes("Author's most recent response"))).toBe(true);
   });
 
   it('omits history when includeHistory is false', () => {
@@ -366,5 +402,47 @@ describe('boundHistory', () => {
     const bounded = boundHistory(transcript, 10, 2500);
     expect(bounded.length).toBeLessThanOrEqual(3);
     expect(bounded.length).toBeGreaterThan(0);
+  });
+
+  // F14: failed/empty turns must not consume window slots meant for real context.
+  it('does not count empty (failed) messages against the window', () => {
+    const transcript = [
+      msg('a', 'A', 'real one', 1),
+      { ...msg('a', 'A', '', 2), status: 'failed' as const },
+      { ...msg('a', 'A', '', 3), status: 'failed' as const },
+      msg('a', 'A', 'real two', 4),
+      msg('a', 'A', 'real three', 5),
+    ];
+    const bounded = boundHistory(transcript, 3);
+    expect(bounded.map((m) => m.content)).toEqual(['real one', 'real two', 'real three']);
+  });
+});
+
+describe('buildTaskPrompt user directive freshness (F13)', () => {
+  it('imposes a fresh directive as a hard instruction', () => {
+    const agent = createAgent({ name: 'A' });
+    const task = buildTaskPrompt({
+      agent,
+      conversation: { ...defaultConversationSettings(), subject: 'S' },
+      history: [],
+      pendingUserDirective: 'argue the other side',
+      userDirectiveIsFresh: true,
+    });
+    expect(task).toContain('you must address it directly');
+    expect(task).toContain('argue the other side');
+  });
+
+  it('downgrades a stale directive to context', () => {
+    const agent = createAgent({ name: 'A' });
+    const task = buildTaskPrompt({
+      agent,
+      conversation: { ...defaultConversationSettings(), subject: 'S' },
+      history: [],
+      pendingUserDirective: 'argue the other side',
+      userDirectiveIsFresh: false,
+    });
+    expect(task).not.toContain('you must address it directly');
+    expect(task).toContain('keep it in mind');
+    expect(task).toContain('argue the other side');
   });
 });

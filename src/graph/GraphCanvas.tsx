@@ -80,7 +80,12 @@ function CanvasInner() {
       const prevById = new Map(prev.map((n) => [n.id, n]));
       return desiredNodes.map((d) => {
         const existing = prevById.get(d.id);
-        return existing ? { ...existing, data: d.data } : d;
+        if (!existing) return d;
+        // Adopt the domain position for any non-drag reposition (undo/redo,
+        // auto-layout, re-import over the same id) while leaving an in-progress
+        // drag untouched, so the canvas can't fight the pointer.
+        const position = existing.dragging ? existing.position : d.position;
+        return { ...existing, data: d.data, position };
       });
     });
   }, [desiredNodes, setNodes]);

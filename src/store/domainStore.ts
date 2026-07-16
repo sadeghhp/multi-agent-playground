@@ -15,6 +15,7 @@ import { regenerateIds } from '../persistence/serialization';
 import { setSelectedPlaygroundId } from './prefs';
 import { useProviderStore } from './providerStore';
 import { useRunHistoryStore } from './runHistoryStore';
+import { useRuntimeStore } from './runtimeStore';
 
 /**
  * Persistent domain state (spec §16). Holds the active playground and every
@@ -79,6 +80,13 @@ interface DomainState {
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 const SAVE_DEBOUNCE_MS = 600;
+// During an active run the transcript grows by a message per turn, and each
+// autosave re-serializes the WHOLE playground (transcript included) — so a naive
+// per-turn save is O(N²) work over a long run. A coarser debounce while running
+// coalesces bursts of turns into far fewer full writes; the run is also snapshotted
+// independently by the run-history store, and a normal-cadence save lands once the
+// run settles (its final mutation reschedules at the shorter interval).
+const SAVE_DEBOUNCE_RUNNING_MS = 5_000;
 
 export const useDomainStore = create<DomainState>((set, get) => {
   /** Apply a mutation to the active playground, bump updatedAt, and schedule save. */
@@ -92,7 +100,10 @@ export const useDomainStore = create<DomainState>((set, get) => {
 
   function scheduleSave() {
     if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => void doSave(), SAVE_DEBOUNCE_MS);
+    const status = useRuntimeStore.getState().status;
+    const delay =
+      status === 'running' || status === 'paused' ? SAVE_DEBOUNCE_RUNNING_MS : SAVE_DEBOUNCE_MS;
+    saveTimer = setTimeout(() => void doSave(), delay);
   }
 
   /**

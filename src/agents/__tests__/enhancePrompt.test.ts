@@ -43,6 +43,23 @@ describe('cleanEnhancedText', () => {
     const clean = 'You are a critic. Challenge unsupported claims.';
     expect(cleanEnhancedText(clean)).toBe(clean);
   });
+
+  // F: a real first line starting "Improved…" must not be mistaken for a preamble.
+  it('does not strip a real first line beginning with "Improved"', () => {
+    const raw = 'Improved decision-making is the goal.\nAlways weigh trade-offs explicitly.';
+    expect(cleanEnhancedText(raw)).toBe(raw);
+  });
+
+  it('still strips a colon-terminated "Improved instruction:" preamble', () => {
+    const raw = 'Improved instruction:\nAnalyze methodically and cite evidence.';
+    expect(cleanEnhancedText(raw)).toBe('Analyze methodically and cite evidence.');
+  });
+
+  // F: only a single enclosing quote pair is unwrapped, not separate pairs.
+  it('does not unwrap when the ends belong to different quote pairs', () => {
+    const raw = '"Alpha" and "Beta" are both valid.';
+    expect(cleanEnhancedText(raw)).toBe(raw);
+  });
 });
 
 describe('enhanceSystemInstruction', () => {

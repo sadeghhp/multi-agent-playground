@@ -151,6 +151,9 @@ export const useUiStore = create<UiState>((set, get) => ({
       const existing = get().fallbackSuggest;
       if (existing) existing.resolve(null);
       if (signal?.aborted) {
+        // Clear any just-resolved modal so it doesn't linger rendered when we
+        // bail without opening a replacement.
+        if (existing) set({ fallbackSuggest: null });
         resolve(null);
         return;
       }
@@ -176,6 +179,7 @@ export const useUiStore = create<UiState>((set, get) => ({
       const existing = get().failureDecision;
       if (existing) existing.resolve('stop');
       if (signal?.aborted) {
+        if (existing) set({ failureDecision: null });
         resolve('stop');
         return;
       }

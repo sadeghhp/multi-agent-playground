@@ -9,6 +9,13 @@ describe('resolveApiBase', () => {
   it('keeps /v1 in base URL', () => {
     expect(resolveApiBase('https://api.example.com/v1/')).toBe('https://api.example.com/v1');
   });
+
+  // F9: a query string on the base URL (e.g. an api-version) must survive.
+  it('preserves a query string on a host-only base', () => {
+    expect(resolveApiBase('https://api.example.com?api-version=2024-02-01')).toBe(
+      'https://api.example.com/v1?api-version=2024-02-01',
+    );
+  });
 });
 
 describe('buildEndpoint', () => {
@@ -42,6 +49,13 @@ describe('buildEndpoint', () => {
     );
     expect(buildEndpoint('https://openrouter.ai/api/v1', '/v1/chat/completions')).toBe(
       'https://openrouter.ai/api/v1/chat/completions',
+    );
+  });
+
+  // F9: the path segment is inserted before the base's query, not after it.
+  it('places the path before a preserved query string', () => {
+    expect(buildEndpoint('https://host.example?api-version=2024-02-01', '')).toBe(
+      'https://host.example/v1/chat/completions?api-version=2024-02-01',
     );
   });
 });

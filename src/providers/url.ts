@@ -91,10 +91,12 @@ export function resolveApiBase(baseUrl: string): string {
   const normalized = baseUrl.trim();
   if (!normalized) return '';
   const url = new URL(normalized);
+  // Preserve any query string on the base URL — some gateways carry an
+  // api-version or key in the query, and dropping it silently breaks the call.
+  const query = url.search;
   const path = url.pathname.replace(/\/+$/, '');
-  if (!path || path === '/') return `${url.origin}/v1`;
-  if (path.endsWith('/v1')) return `${url.origin}${path}`;
-  return `${url.origin}${path}`;
+  if (!path || path === '/') return `${url.origin}/v1${query}`;
+  return `${url.origin}${path}${query}`;
 }
 
 /**
@@ -103,15 +105,20 @@ export function resolveApiBase(baseUrl: string): string {
  */
 export function buildEndpoint(baseUrl: string, path: string): string {
   const apiBase = resolveApiBase(baseUrl);
+  // Split off any query so the path segment is inserted before it, not after.
+  const qIdx = apiBase.indexOf('?');
+  const base = qIdx === -1 ? apiBase : apiBase.slice(0, qIdx);
+  const query = qIdx === -1 ? '' : apiBase.slice(qIdx);
+
   let segment = path.trim();
   if (!segment) segment = CHAT_COMPLETIONS_PATH;
   else if (!segment.startsWith('/')) segment = `/${segment}`;
 
-  if (apiBase.endsWith('/v1') && segment.startsWith('/v1/')) {
+  if (base.endsWith('/v1') && segment.startsWith('/v1/')) {
     segment = segment.slice(3);
-  } else if (apiBase.endsWith('/v1') && segment === '/v1') {
+  } else if (base.endsWith('/v1') && segment === '/v1') {
     segment = '';
   }
 
-  return `${apiBase}${segment}`;
+  return `${base}${segment}${query}`;
 }

@@ -224,6 +224,29 @@ describe('sendChat', () => {
     expect(body.stream).toBe(true);
   });
 
+  // F8: one SSE event whose JSON is split across multiple `data:` lines must be
+  // re-joined before parsing, not parsed line-by-line (which would drop it).
+  it('concatenates multi-line data: fields within a single SSE event', async () => {
+    const sse = [
+      'data: {"choices":[{"delta":\ndata: {"content":"hi there"}}]}\n\n',
+      'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+      'data: [DONE]\n\n',
+    ];
+    const fetchMock = vi.fn().mockResolvedValue(sseResponse(sse));
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = createProvider({ baseUrl: 'https://api.example.com', apiKey: 'k' });
+
+    const tokens: string[] = [];
+    const res = await sendChat(
+      provider,
+      { model: 'test-model', messages: [{ role: 'user', content: 'hi' }] },
+      { onToken: (c) => tokens.push(c) },
+    );
+
+    expect(res.text).toBe('hi there');
+    expect(tokens).toEqual(['hi there']);
+  });
+
   it('requests stream_options.include_usage for OpenRouter / OpenAI hosts only', async () => {
     const makeSse = () =>
       sseResponse([

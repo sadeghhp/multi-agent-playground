@@ -17,8 +17,38 @@ import {
   ModelPrice as ModelPriceSchema,
   UsageEntry as UsageEntrySchema,
 } from '../domain/usage';
+import type { ZodType } from 'zod';
 import { migrateToCurrent } from './migrate';
 import { clearCredential, loadCredential, saveCredential } from './credentialStore';
+
+/**
+ * Optional listener notified whenever a stored record is dropped on read because
+ * it failed validation, so the UI can surface it (App wires this to a toast)
+ * instead of the drop being visible only in the console. Kept as a plain
+ * callback to avoid a db → store import cycle.
+ */
+let recordDropListener: ((detail: string) => void) | null = null;
+export function setRecordDropListener(listener: ((detail: string) => void) | null): void {
+  recordDropListener = listener;
+}
+function reportDroppedRecord(label: string, detail: string): void {
+  console.warn(`Skipping ${label}:`, detail);
+  recordDropListener?.(`A stored ${label} could not be loaded and was skipped.`);
+}
+
+/**
+ * Validate a domain object before it is written, so corruption is caught where
+ * it is introduced rather than silently dropped on the next load. Returns the
+ * parsed (normalized) value to persist; throws with a precise path on failure.
+ */
+function assertValidForSave<T>(schema: ZodType<T>, value: unknown, label: string): T {
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) {
+    const detail = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
+    throw new Error(`Refusing to persist invalid ${label}: ${detail}`);
+  }
+  return parsed.data;
+}
 
 /**
  * IndexedDB persistence (spec §15.1). Object stores:
@@ -67,13 +97,26 @@ function getDb(): Promise<IDBPDatabase> {
         if (!db.objectStoreNames.contains(RUN_PRESET_STORE)) {
           db.createObjectStore(RUN_PRESET_STORE, { keyPath: 'id' });
         }
+        // Create stores if absent, and (crucially) create indexes based on
+        // whether they already exist — NOT only when the store is first created.
+        // An index added to an existing store in a later version must backfill on
+        // upgrade, otherwise index reads (e.g. listRuns) would throw NotFoundError
+        // on databases that predate the index.
         if (!db.objectStoreNames.contains(CONVERSATION_RUN_STORE)) {
-          const runStore = db.createObjectStore(CONVERSATION_RUN_STORE, { keyPath: 'id' });
+          db.createObjectStore(CONVERSATION_RUN_STORE, { keyPath: 'id' });
+        }
+        const runStore = tx.objectStore(CONVERSATION_RUN_STORE);
+        if (!runStore.indexNames.contains('by-playground')) {
           runStore.createIndex('by-playground', 'playgroundId');
+        }
+        if (!runStore.indexNames.contains('by-playground-version')) {
           runStore.createIndex('by-playground-version', ['playgroundId', 'version']);
         }
         if (!db.objectStoreNames.contains(USAGE_LEDGER_STORE)) {
-          const usageStore = db.createObjectStore(USAGE_LEDGER_STORE, { keyPath: 'id' });
+          db.createObjectStore(USAGE_LEDGER_STORE, { keyPath: 'id' });
+        }
+        const usageStore = tx.objectStore(USAGE_LEDGER_STORE);
+        if (!usageStore.indexNames.contains('by-at')) {
           usageStore.createIndex('by-at', 'at');
         }
         if (!db.objectStoreNames.contains(MODEL_PRICES_STORE)) {
@@ -131,17 +174,30 @@ async function hoistEmbeddedProviders(
   const pgStore = tx.objectStore(STORE);
   const provStore = tx.objectStore(PROVIDER_STORE);
   const records = (await pgStore.getAll()) as unknown[];
-  const seen = new Set<string>();
+  const seen = new Map<string, string>();
   for (const rec of records) {
     if (typeof rec !== 'object' || rec === null) continue;
     const record = rec as { id?: unknown; providers?: unknown };
     const providers = Array.isArray(record.providers) ? record.providers : [];
     for (const p of providers) {
       const pid = (p as { id?: unknown })?.id;
-      if (typeof pid !== 'string' || seen.has(pid)) continue;
-      seen.add(pid);
+      if (typeof pid !== 'string') continue;
       // Stored records never carried apiKey, but drop it defensively.
       const { apiKey: _drop, ...rest } = p as Record<string, unknown>;
+      const fingerprint = JSON.stringify(rest);
+      const existing = seen.get(pid);
+      if (existing !== undefined) {
+        // First-writer-wins across playgrounds. In v1 the same id could have
+        // diverged if the user edited it in one playground only — surface that
+        // rather than silently discarding the later config.
+        if (existing !== fingerprint) {
+          console.warn(
+            `Provider "${pid}" was embedded with differing config in multiple playgrounds; keeping the first and discarding the rest.`,
+          );
+        }
+        continue;
+      }
+      seen.set(pid, fingerprint);
       await provStore.put(rest);
     }
     const { providers: _providers, ...withoutProviders } = record as Record<string, unknown>;
@@ -155,7 +211,7 @@ async function hoistEmbeddedProviders(
 
 export async function savePlayground(pg: Playground): Promise<void> {
   const db = await getDb();
-  await db.put(STORE, pg);
+  await db.put(STORE, assertValidForSave(PlaygroundSchema, pg, 'playground'));
 }
 
 export async function loadPlayground(id: string): Promise<Playground | undefined> {
@@ -192,7 +248,7 @@ export async function deletePlayground(id: string): Promise<void> {
 
 export async function saveLibraryAgent(saved: SavedAgent): Promise<void> {
   const db = await getDb();
-  await db.put(LIBRARY_STORE, saved);
+  await db.put(LIBRARY_STORE, assertValidForSave(SavedAgentSchema, saved, 'library agent'));
 }
 
 export async function loadAllLibraryAgents(): Promise<SavedAgent[]> {
@@ -203,16 +259,16 @@ export async function loadAllLibraryAgents(): Promise<SavedAgent[]> {
     // Route through the same version migration as playgrounds first — a
     // library agent saved under an older schemaVersion is stale, not
     // corrupted, and must not be silently dropped on the next version bump.
-    const migrated = migrateToCurrent(raw);
+    const migrated = migrateToCurrent(raw, 'savedAgent');
     if (!migrated.ok) {
-      console.warn('Skipping unreadable library agent record:', migrated.reason);
+      reportDroppedRecord('library agent record', migrated.reason ?? 'unreadable');
       continue;
     }
     // Tolerate corruption exactly like parseStored: skip a bad record, never
     // let it crash hydration of the whole library.
     const parsed = SavedAgentSchema.safeParse(migrated.data);
     if (parsed.success) result.push(parsed.data);
-    else console.warn('Skipping corrupted library agent record:', parsed.error.issues[0]?.message);
+    else reportDroppedRecord('library agent record', parsed.error.issues[0]?.message ?? 'invalid');
   }
   return result;
 }
@@ -229,7 +285,7 @@ export async function deleteLibraryAgent(id: string): Promise<void> {
 
 export async function saveRunPreset(preset: RunPreset): Promise<void> {
   const db = await getDb();
-  await db.put(RUN_PRESET_STORE, preset);
+  await db.put(RUN_PRESET_STORE, assertValidForSave(RunPresetSchema, preset, 'run preset'));
 }
 
 export async function loadAllRunPresets(): Promise<RunPreset[]> {
@@ -237,14 +293,14 @@ export async function loadAllRunPresets(): Promise<RunPreset[]> {
   const all = await db.getAll(RUN_PRESET_STORE);
   const result: RunPreset[] = [];
   for (const raw of all) {
-    const migrated = migrateToCurrent(raw);
+    const migrated = migrateToCurrent(raw, 'runPreset');
     if (!migrated.ok) {
-      console.warn('Skipping unreadable run preset record:', migrated.reason);
+      reportDroppedRecord('run preset record', migrated.reason ?? 'unreadable');
       continue;
     }
     const parsed = RunPresetSchema.safeParse(migrated.data);
     if (parsed.success) result.push(parsed.data);
-    else console.warn('Skipping corrupted run preset record:', parsed.error.issues[0]?.message);
+    else reportDroppedRecord('run preset record', parsed.error.issues[0]?.message ?? 'invalid');
   }
   return result;
 }
@@ -261,7 +317,7 @@ export async function deleteRunPreset(id: string): Promise<void> {
 function parseConversationRun(raw: unknown): ConversationRun | undefined {
   const parsed = ConversationRunSchema.safeParse(raw);
   if (!parsed.success) {
-    console.warn('Skipping corrupted conversation run record:', parsed.error.issues[0]?.message);
+    reportDroppedRecord('conversation run record', parsed.error.issues[0]?.message ?? 'invalid');
     return undefined;
   }
   return parsed.data;
@@ -269,7 +325,7 @@ function parseConversationRun(raw: unknown): ConversationRun | undefined {
 
 export async function saveRun(run: ConversationRun): Promise<void> {
   const db = await getDb();
-  await db.put(CONVERSATION_RUN_STORE, run);
+  await db.put(CONVERSATION_RUN_STORE, assertValidForSave(ConversationRunSchema, run, 'conversation run'));
 }
 
 export async function getRun(id: string): Promise<ConversationRun | undefined> {
@@ -299,10 +355,14 @@ export async function deleteRun(id: string): Promise<void> {
 
 export async function deleteRunsForPlayground(playgroundId: string): Promise<void> {
   const db = await getDb();
-  const runs = await listRuns(playgroundId);
+  // Delete over raw index keys, not parsed records — a corrupt run that
+  // parseConversationRun would skip must still be removed, or it lingers forever.
   const tx = db.transaction(CONVERSATION_RUN_STORE, 'readwrite');
-  for (const run of runs) {
-    await tx.store.delete(run.id);
+  const index = tx.store.index('by-playground');
+  let cursor = await index.openKeyCursor(IDBKeyRange.only(playgroundId));
+  while (cursor) {
+    await tx.store.delete(cursor.primaryKey);
+    cursor = await cursor.continue();
   }
   await tx.done;
 }
@@ -312,14 +372,14 @@ export async function deleteRunsForPlayground(playgroundId: string): Promise<voi
  * A single bad record must not crash the whole app — it's skipped and reported.
  */
 function parseStored(raw: unknown): Playground | undefined {
-  const migrated = migrateToCurrent(raw);
+  const migrated = migrateToCurrent(raw, 'playground');
   if (!migrated.ok) {
-    console.warn('Skipping unreadable playground record:', migrated.reason);
+    reportDroppedRecord('playground record', migrated.reason ?? 'unreadable');
     return undefined;
   }
   const parsed = PlaygroundSchema.safeParse(migrated.data);
   if (!parsed.success) {
-    console.warn('Skipping corrupted playground record:', parsed.error.issues[0]?.message);
+    reportDroppedRecord('playground record', parsed.error.issues[0]?.message ?? 'invalid');
     return undefined;
   }
   return parsed.data;
@@ -346,9 +406,15 @@ export async function saveProvider(p: Provider): Promise<void> {
   // Write the IDB record first — only save the credential once that succeeds,
   // so a failing IDB write can never leave a credential stored for a provider
   // record that was never actually persisted.
-  await db.put(PROVIDER_STORE, stripApiKey(p));
-  if (p.apiKey !== undefined) {
-    saveCredential(p.id, p.apiKey, p.credentialStorage);
+  const record = assertValidForSave(ProviderSchema, stripApiKey(p), 'provider');
+  await db.put(PROVIDER_STORE, record);
+  // Route the key to the store the provider's credentialStorage selects. When the
+  // caller supplies an explicit apiKey use it; otherwise relocate any existing
+  // key, so a storage-mode change (e.g. local→session) that omits the key can't
+  // leave a stale copy behind in the other Web Storage backend.
+  const key = p.apiKey !== undefined ? p.apiKey : loadCredential(p.id);
+  if (key !== undefined) {
+    saveCredential(p.id, key, p.credentialStorage);
   }
 }
 
@@ -359,7 +425,7 @@ export async function loadAllProviders(): Promise<Provider[]> {
   for (const raw of all) {
     const parsed = ProviderSchema.safeParse(raw);
     if (!parsed.success) {
-      console.warn('Skipping corrupted provider record:', parsed.error.issues[0]?.message);
+      reportDroppedRecord('provider record', parsed.error.issues[0]?.message ?? 'invalid');
       continue;
     }
     result.push(rehydrateProvider(parsed.data));
@@ -382,7 +448,7 @@ export async function deleteProvider(id: string): Promise<void> {
 
 export async function saveUsageEntry(entry: UsageEntry): Promise<void> {
   const db = await getDb();
-  await db.put(USAGE_LEDGER_STORE, entry);
+  await db.put(USAGE_LEDGER_STORE, assertValidForSave(UsageEntrySchema, entry, 'usage entry'));
 }
 
 export async function loadAllUsageEntries(): Promise<UsageEntry[]> {
@@ -392,7 +458,7 @@ export async function loadAllUsageEntries(): Promise<UsageEntry[]> {
   for (const raw of all) {
     const parsed = UsageEntrySchema.safeParse(raw);
     if (parsed.success) result.push(parsed.data);
-    else console.warn('Skipping corrupted usage entry:', parsed.error.issues[0]?.message);
+    else reportDroppedRecord('usage entry', parsed.error.issues[0]?.message ?? 'invalid');
   }
   result.sort((a, b) => a.at - b.at);
   return result;
@@ -405,17 +471,21 @@ export async function clearUsageLedger(): Promise<void> {
 
 export async function deleteUsageSince(sinceMs: number): Promise<void> {
   const db = await getDb();
-  const all = await loadAllUsageEntries();
+  // Delete over the raw `by-at` index range, not parsed records, so a corrupt
+  // entry that loadAllUsageEntries would skip is still removed.
   const tx = db.transaction(USAGE_LEDGER_STORE, 'readwrite');
-  for (const e of all) {
-    if (e.at >= sinceMs) await tx.store.delete(e.id);
+  const index = tx.store.index('by-at');
+  let cursor = await index.openKeyCursor(IDBKeyRange.lowerBound(sinceMs));
+  while (cursor) {
+    await tx.store.delete(cursor.primaryKey);
+    cursor = await cursor.continue();
   }
   await tx.done;
 }
 
 export async function saveModelPrice(price: ModelPrice): Promise<void> {
   const db = await getDb();
-  await db.put(MODEL_PRICES_STORE, price);
+  await db.put(MODEL_PRICES_STORE, assertValidForSave(ModelPriceSchema, price, 'model price'));
 }
 
 export async function loadAllModelPrices(): Promise<ModelPrice[]> {
@@ -425,7 +495,7 @@ export async function loadAllModelPrices(): Promise<ModelPrice[]> {
   for (const raw of all) {
     const parsed = ModelPriceSchema.safeParse(raw);
     if (parsed.success) result.push(parsed.data);
-    else console.warn('Skipping corrupted model price:', parsed.error.issues[0]?.message);
+    else reportDroppedRecord('model price', parsed.error.issues[0]?.message ?? 'invalid');
   }
   return result;
 }

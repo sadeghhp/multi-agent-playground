@@ -13,9 +13,9 @@ export const UsageEntry = z.object({
   providerId: z.string(),
   providerName: z.string().default(''),
   model: z.string().default(''),
-  promptTokens: z.number().nonnegative().default(0),
-  completionTokens: z.number().nonnegative().default(0),
-  totalTokens: z.number().nonnegative().default(0),
+  promptTokens: z.number().int().nonnegative().default(0),
+  completionTokens: z.number().int().nonnegative().default(0),
+  totalTokens: z.number().int().nonnegative().default(0),
   /** USD estimate from the price table at record time; 0 when unknown. */
   estimatedCost: z.number().nonnegative().default(0),
   /** True when token counts were estimated (e.g. stream without usage). */

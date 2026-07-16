@@ -138,10 +138,17 @@ export function duplicateAgent(agent: Agent): Agent {
     name: nextCopyName(agent.name),
     position: { x: agent.position.x + 48, y: agent.position.y + 48 },
     characteristics: { ...agent.characteristics },
-    llm: { ...agent.llm },
+    // Deep-clone every nested object/array so the copy and original never alias.
+    persona: agent.persona ? { ...agent.persona } : undefined,
+    llm: cloneLlmConfig(agent.llm),
     runtime: { ...agent.runtime },
     skills: agent.skills.map((s) => ({ ...s, id: newSkillId() })),
   };
+}
+
+/** Clone an LlmConfig including its optional array field so edits never alias. */
+function cloneLlmConfig(llm: LlmConfig): LlmConfig {
+  return { ...llm, ...(llm.stopSequences ? { stopSequences: [...llm.stopSequences] } : {}) };
 }
 
 /**
@@ -177,7 +184,8 @@ export function instantiateFromLibrary(
     // Cloned, not shared — this instance and the stored library template (or
     // any other instance created from it) must never alias the same object.
     characteristics: { ...saved.agent.characteristics },
-    llm: { ...saved.agent.llm },
+    persona: saved.agent.persona ? { ...saved.agent.persona } : undefined,
+    llm: cloneLlmConfig(saved.agent.llm),
     runtime: { ...saved.agent.runtime },
     skills: saved.agent.skills.map((s) => ({ ...s, id: newSkillId() })),
   };

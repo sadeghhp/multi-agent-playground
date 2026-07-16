@@ -105,16 +105,27 @@ export function normalizeGeneratedAgentDraft(raw: unknown): unknown {
   }
 
   if (Array.isArray(out.skills)) {
-    out.skills = out.skills.map((skill) => {
-      const s = coerceRecord(skill);
-      if (!s) return skill;
-      return {
-        ...s,
-        name: coerceString(s.name),
-        description: coerceString(s.description),
-        instruction: coerceString(s.instruction),
-      };
-    });
+    out.skills = out.skills
+      .map((skill) => {
+        const s = coerceRecord(skill);
+        if (!s) return undefined; // bare string / non-object skill
+        return {
+          ...s,
+          name: coerceString(s.name),
+          description: coerceString(s.description),
+          instruction: coerceString(s.instruction),
+        };
+      })
+      // Drop entries that can't satisfy the schema (name + instruction required),
+      // so one malformed skill doesn't fail the entire generate/enrich draft.
+      .filter(
+        (s) =>
+          !!s &&
+          typeof s.name === 'string' &&
+          s.name.trim() !== '' &&
+          typeof s.instruction === 'string' &&
+          s.instruction.trim() !== '',
+      );
   }
 
   return out;

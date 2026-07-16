@@ -1,4 +1,4 @@
-import { type CSSProperties, useState } from 'react';
+import { type CSSProperties, memo, useMemo, useState } from 'react';
 import type { TranscriptMessage } from '../../domain/schema';
 import { dirForLanguage } from '../../domain/language';
 import { extractInlineThinking } from '../../providers/openaiAdapter';
@@ -14,7 +14,11 @@ import styles from './Transcript.module.css';
  * Markdown — rehype-sanitize strips any HTML/script so provider output can never
  * inject markup (spec §21).
  */
-export function Message({ msg, color }: { msg: TranscriptMessage; color?: string }) {
+// Memoized: a committed transcript message never changes, and its snapshot
+// selector is keyed by msg.id, so during an active stream (which re-renders the
+// parent BottomPanel on every token) unaffected messages skip re-rendering
+// instead of re-parsing their Markdown and inline-thinking on each token.
+export const Message = memo(function Message({ msg, color }: { msg: TranscriptMessage; color?: string }) {
   const failed = msg.status === 'failed';
   const [expanded, setExpanded] = useState(true);
   const [showRequest, setShowRequest] = useState(failed);
@@ -24,7 +28,7 @@ export function Message({ msg, color }: { msg: TranscriptMessage; color?: string
 
   // Safety net for older turns that stored inline think tags in `content`
   // before extraction handled Qwen's closer-only form.
-  const split = extractInlineThinking(msg.content);
+  const split = useMemo(() => extractInlineThinking(msg.content), [msg.content]);
   const visibleContent = split.text;
   const reasoning = [msg.reasoning, split.reasoning].filter(Boolean).join('\n\n') || undefined;
 
@@ -177,4 +181,4 @@ export function Message({ msg, color }: { msg: TranscriptMessage; color?: string
       )}
     </div>
   );
-}
+});

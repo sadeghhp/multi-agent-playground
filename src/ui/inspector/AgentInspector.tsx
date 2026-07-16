@@ -12,8 +12,8 @@ import { defaultPersonaConfig } from '../../domain/persona';
 import { assembleMessages, boundHistory, buildSystemPrompt, buildTaskPrompt, estimateTokens } from '../../agents/promptAssembly';
 import { enhanceSystemInstruction, type EnhancePromptResult } from '../../agents/enhancePrompt';
 import { enrichAgentDraft, enrichedDraftToAgentOverrides, type EnrichAgentResult } from '../../agents/enrichAgent';
-import type { GeneratedAgentDraft } from '../../agents/generateAgent';
-import { parseGeneratedAgentDraftFromText } from '../../agents/parseGeneratedAgentDraft';
+import type { EnrichAgentDraft } from '../../agents/generateAgent';
+import { parseEnrichAgentDraftFromText } from '../../agents/parseGeneratedAgentDraft';
 import { exportSkillSet, importSkillSet } from '../../persistence/skillSets';
 import { downloadJson } from '../fileDownload';
 import { validateForRun } from '../../orchestrator/validate';
@@ -97,7 +97,7 @@ export function AgentInspector({ agent }: { agent: Agent }) {
   // (role, instruction, characteristics, skills) around it.
   const [enriching, setEnriching] = useState(false);
   const [enrichInfo, setEnrichInfo] = useState('');
-  const [enrichProposal, setEnrichProposal] = useState<GeneratedAgentDraft | null>(null);
+  const [enrichProposal, setEnrichProposal] = useState<EnrichAgentDraft | null>(null);
   const [enrichError, setEnrichError] = useState<EnrichAgentResult | null>(null);
   const [enrichShowRaw, setEnrichShowRaw] = useState(false);
   const [enrichRecoveryError, setEnrichRecoveryError] = useState<string | null>(null);
@@ -126,7 +126,7 @@ export function AgentInspector({ agent }: { agent: Agent }) {
   function handleRecoverEnrichDraft() {
     if (!enrichError?.rawText) return;
     setEnrichRecoveryError(null);
-    const recovered = parseGeneratedAgentDraftFromText(enrichError.rawText);
+    const recovered = parseEnrichAgentDraftFromText(enrichError.rawText);
     if (recovered.ok) {
       setEnrichProposal(recovered.draft);
       setEnrichError(null);
@@ -146,20 +146,28 @@ export function AgentInspector({ agent }: { agent: Agent }) {
     setEnrichInfo('');
   }
 
-  function formatEnrichPreview(draft: GeneratedAgentDraft): string {
+  function formatEnrichPreview(draft: EnrichAgentDraft): string {
+    // Enrich preserves omitted fields; reflect that in the preview instead of
+    // implying a reset. Fall back to the current agent's value where the draft
+    // left a field out.
+    const personaMode = draft.personaMode ?? agent.personaMode;
     const lines: string[] = [
       `Name: ${draft.name}`,
       `Role: ${draft.role}`,
-      `Persona: ${draft.personaMode}`,
+      `Persona: ${personaMode}`,
     ];
-    if (draft.personaMode === 'digital-shadow' && draft.persona?.realName) {
+    if (personaMode === 'digital-shadow' && draft.persona?.realName) {
       lines.push(`Shadow of: ${draft.persona.realName}`);
     }
     if (draft.description) lines.push(`Description: ${draft.description}`);
     lines.push('', 'System instruction:', draft.systemInstruction);
-    lines.push('', `Skills (${draft.skills.length}):`);
-    if (draft.skills.length === 0) lines.push('(none)');
-    for (const s of draft.skills) lines.push(`- ${s.name}${s.description ? `: ${s.description}` : ''}`);
+    if (draft.skills === undefined) {
+      lines.push('', 'Skills: (unchanged)');
+    } else {
+      lines.push('', `Skills (${draft.skills.length}):`);
+      if (draft.skills.length === 0) lines.push('(none)');
+      for (const s of draft.skills) lines.push(`- ${s.name}${s.description ? `: ${s.description}` : ''}`);
+    }
     return lines.join('\n');
   }
 

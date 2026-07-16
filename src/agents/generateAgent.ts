@@ -65,6 +65,35 @@ export const GeneratedAgentDraft = z.object({
 });
 export type GeneratedAgentDraft = z.infer<typeof GeneratedAgentDraft>;
 
+/**
+ * Enrich variant of the draft contract. Enrichment revises an EXISTING agent, so
+ * a field the model omits must mean "leave it unchanged" — not "reset to the
+ * default". The create-path defaults (language 'en', all characteristics 50,
+ * colorCategory 'blue', empty description/skills) would silently wipe tuned
+ * values on any partial model reply, so here those fields are optional with no
+ * default and the caller (enrichedDraftToAgentOverrides) applies them only when
+ * present. `personaMode`/`persona` are already optional on the base schema for
+ * the same reason. Required identity fields (name/role/systemInstruction) stay
+ * required so an empty/garbage reply is still rejected.
+ */
+export const EnrichAgentDraft = GeneratedAgentDraft.extend({
+  description: z.string().max(300).optional(),
+  language: z.enum(['en', 'fa', 'fr']).optional(),
+  colorCategory: ColorCategory.optional(),
+  characteristics: z
+    .object({
+      tone: z.string().max(40).optional(),
+      verbosity: z.number().min(0).max(100).optional(),
+      creativity: z.number().min(0).max(100).optional(),
+      assertiveness: z.number().min(0).max(100).optional(),
+      skepticism: z.number().min(0).max(100).optional(),
+      cooperation: z.number().min(0).max(100).optional(),
+    })
+    .optional(),
+  skills: z.array(GeneratedSkill).max(6).optional(),
+});
+export type EnrichAgentDraft = z.infer<typeof EnrichAgentDraft>;
+
 const GENERATE_SYSTEM_PROMPT = [
   'You are an agent designer. You turn a short natural-language description into',
   'a single AI agent configuration for a multi-agent conversation tool.',
@@ -336,7 +365,7 @@ export async function generateAgentDraft(
  * Enrich uses a separate path that can preserve the previous agent's mode.
  */
 export function resolvePersonaMode(
-  draft: GeneratedAgentDraft,
+  draft: Pick<GeneratedAgentDraft, 'personaMode'>,
   fallback: Agent['personaMode'] = 'role',
 ): Agent['personaMode'] {
   return draft.personaMode ?? fallback;
@@ -344,7 +373,7 @@ export function resolvePersonaMode(
 
 /** Map draft persona fields onto Agent.persona when in digital-shadow mode. */
 export function personaFromDraft(
-  draft: GeneratedAgentDraft,
+  draft: Pick<GeneratedAgentDraft, 'persona' | 'name'>,
   mode: Agent['personaMode'],
 ): PersonaConfig | undefined {
   if (mode !== 'digital-shadow') return undefined;

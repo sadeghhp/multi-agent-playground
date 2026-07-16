@@ -133,4 +133,20 @@ describe('normalizeGeneratedAgentDraft', () => {
     });
     expect(GeneratedAgentDraft.safeParse(normalized).success).toBe(false);
   });
+
+  // F: one malformed skill shouldn't sink the whole draft — drop it, keep the rest.
+  it('drops invalid skill entries instead of failing the whole draft', () => {
+    const normalized = normalizeGeneratedAgentDraft({
+      ...BASE_DRAFT,
+      skills: [
+        { name: 'good', description: 'ok', instruction: 'Do the thing.' },
+        'a bare string skill',
+        { name: '', instruction: 'no name' },
+        { name: 'no-instruction' },
+      ],
+    }) as Record<string, unknown>;
+    expect(normalized.skills).toHaveLength(1);
+    expect((normalized.skills as Array<{ name: string }>)[0].name).toBe('good');
+    expect(GeneratedAgentDraft.safeParse(normalized).success).toBe(true);
+  });
 });

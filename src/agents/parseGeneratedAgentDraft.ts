@@ -1,12 +1,15 @@
+import { z } from 'zod';
 import {
   GeneratedAgentDraft,
+  EnrichAgentDraft,
   parseJsonObject,
   type GeneratedAgentDraft as Draft,
+  type EnrichAgentDraft as EnrichDraft,
 } from './generateAgent';
 import { normalizeGeneratedAgentDraft } from './normalizeGeneratedAgentDraft';
 
-export type ParseGeneratedAgentDraftResult =
-  | { ok: true; draft: Draft }
+export type ParseDraftResult<T> =
+  | { ok: true; draft: T }
   | {
       ok: false;
       errorKind: 'invalid-json';
@@ -16,11 +19,18 @@ export type ParseGeneratedAgentDraftResult =
       errorDetail?: string;
     };
 
+/** Back-compat alias for the generate-path result type. */
+export type ParseGeneratedAgentDraftResult = ParseDraftResult<Draft>;
+
 /**
- * Shared LLM-boundary parse: extract JSON → coerce known shape drift → Zod validate.
- * Used by generate, enrich, and UI "Recover draft".
+ * Shared LLM-boundary parse: extract JSON → coerce known shape drift → Zod validate
+ * against the given schema. Parameterized by schema so the create path enforces
+ * full defaults while the enrich path preserves omitted fields.
  */
-export function parseGeneratedAgentDraftFromText(rawText: string): ParseGeneratedAgentDraftResult {
+function parseDraftWithSchema<S extends z.ZodTypeAny>(
+  rawText: string,
+  schema: S,
+): ParseDraftResult<z.infer<S>> {
   let parsed: unknown;
   try {
     parsed = parseJsonObject(rawText);
@@ -33,7 +43,7 @@ export function parseGeneratedAgentDraftFromText(rawText: string): ParseGenerate
     };
   }
 
-  const result = GeneratedAgentDraft.safeParse(normalizeGeneratedAgentDraft(parsed));
+  const result = schema.safeParse(normalizeGeneratedAgentDraft(parsed));
   if (!result.success) {
     return {
       ok: false,
@@ -45,4 +55,20 @@ export function parseGeneratedAgentDraftFromText(rawText: string): ParseGenerate
   }
 
   return { ok: true, draft: result.data };
+}
+
+/**
+ * Parse a full agent draft (create / "Recover draft"): omitted optional fields
+ * are filled with their create-path defaults.
+ */
+export function parseGeneratedAgentDraftFromText(rawText: string): ParseDraftResult<Draft> {
+  return parseDraftWithSchema(rawText, GeneratedAgentDraft);
+}
+
+/**
+ * Parse an enrichment draft: omitted fields stay omitted (undefined) so the
+ * caller preserves the existing agent's values instead of resetting them.
+ */
+export function parseEnrichAgentDraftFromText(rawText: string): ParseDraftResult<EnrichDraft> {
+  return parseDraftWithSchema(rawText, EnrichAgentDraft);
 }

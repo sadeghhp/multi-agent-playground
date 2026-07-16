@@ -307,29 +307,55 @@ async function consumeStream(
     if (json.usage) usage = extractUsage(json);
   };
 
+  // Accumulate the `data:` field(s) of one SSE event; the event dispatches at
+  // its terminating blank line. Per the SSE spec, multiple `data:` lines in a
+  // single event are concatenated with newlines — a provider that splits one
+  // JSON object across lines would otherwise yield parse failures and lost tokens.
+  let dataLines: string[] = [];
+  const dispatchEvent = () => {
+    if (dataLines.length === 0) return;
+    const payload = dataLines.join('\n');
+    dataLines = [];
+    handleData(payload);
+  };
   const drainLines = () => {
     let idx: number;
     while ((idx = buffer.indexOf('\n')) !== -1) {
       const line = buffer.slice(0, idx).replace(/\r$/, '');
       buffer = buffer.slice(idx + 1);
-      if (line.startsWith('data:')) handleData(line.slice(5).trim());
+      if (line === '') {
+        dispatchEvent(); // blank line = event boundary
+      } else if (line.startsWith('data:')) {
+        // Strip one optional leading space after the colon (SSE spec).
+        dataLines.push(line.slice(5).replace(/^ /, ''));
+      }
+      // event:/id:/retry:/`:`-comment lines carry no chat payload — ignore.
     }
   };
 
-  for (;;) {
-    const { done, value } = await reader.read();
-    // Each chunk received is activity — a connection that keeps sending data
-    // (even keep-alives) must not be killed by the idle timeout, but one that
-    // goes silent mid-stream still should be.
-    resetTimeout();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      // Each chunk received is activity — a connection that keeps sending data
+      // (even keep-alives) must not be killed by the idle timeout, but one that
+      // goes silent mid-stream still should be.
+      resetTimeout();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      drainLines();
+    }
+    buffer += decoder.decode();
     drainLines();
+    // Flush a trailing event with no terminating blank line.
+    const tail = buffer.replace(/\r$/, '');
+    if (tail.startsWith('data:')) dataLines.push(tail.slice(5).replace(/^ /, ''));
+    dispatchEvent();
+  } finally {
+    // Release the stream on every exit path. An in-band error thrown by
+    // handleData (or a throwing token callback) must not leave the reader
+    // locked and the underlying connection open until GC.
+    reader.cancel().catch(() => {});
   }
-  buffer += decoder.decode();
-  drainLines();
-  const tail = buffer.trim();
-  if (tail.startsWith('data:')) handleData(tail.slice(5).trim());
 
   return { text, reasoning, finishReason, model, usage };
 }
@@ -383,6 +409,11 @@ export async function sendChat(
     try {
       streamed = await consumeStream(response, options.onToken, resetTimeout, options.onReasoningToken);
     } catch (err) {
+      // User intent wins the race: a Stop that lands at the same time as the
+      // idle timeout is reported as 'aborted' (matches providerRequest ordering).
+      if (options.signal?.aborted) {
+        throw new ProviderError('aborted', summaryFor('aborted'));
+      }
       // The idle timeout aborts the same signal that fed the original fetch —
       // classify a mid-stream stall the same way providerRequest classifies a
       // time-to-first-byte timeout, instead of surfacing an opaque abort error.
@@ -391,10 +422,10 @@ export async function sendChat(
           detail: 'The connection stalled mid-response (no data received before the timeout).',
         });
       }
-      if (options.signal?.aborted) {
-        throw new ProviderError('aborted', summaryFor('aborted'));
-      }
-      throw err;
+      // Any other throw (in-band SSE error, a throwing token callback, a mid-
+      // stream parse failure) must reach callers as a ProviderError so their
+      // `instanceof ProviderError` guards hold instead of degrading to 'unknown'.
+      throw err instanceof ProviderError ? err : new ProviderError('unknown', summaryFor('unknown'));
     } finally {
       clearRequestTimeout();
     }

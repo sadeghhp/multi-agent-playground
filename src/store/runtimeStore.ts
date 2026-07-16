@@ -168,34 +168,40 @@ function capRecord<T>(record: Record<string, T>, max: number): Record<string, T>
   return next;
 }
 
-const initial = {
-  runId: null,
-  status: 'idle' as RunStatus,
-  currentTurn: 0,
-  activeAgentId: null,
-  activeConnectionId: null,
-  agentStates: {},
-  responsesPerAgent: {},
-  events: [],
-  errors: [],
-  requestSnapshots: {},
-  streamingText: {},
-  streamingReasoning: {},
-  providerOverrides: {} as Record<string, ProviderOverride>,
-  runDisabledAgents: {} as Record<string, true>,
-  consecutiveFailures: {} as Record<string, number>,
-  pauseRequested: false,
-  runTokens: 0,
-  runFallbackTokens: 0,
-  abortController: null,
-};
+// A FACTORY, not a shared literal: startRun/reset each get their own fresh
+// nested containers. A single shared literal would have every run alias the same
+// `{}`/`[]` objects, so a future in-place setter (e.g. `state.events.push(...)`)
+// could permanently corrupt the template and leak state across runs.
+function makeInitial() {
+  return {
+    runId: null,
+    status: 'idle' as RunStatus,
+    currentTurn: 0,
+    activeAgentId: null,
+    activeConnectionId: null,
+    agentStates: {} as Record<string, RuntimeState>,
+    responsesPerAgent: {} as Record<string, number>,
+    events: [] as EventLogEntry[],
+    errors: [] as RunError[],
+    requestSnapshots: {} as Record<string, RequestSnapshot>,
+    streamingText: {} as Record<string, string>,
+    streamingReasoning: {} as Record<string, string>,
+    providerOverrides: {} as Record<string, ProviderOverride>,
+    runDisabledAgents: {} as Record<string, true>,
+    consecutiveFailures: {} as Record<string, number>,
+    pauseRequested: false,
+    runTokens: 0,
+    runFallbackTokens: 0,
+    abortController: null as AbortController | null,
+  };
+}
 
 export const useRuntimeStore = create<RuntimeStoreState>((set, get) => ({
-  ...initial,
+  ...makeInitial(),
 
   startRun: (runId, controller) =>
     set({
-      ...initial,
+      ...makeInitial(),
       runId,
       status: 'running',
       abortController: controller,
@@ -273,6 +279,6 @@ export const useRuntimeStore = create<RuntimeStoreState>((set, get) => ({
     })),
   logEvent: (entry) => set((s) => ({ events: capArray([...s.events, entry], MAX_EVENTS) })),
   addError: (error) => set((s) => ({ errors: capArray([...s.errors, error], MAX_ERRORS) })),
-  reset: () => set({ ...initial }),
+  reset: () => set({ ...makeInitial() }),
   isRunning: () => get().status === 'running',
 }));

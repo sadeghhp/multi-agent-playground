@@ -21,6 +21,7 @@ type Tab = 'transcript' | 'log' | 'errors';
 const RUN_STATUS_LABEL: Record<string, string> = {
   idle: 'Idle',
   running: 'Running…',
+  paused: 'Paused',
   stopped: 'Stopped',
   completed: 'Completed',
   error: 'Error',
@@ -167,7 +168,7 @@ export function BottomPanel() {
             </span>
           )}
           <span className={`${styles.status} ${styles[`status_${status}`] ?? ''}`}>
-            {RUN_STATUS_LABEL[status]}{status === 'running' ? ` · turn ${currentTurn}` : ''}
+            {RUN_STATUS_LABEL[status] ?? status}{status === 'running' ? ` · turn ${currentTurn}` : ''}
           </span>
           {tab === 'transcript' && transcript.length > 0 && (
             <button type="button" onClick={() => clearTranscript()} disabled={status === 'running'}>Clear</button>

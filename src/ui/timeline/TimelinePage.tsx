@@ -16,6 +16,16 @@ interface TurnGroup {
   messages: TranscriptMessage[];
 }
 
+/** First grapheme-ish character of the agent's name for the spine disc. */
+function agentInitial(name: string): string {
+  return [...name.trim()][0]?.toUpperCase() ?? '?';
+}
+
+/** Compact token count for the header stats (e.g. 12.4k). */
+function formatTokens(n: number): string {
+  return n >= 10_000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+}
+
 /**
  * Group the (already chronological) transcript into contiguous runs by turn
  * number. A new turn value starts a new group; the same turn repeated later
@@ -142,20 +152,32 @@ export function TimelinePage() {
       <div className={styles.panel} ref={panelRef} tabIndex={-1}>
         <header className={styles.header}>
           <div className={styles.titleBlock}>
-            <h1 className={styles.title}>Conversation Timeline</h1>
-            {playground && <span className={styles.subtitle}>{playground.name}</span>}
+            <span className={styles.eyebrow}>Conversation timeline</span>
+            <h1 className={styles.title}>{playground?.name || 'Untitled playground'}</h1>
           </div>
           <div className={styles.headerRight}>
             {transcript.length > 0 && (
-              <span className={styles.stats}>
-                {stats.turns} turn{stats.turns === 1 ? '' : 's'} · {stats.messages} message
-                {stats.messages === 1 ? '' : 's'}
-                {stats.duration > 0 && ` · ${(stats.duration / 1000).toFixed(1)}s`}
-                {stats.hasTokens && ` · ~${stats.tokens} tok`}
-              </span>
+              <div className={styles.stats}>
+                <span className={styles.stat}>
+                  <strong>{stats.turns}</strong> turn{stats.turns === 1 ? '' : 's'}
+                </span>
+                <span className={styles.stat}>
+                  <strong>{stats.messages}</strong> message{stats.messages === 1 ? '' : 's'}
+                </span>
+                {stats.duration > 0 && (
+                  <span className={styles.stat}>
+                    <strong>{formatDuration(stats.duration)}</strong>
+                  </span>
+                )}
+                {stats.hasTokens && (
+                  <span className={styles.stat}>
+                    <strong>~{formatTokens(stats.tokens)}</strong> tok
+                  </span>
+                )}
+              </div>
             )}
-            <button type="button" onClick={close} aria-label="Close timeline">
-              Close
+            <button type="button" className="icon ghost" onClick={close} aria-label="Close timeline">
+              ✕
             </button>
           </div>
         </header>
@@ -166,9 +188,13 @@ export function TimelinePage() {
           onScroll={handleScroll}
         >
           {!hasContent ? (
-            <p className={styles.empty}>
-              No conversation yet. Configure agents, connect them, and press Run.
-            </p>
+            <div className={styles.empty}>
+              <div className={styles.emptySpine} aria-hidden="true">
+                <span /><span /><span />
+              </div>
+              <p className={styles.emptyTitle}>No conversation yet.</p>
+              <p className={styles.emptyHint}>Configure agents, connect them, and press Run.</p>
+            </div>
           ) : (
             <ol className={styles.timeline}>
               {groups.map((group, gi) => (
@@ -231,8 +257,13 @@ function TimelineItem({ msg, color }: { msg: TranscriptMessage; color: string })
   const reasoning = [msg.reasoning, split.reasoning].filter(Boolean).join('\n\n') || undefined;
 
   return (
-    <div className={`${styles.item} ${failed ? styles.itemFailed : ''}`}>
-      <span className={styles.node} style={{ backgroundColor: color }} aria-hidden="true" />
+    <div
+      className={`${styles.item} ${failed ? styles.itemFailed : ''}`}
+      style={{ '--agent-color': color } as CSSProperties}
+    >
+      <span className={styles.node} aria-hidden="true">
+        {agentInitial(msg.agentName)}
+      </span>
       <div className={styles.card} dir={dir}>
         <div className={styles.cardHeader}>
           <span className={styles.agent}>
@@ -308,9 +339,15 @@ function TimelineLiveItem({
   const dir = dirForLanguage(agent.language);
 
   return (
-    <div className={`${styles.item} ${styles.itemLive}`} aria-live="polite">
-      <span className={styles.node} style={{ backgroundColor: color }} aria-hidden="true" />
-      <div className={styles.card} dir={dir} style={{ '--agent-color': color } as CSSProperties}>
+    <div
+      className={`${styles.item} ${styles.itemLive}`}
+      aria-live="polite"
+      style={{ '--agent-color': color } as CSSProperties}
+    >
+      <span className={styles.node} aria-hidden="true">
+        {agentInitial(agent.name)}
+      </span>
+      <div className={styles.card} dir={dir}>
         <div className={styles.cardHeader}>
           <span className={styles.agent}>{agent.name}</span>
           {agent.role && <span className="chip">{agent.role}</span>}

@@ -776,7 +776,7 @@ export function AgentInspector({ agent }: { agent: Agent }) {
         </div>
       </Section>
 
-      <Section title={`Tools (${agent.tools.filter((t) => t in TOOLS).length})`}>
+      <Section title={`Tools (${agent.tools.filter((t) => toolAvailable(t)).length})`}>
         <p className={styles.hint}>
           Executable tools the agent can call mid-turn to fetch real facts and sources.
         </p>
